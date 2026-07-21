@@ -18,6 +18,7 @@ class LessonSerializer(serializers.ModelSerializer):
             "lesson_type",
             "lesson_type_label",
             "content",
+            "quiz_data",
             "media_url",
             "video_url",
             "video_original_name",
@@ -64,6 +65,22 @@ class LessonSerializer(serializers.ModelSerializer):
             "media_url", getattr(self.instance, "media_url", "")
         ):
             raise serializers.ValidationError({"media_url": "Добавьте ссылку на материал"})
+        if lesson_type == Lesson.Type.QUIZ:
+            quiz_data = attrs.get("quiz_data", getattr(self.instance, "quiz_data", {}))
+            questions = quiz_data.get("questions", []) if isinstance(quiz_data, dict) else []
+            passing_score = quiz_data.get("passing_score", 80) if isinstance(quiz_data, dict) else 80
+            if not isinstance(passing_score, (int, float)) or not 0 <= passing_score <= 100:
+                raise serializers.ValidationError({"quiz_data": "Проходной балл должен быть от 0 до 100"})
+            if not questions:
+                raise serializers.ValidationError({"quiz_data": "Добавьте хотя бы один вопрос"})
+            for question in questions:
+                options = question.get("options", []) if isinstance(question, dict) else []
+                if not str(question.get("prompt", "")).strip() or len(options) < 2 or any(
+                    not str(option.get("text", "")).strip() for option in options if isinstance(option, dict)
+                ):
+                    raise serializers.ValidationError({"quiz_data": "У каждого вопроса должны быть текст и минимум два ответа"})
+                if sum(bool(option.get("correct")) for option in options if isinstance(option, dict)) != 1:
+                    raise serializers.ValidationError({"quiz_data": "Отметьте один правильный ответ для каждого вопроса"})
         return attrs
 
 
@@ -164,7 +181,7 @@ class CourseSerializer(serializers.ModelSerializer):
     def _lessons_changed(self, course, lessons):
         current = list(
             course.lessons.values(
-                "id", "title", "lesson_type", "content", "media_url", "duration_minutes", "position", "is_required"
+                "id", "title", "lesson_type", "content", "quiz_data", "media_url", "duration_minutes", "position", "is_required"
             )
         )
         normalized = []
@@ -175,6 +192,7 @@ class CourseSerializer(serializers.ModelSerializer):
                     "title": lesson.get("title", ""),
                     "lesson_type": lesson.get("lesson_type", Lesson.Type.TEXT),
                     "content": lesson.get("content", ""),
+                    "quiz_data": lesson.get("quiz_data", {}),
                     "media_url": lesson.get("media_url", ""),
                     "duration_minutes": lesson.get("duration_minutes", 5),
                     "position": lesson.get("position", position),

@@ -293,7 +293,7 @@ class CourseApiTests(TestCase):
                         "course": {
                             "cs": {
                                 "b": {
-                                    "o": ["heading", "paragraph", "quiz"],
+                                    "o": ["heading", "paragraph", "test-heading", "quiz"],
                                     "B": {
                                         "heading": {"t": "p", "v": "h2", "c": [{"t": "1. Введение"}]},
                                         "paragraph": {
@@ -304,6 +304,7 @@ class CourseApiTests(TestCase):
                                                 {"t": "документация", "m": {"#": ["https://example.com/docs"]}},
                                             ],
                                         },
+                                        "test-heading": {"t": "p", "v": "h2", "c": [{"t": "2. Тест"}]},
                                         "quiz": {
                                             "t": "Q",
                                             "dt": {
@@ -313,12 +314,16 @@ class CourseApiTests(TestCase):
                                                         "question": {
                                                             "d": {"b": {"o": ["q"], "B": {"q": {"t": "p", "c": [{"t": "Вопрос?"}]}}}},
                                                             "c": {
-                                                                "o": ["answer"],
+                                                                "o": ["answer", "wrong-answer"],
                                                                 "B": {
                                                                     "answer": {
                                                                         "c": True,
                                                                         "t": {"b": {"o": ["a"], "B": {"a": {"t": "p", "c": [{"t": "Ответ"}]}}}},
-                                                                    }
+                                                                    },
+                                                                    "wrong-answer": {
+                                                                        "c": False,
+                                                                        "t": {"b": {"o": ["a"], "B": {"a": {"t": "p", "c": [{"t": "Другой ответ"}]}}}},
+                                                                    },
                                                                 },
                                                             },
                                                         }
@@ -352,7 +357,11 @@ class CourseApiTests(TestCase):
             self.assertEqual(response.data["source_format"], Course.SourceFormat.NATIVE)
             self.assertEqual(response.data["lessons"][0]["title"], "1. Введение")
             self.assertIn("Редактируемый текст", response.data["lessons"][0]["content"])
-            self.assertIn("Вопрос?", response.data["lessons"][0]["content"])
+            quiz_lesson = next(lesson for lesson in response.data["lessons"] if lesson["lesson_type"] == "quiz")
+            self.assertEqual(quiz_lesson["title"], "2. Тест")
+            self.assertEqual(quiz_lesson["quiz_data"]["questions"][0]["prompt"], "Вопрос?")
+            self.assertTrue(quiz_lesson["quiz_data"]["questions"][0]["options"][0]["correct"])
+            self.assertFalse(quiz_lesson["quiz_data"]["questions"][0]["options"][1]["correct"])
             all_content = "".join(lesson["content"] for lesson in response.data["lessons"])
             self.assertIn('href="https://example.com/docs"', all_content)
             self.assertIn('href="https://example.com/additional-guide"', all_content)

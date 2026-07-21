@@ -191,6 +191,25 @@ def _lesson_markup(lesson: Lesson, asset_paths: dict[int, str]) -> str:
     elif lesson.lesson_type in {Lesson.Type.LINK, Lesson.Type.FILE}:
         url = html.escape(lesson.media_url, quote=True)
         body = f'<p><a class="material-link" href="{url}" target="_blank" rel="noopener">Открыть материал</a></p>'
+    elif lesson.lesson_type == Lesson.Type.QUIZ:
+        quiz = lesson.quiz_data if isinstance(lesson.quiz_data, dict) else {}
+        questions = []
+        for question_index, question in enumerate(quiz.get("questions", [])):
+            options = "".join(
+                f'<label class="quiz-option"><input type="radio" name="quiz-{lesson.id}-{question_index}" '
+                f'data-correct="{"true" if option.get("correct") else "false"}"><span>{html.escape(str(option.get("text", "")))}</span></label>'
+                for option in question.get("options", [])
+            )
+            questions.append(
+                f'<fieldset class="quiz-question"><legend>{question_index + 1}. '
+                f'{html.escape(str(question.get("prompt", "")))}</legend>{options}</fieldset>'
+            )
+        passing_score = max(0, min(100, int(quiz.get("passing_score", 80))))
+        body = (
+            f'<div class="quiz" data-passing-score="{passing_score}">{"".join(questions)}'
+            '<button class="primary quiz-submit" type="button">Проверить ответы</button>'
+            '<p class="quiz-result" role="status"></p></div>'
+        )
     else:
         body = "<p>Материал доступен в исходной LMS.</p>"
     return f'<section class="chapter"><p class="chapter-number">Глава {lesson.position + 1}</p><h1>{title}</h1><div class="content">{body}</div></section>'
@@ -207,7 +226,8 @@ def _player_html(course: Course, asset_paths: dict[int, str], cover_path: str) -
 body{{margin:0;font-family:Arial,sans-serif;color:var(--ink);background:var(--bg)}}.progress{{position:fixed;inset:0 0 auto;height:5px;background:#dfe6d9;z-index:4}}.progress span{{display:block;height:100%;width:0;background:var(--brand);transition:.2s}}
 .course{{width:min(900px,calc(100% - 24px));margin:24px auto 90px}}.cover,.chapter{{min-height:calc(100vh - 120px);padding:clamp(32px,7vw,88px);border-radius:18px;background:var(--paper);box-shadow:0 16px 45px #23311c1c}}
 .cover{{display:flex;flex-direction:column;justify-content:center;background-size:cover;background-position:center}}.cover.has-image{{color:#fff}}.eyebrow,.chapter-number{{color:var(--brand);font-weight:800;letter-spacing:.12em;text-transform:uppercase}}h1{{font-size:clamp(2.2rem,6vw,4.6rem);line-height:1.04;margin:.35em 0}}.lead{{max-width:680px;font-size:1.2rem;line-height:1.65;color:var(--muted)}}.has-image .lead{{color:#f1f5ee}}
-.chapter{{display:none}}.chapter.active{{display:block}}.content{{font-size:1.05rem;line-height:1.75}}.content h1{{font-size:2.2rem}}.content h2{{font-size:1.7rem}}.content img,.content video{{max-width:100%;border-radius:12px}}.content blockquote{{padding:12px 18px;border-left:4px solid var(--brand);background:#f3f6f0}}.material-link{{display:inline-block;padding:12px 16px;border-radius:9px;background:var(--brand);color:#142008;text-decoration:none;font-weight:700}}
+.chapter{{display:none}}.chapter.active{{display:block}}.content{{font-size:1.05rem;line-height:1.75}}.content h1{{font-size:2.2rem}}.content h2{{font-size:1.7rem}}.content img,.content video{{max-width:100%;border-radius:12px}}.content blockquote{{padding:12px 18px;border-left:4px solid var(--brand);background:#f3f6f0}}.content a{{color:var(--brand)}}.material-link{{display:inline-block;padding:12px 16px;border-radius:9px;background:var(--brand);color:#142008!important;text-decoration:none;font-weight:700}}
+.quiz{{display:grid;gap:16px}}.quiz-question{{padding:16px;border:1px solid #cad3c5;border-radius:12px}}.quiz-question legend{{padding:0 6px;font-weight:700}}.quiz-option{{margin:7px 0;padding:10px;border:1px solid #dfe6d9;border-radius:9px;display:flex;gap:8px;cursor:pointer}}.quiz-option input{{accent-color:var(--brand)}}.quiz-submit{{justify-self:start}}.quiz-result{{font-weight:700}}
 .nav{{position:fixed;left:50%;bottom:18px;translate:-50% 0;display:flex;align-items:center;gap:10px;padding:8px;border:1px solid #cad3c5;border-radius:14px;background:#fffffff2;box-shadow:0 8px 30px #18201624}}button{{min-height:42px;padding:9px 15px;border:1px solid #cad3c5;border-radius:9px;background:#fff;font-weight:700;cursor:pointer}}button.primary{{background:var(--brand);border-color:#6e962c}}button:disabled{{opacity:.45}}.counter{{min-width:70px;text-align:center;color:var(--muted);font-size:.85rem}}
 @media(max-width:600px){{.cover,.chapter{{padding:28px 22px;border-radius:12px}}.nav{{width:calc(100% - 24px);justify-content:space-between}}}}
 </style></head><body><div class="progress"><span id="progress"></span></div><main class="course">
@@ -222,6 +242,7 @@ function sessionTime(){{var s=Math.floor((Date.now()-started)/1000),h=String(Mat
 function complete(){{if(!api)return;try{{api.LMSSetValue('cmi.core.lesson_status','completed');api.LMSSetValue('cmi.core.score.raw','100');api.LMSSetValue('cmi.core.score.min','0');api.LMSSetValue('cmi.core.score.max','100');api.LMSSetValue('cmi.core.session_time',sessionTime());api.LMSCommit('')}}catch(e){{}}}}
 function finish(){{if(!api)return;try{{api.LMSSetValue('cmi.core.session_time',sessionTime());api.LMSCommit('');api.LMSFinish('')}}catch(e){{}}}}
 function render(){{pages.forEach(function(p,i){{p.style.display=i===current?'flex':'none';if(p.classList.contains('chapter'))p.style.display=i===current?'block':'none'}});document.getElementById('prev').disabled=current===0;document.getElementById('next').textContent=current===0?'Начать':current===pages.length-1?'Завершить':'Далее';document.getElementById('counter').textContent=(current+1)+' / '+pages.length;document.getElementById('progress').style.width=((current+1)/pages.length*100)+'%'}}
+document.querySelectorAll('.quiz-submit').forEach(function(button){{button.onclick=function(){{var quiz=button.closest('.quiz'),questions=Array.from(quiz.querySelectorAll('.quiz-question')),answered=questions.filter(function(q){{return q.querySelector('input:checked')}});if(answered.length!==questions.length){{quiz.querySelector('.quiz-result').textContent='Ответьте на все вопросы';return}}var correct=questions.filter(function(q){{var selected=q.querySelector('input:checked');return selected&&selected.dataset.correct==='true'}}).length,score=Math.round(correct/questions.length*100),passed=score>=Number(quiz.dataset.passingScore);quiz.querySelector('.quiz-result').textContent=(passed?'Тест пройден. ':'Тест пока не пройден. ')+'Результат: '+score+'%';if(api){{try{{api.LMSSetValue('cmi.core.score.raw',String(score));api.LMSSetValue('cmi.core.lesson_status',passed?'passed':'failed');api.LMSCommit('')}}catch(e){{}}}}}}}});
 document.getElementById('prev').onclick=function(){{if(current>0){{current--;render()}}}};document.getElementById('next').onclick=function(){{if(current<pages.length-1){{current++;render()}}else{{complete();this.textContent='Завершено'}}}};window.addEventListener('beforeunload',finish);init();render();
 }})();
 </script></body></html>"""

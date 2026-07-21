@@ -16,6 +16,8 @@ import {
   GripVertical,
   Home,
   Link2,
+  LayoutGrid,
+  List,
   LogOut,
   PanelLeftClose,
   PanelLeftOpen,
@@ -23,6 +25,7 @@ import {
   PlayCircle,
   Plus,
   Route,
+  Rows3,
   Save,
   Settings,
   Settings2,
@@ -66,11 +69,14 @@ type User = {
   department_name: string | null;
 };
 type Department = { id: number; name: string; code: string; is_active: boolean };
+type QuizOption = { text: string; correct: boolean };
+type QuizQuestion = { prompt: string; options: QuizOption[] };
+type QuizData = { passing_score: number; questions: QuizQuestion[] };
 type Lesson = {
   id?: number;
   client_key: string;
   title: string;
-  lesson_type: "text" | "video" | "link" | "file" | "scorm";
+  lesson_type: "text" | "video" | "link" | "file" | "quiz" | "scorm";
   lesson_type_label?: string;
   content: string;
   media_url: string;
@@ -81,6 +87,7 @@ type Lesson = {
   duration_minutes: number;
   position: number;
   is_required: boolean;
+  quiz_data: QuizData;
 };
 type Course = {
   id: number;
@@ -488,8 +495,19 @@ const lessonTypeLabels: Record<Lesson["lesson_type"], string> = {
   video: "Видео",
   link: "Ссылка",
   file: "Файл",
+  quiz: "Тест",
   scorm: "SCORM 1.2",
 };
+
+function emptyQuiz(): QuizData {
+  return {
+    passing_score: 80,
+    questions: [{
+      prompt: "",
+      options: [{ text: "", correct: true }, { text: "", correct: false }],
+    }],
+  };
+}
 
 function newLesson(position: number): Lesson {
   return {
@@ -504,6 +522,7 @@ function newLesson(position: number): Lesson {
     duration_minutes: 5,
     position,
     is_required: true,
+    quiz_data: emptyQuiz(),
   };
 }
 
@@ -519,6 +538,135 @@ function chapterCountLabel(count: number) {
   const word = last === 1 && lastTwo !== 11 ? "глава"
     : last >= 2 && last <= 4 && (lastTwo < 12 || lastTwo > 14) ? "главы" : "глав";
   return `${count} ${word}`;
+}
+
+function QuizPreview({ lesson }: { lesson: Lesson }) {
+  const questions = lesson.quiz_data?.questions || [];
+  const passingScore = lesson.quiz_data?.passing_score ?? 80;
+  const [answers, setAnswers] = useState<Record<number, number>>({});
+  const [submitted, setSubmitted] = useState(false);
+  const correctCount = questions.reduce(
+    (total, question, index) => total + (question.options[answers[index]]?.correct ? 1 : 0),
+    0,
+  );
+  const score = questions.length ? Math.round((correctCount / questions.length) * 100) : 0;
+
+  useEffect(() => {
+    setAnswers({});
+    setSubmitted(false);
+  }, [lesson.id, lesson.client_key]);
+
+  if (!questions.length) {
+    return <div className="native-preview-placeholder"><CheckCircle2 /><p>Вопросы теста пока не добавлены.</p></div>;
+  }
+
+  return (
+    <div className="quiz-preview">
+      <p className="quiz-preview__intro">Для прохождения нужно набрать не менее {passingScore}%.</p>
+      {questions.map((question, questionIndex) => (
+        <fieldset className="quiz-question" key={`${question.prompt}-${questionIndex}`}>
+          <legend>{questionIndex + 1}. {question.prompt}</legend>
+          <div className="quiz-options">
+            {question.options.map((option, optionIndex) => {
+              const chosen = answers[questionIndex] === optionIndex;
+              const resultClass = submitted && option.correct ? " quiz-option--correct"
+                : submitted && chosen ? " quiz-option--incorrect" : "";
+              return (
+                <label className={`quiz-option${chosen ? " quiz-option--chosen" : ""}${resultClass}`} key={`${option.text}-${optionIndex}`}>
+                  <input
+                    type="radio"
+                    name={`preview-question-${questionIndex}`}
+                    checked={chosen}
+                    disabled={submitted}
+                    onChange={() => setAnswers((current) => ({ ...current, [questionIndex]: optionIndex }))}
+                  />
+                  <span>{option.text}</span>
+                </label>
+              );
+            })}
+          </div>
+        </fieldset>
+      ))}
+      {!submitted ? (
+        <button
+          className="primary-button quiz-preview__submit"
+          type="button"
+          disabled={Object.keys(answers).length !== questions.length}
+          onClick={() => setSubmitted(true)}
+        >
+          Проверить ответы
+        </button>
+      ) : (
+        <div className={score >= passingScore ? "quiz-result quiz-result--passed" : "quiz-result quiz-result--failed"} role="status">
+          <CheckCircle2 />
+          <div><strong>{score >= passingScore ? "Тест пройден" : "Тест пока не пройден"}</strong><span>Результат: {score}% · правильных ответов {correctCount} из {questions.length}</span></div>
+          <button className="secondary-button" type="button" onClick={() => { setAnswers({}); setSubmitted(false); }}>Пройти ещё раз</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function QuizEditor({ value, onChange }: { value: QuizData; onChange: (value: QuizData) => void }) {
+  const quiz = value?.questions?.length ? value : emptyQuiz();
+  const updateQuestion = (questionIndex: number, update: Partial<QuizQuestion>) => {
+    onChange({
+      ...quiz,
+      questions: quiz.questions.map((question, index) => index === questionIndex ? { ...question, ...update } : question),
+    });
+  };
+
+  return (
+    <div className="quiz-editor">
+      <div className="quiz-editor__heading">
+        <div><h2>Вопросы теста</h2><p>Один вариант ответа на каждый вопрос</p></div>
+        <label>Проходной балл
+          <span className="quiz-editor__score"><input type="number" min="0" max="100" value={quiz.passing_score} onChange={(event) => onChange({ ...quiz, passing_score: Number(event.target.value) })} /><b>%</b></span>
+        </label>
+      </div>
+      {quiz.questions.map((question, questionIndex) => (
+        <fieldset className="quiz-editor__question" key={questionIndex}>
+          <div className="quiz-editor__question-top">
+            <span>Вопрос {questionIndex + 1}</span>
+            {quiz.questions.length > 1 && (
+              <button className="mini-button mini-button--danger" type="button" onClick={() => onChange({ ...quiz, questions: quiz.questions.filter((_, index) => index !== questionIndex) })} aria-label={`Удалить вопрос ${questionIndex + 1}`}><Trash2 /></button>
+            )}
+          </div>
+          <input value={question.prompt} onChange={(event) => updateQuestion(questionIndex, { prompt: event.target.value })} placeholder="Введите вопрос" aria-label={`Текст вопроса ${questionIndex + 1}`} required />
+          <div className="quiz-editor__options">
+            {question.options.map((option, optionIndex) => (
+              <div className="quiz-editor__option" key={optionIndex}>
+                <input
+                  className="quiz-editor__correct"
+                  type="radio"
+                  name={`correct-${questionIndex}`}
+                  checked={option.correct}
+                  onChange={() => updateQuestion(questionIndex, {
+                    options: question.options.map((item, index) => ({ ...item, correct: index === optionIndex })),
+                  })}
+                  aria-label={`Правильный ответ ${optionIndex + 1}`}
+                />
+                <input
+                  value={option.text}
+                  onChange={(event) => updateQuestion(questionIndex, {
+                    options: question.options.map((item, index) => index === optionIndex ? { ...item, text: event.target.value } : item),
+                  })}
+                  placeholder={`Вариант ${optionIndex + 1}`}
+                  aria-label={`Вариант ответа ${optionIndex + 1}`}
+                  required
+                />
+                {question.options.length > 2 && (
+                  <button className="mini-button mini-button--danger" type="button" onClick={() => updateQuestion(questionIndex, { options: question.options.filter((_, index) => index !== optionIndex) })} aria-label={`Удалить вариант ${optionIndex + 1}`}><X /></button>
+                )}
+              </div>
+            ))}
+          </div>
+          <button className="secondary-button quiz-editor__add-option" type="button" onClick={() => updateQuestion(questionIndex, { options: [...question.options, { text: "", correct: false }] })}><Plus /> Добавить вариант</button>
+        </fieldset>
+      ))}
+      <button className="secondary-button quiz-editor__add-question" type="button" onClick={() => onChange({ ...quiz, questions: [...quiz.questions, emptyQuiz().questions[0]] })}><Plus /> Добавить вопрос</button>
+    </div>
+  );
 }
 
 function CoursePreviewModal({
@@ -540,6 +688,15 @@ function CoursePreviewModal({
 }) {
   const lesson = step >= 0 ? course.lessons[step] : undefined;
   const isLastStep = step >= course.lessons.length - 1;
+  const previewScrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = previousOverflow; };
+  }, []);
+  useEffect(() => {
+    previewScrollRef.current?.scrollTo({ top: 0 });
+  }, [step]);
   return (
     <div className="course-preview-overlay" role="dialog" aria-modal="true" aria-label={`Предпросмотр курса ${course.title}`}>
       <section className="course-preview-modal">
@@ -563,31 +720,35 @@ function CoursePreviewModal({
           ) : <div className="course-preview-loading">Подготавливаем SCORM-курс…</div>
         ) : (
           <div className="native-course-preview">
-            {!lesson ? (
-              <article
-                className={course.cover_style === "custom" && course.cover_url ? "native-preview-page native-preview-cover native-preview-cover--image" : "native-preview-page native-preview-cover"}
-                style={course.cover_style === "custom" && course.cover_url ? { backgroundImage: `linear-gradient(90deg, rgba(8,12,7,.82), rgba(8,12,7,.35)), url(${course.cover_url})` } : undefined}
-              >
-                <span className="longread-eyebrow">SMARTIS · ОБУЧЕНИЕ</span>
-                <h1>{course.title}</h1>
-                <p>{course.description || "Описание курса пока не добавлено"}</p>
-                <div className="longread-cover-meta"><span><BookOpen />{chapterCountLabel(course.lessons.length)}</span><span><Clock3 />{course.estimated_minutes} минут</span></div>
-              </article>
-            ) : (
-              <article className="native-preview-page native-preview-lesson">
-                <div className="longread-chapter-kicker"><span>Глава {step + 1}</span><span>{lessonTypeLabels[lesson.lesson_type]}</span></div>
-                <h1>{lesson.title}</h1>
-                {lesson.lesson_type === "text" ? (
-                  <div className="native-preview-content" dangerouslySetInnerHTML={{ __html: lesson.content || "<p>Содержание пока не добавлено.</p>" }} />
-                ) : lesson.lesson_type === "video" ? (
-                  lesson.video_url ? <video className="native-preview-video" src={lesson.video_url} controls /> : <div className="native-preview-placeholder"><Video /><p>Видео появится после сохранения и загрузки файла.</p></div>
-                ) : lesson.lesson_type === "scorm" ? (
-                  <div className="native-preview-placeholder"><FileArchive /><p>SCORM-пакет открывается в отдельном режиме просмотра.</p></div>
-                ) : (
-                  <div className="native-preview-placeholder"><Link2 /><p>Материал откроется в новой вкладке.</p><a className="primary-button" href={lesson.media_url} target="_blank" rel="noreferrer">Открыть материал</a></div>
-                )}
-              </article>
-            )}
+            <div className="native-preview-scroll" ref={previewScrollRef}>
+              {!lesson ? (
+                <article
+                  className={course.cover_style === "custom" && course.cover_url ? "native-preview-page native-preview-cover native-preview-cover--image" : "native-preview-page native-preview-cover"}
+                  style={course.cover_style === "custom" && course.cover_url ? { backgroundImage: `linear-gradient(90deg, rgba(8,12,7,.82), rgba(8,12,7,.35)), url(${course.cover_url})` } : undefined}
+                >
+                  <span className="longread-eyebrow">SMARTIS · ОБУЧЕНИЕ</span>
+                  <h1>{course.title}</h1>
+                  <p>{course.description || "Описание курса пока не добавлено"}</p>
+                  <div className="longread-cover-meta"><span><BookOpen />{chapterCountLabel(course.lessons.length)}</span><span><Clock3 />{course.estimated_minutes} минут</span></div>
+                </article>
+              ) : (
+                <article className="native-preview-page native-preview-lesson">
+                  <div className="longread-chapter-kicker"><span>Глава {step + 1}</span><span>{lessonTypeLabels[lesson.lesson_type]}</span></div>
+                  <h1>{lesson.title}</h1>
+                  {lesson.lesson_type === "quiz" ? (
+                    <QuizPreview lesson={lesson} />
+                  ) : lesson.lesson_type === "text" ? (
+                    <div className="native-preview-content" dangerouslySetInnerHTML={{ __html: lesson.content || "<p>Содержание пока не добавлено.</p>" }} />
+                  ) : lesson.lesson_type === "video" ? (
+                    lesson.video_url ? <video className="native-preview-video" src={lesson.video_url} controls /> : <div className="native-preview-placeholder"><Video /><p>Видео появится после сохранения и загрузки файла.</p></div>
+                  ) : lesson.lesson_type === "scorm" ? (
+                    <div className="native-preview-placeholder"><FileArchive /><p>SCORM-пакет открывается в отдельном режиме просмотра.</p></div>
+                  ) : (
+                    <div className="native-preview-placeholder"><Link2 /><p>Материал откроется в новой вкладке.</p><a className="primary-button" href={lesson.media_url} target="_blank" rel="noreferrer">Открыть материал</a></div>
+                  )}
+                </article>
+              )}
+            </div>
             <footer className="native-preview-navigation">
               <button className="secondary-button" type="button" disabled={step < 0} onClick={() => onStep(step - 1)}><ChevronLeft /> Назад</button>
               <span>{step < 0 ? "Обложка" : `${step + 1} / ${course.lessons.length}`}</span>
@@ -628,6 +789,9 @@ function CoursesView({ token }: { token: string }) {
   const [previewStep, setPreviewStep] = useState(-1);
   const [scormLaunchUrl, setScormLaunchUrl] = useState("");
   const [scormRuntime, setScormRuntime] = useState({ status: "Не начат", score: "—" });
+  const [courseView, setCourseView] = useState<"cards" | "compact" | "list">(
+    () => (localStorage.getItem("smartis-course-view") as "cards" | "compact" | "list") || "cards",
+  );
   const scormFrameRef = useRef<HTMLIFrameElement>(null);
 
   async function load() {
@@ -643,6 +807,10 @@ function CoursesView({ token }: { token: string }) {
   }
 
   useEffect(() => { void load(); }, []);
+
+  useEffect(() => {
+    localStorage.setItem("smartis-course-view", courseView);
+  }, [courseView]);
 
   useEffect(() => {
     if (!previewCourse || previewCourse.source_format !== "scorm_12") return undefined;
@@ -683,6 +851,7 @@ function CoursesView({ token }: { token: string }) {
       estimated_minutes: course.estimated_minutes,
       lessons: course.lessons.map((lesson, position) => ({
         ...lesson,
+        quiz_data: lesson.quiz_data || emptyQuiz(),
         client_key: `lesson-${lesson.id ?? crypto.randomUUID()}`,
         position,
       })),
@@ -787,6 +956,7 @@ function CoursesView({ token }: { token: string }) {
               lesson_type: lesson.lesson_type,
               content: lesson.content,
               media_url: lesson.media_url,
+              quiz_data: lesson.quiz_data,
               duration_minutes: lesson.duration_minutes,
               position,
               is_required: lesson.is_required,
@@ -1009,6 +1179,7 @@ function CoursesView({ token }: { token: string }) {
     if (type === "video") return <Video />;
     if (type === "link") return <Link2 />;
     if (type === "file") return <FileText />;
+    if (type === "quiz") return <CheckCircle2 />;
     if (type === "scorm") return <FileArchive />;
     return <Type />;
   }
@@ -1142,6 +1313,8 @@ function CoursesView({ token }: { token: string }) {
                       variant="longread"
                     />
                   </Suspense>
+                ) : activeLesson.lesson_type === "quiz" ? (
+                  <QuizEditor value={activeLesson.quiz_data} onChange={(quiz_data) => updateLesson(activeLessonIndex, { quiz_data })} />
                 ) : activeLesson.lesson_type === "video" ? (
                   <div className="longread-media-editor">
                     {activeLesson.video_url && !videoFiles[activeLesson.client_key] && (
@@ -1372,6 +1545,8 @@ function CoursesView({ token }: { token: string }) {
                         <RichTextEditor value={lesson.content} onChange={(content) => updateLesson(index, { content })} />
                       </Suspense>
                     </div>
+                  ) : lesson.lesson_type === "quiz" ? (
+                    <div className="field-wide"><QuizEditor value={lesson.quiz_data} onChange={(quiz_data) => updateLesson(index, { quiz_data })} /></div>
                   ) : lesson.lesson_type === "video" ? (
                     <div className="field-wide video-upload-field">
                       <span className="field-label">Видеофайл</span>
@@ -1422,7 +1597,15 @@ function CoursesView({ token }: { token: string }) {
           </div>
         </form>
       )}
-      <section className="course-grid" aria-busy={loading}>
+      <div className="course-view-toolbar" role="group" aria-label="Вид списка курсов">
+        <span>Вид курсов</span>
+        <div>
+          <button className={courseView === "cards" ? "course-view-button course-view-button--active" : "course-view-button"} type="button" onClick={() => setCourseView("cards")} aria-pressed={courseView === "cards"} title="Прямоугольные карточки"><Rows3 /><span>Карточки</span></button>
+          <button className={courseView === "compact" ? "course-view-button course-view-button--active" : "course-view-button"} type="button" onClick={() => setCourseView("compact")} aria-pressed={courseView === "compact"} title="Компактные значки"><LayoutGrid /><span>Значки</span></button>
+          <button className={courseView === "list" ? "course-view-button course-view-button--active" : "course-view-button"} type="button" onClick={() => setCourseView("list")} aria-pressed={courseView === "list"} title="Список"><List /><span>Список</span></button>
+        </div>
+      </div>
+      <section className={`course-grid course-grid--${courseView}`} aria-busy={loading}>
         {courses.map((course) => (
           <article className="panel course-card" key={course.id}>
             <div className="course-card__top">

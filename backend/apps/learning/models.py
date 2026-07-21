@@ -83,12 +83,14 @@ class Lesson(models.Model):
         VIDEO = "video", "Видео"
         LINK = "link", "Ссылка"
         FILE = "file", "Файл"
+        QUIZ = "quiz", "Тест"
         SCORM = "scorm", "SCORM 1.2"
 
     course = models.ForeignKey(Course, related_name="lessons", on_delete=models.CASCADE)
     title = models.CharField("Название", max_length=220)
     lesson_type = models.CharField("Тип", max_length=20, choices=Type.choices, default=Type.TEXT)
     content = models.TextField("Содержание", blank=True)
+    quiz_data = models.JSONField("Настройки теста", default=dict, blank=True)
     media_url = models.URLField("Ссылка на материал", blank=True)
     video_file = models.FileField("Видеофайл", upload_to=lesson_video_path, blank=True)
     video_original_name = models.CharField("Исходное имя видео", max_length=255, blank=True)

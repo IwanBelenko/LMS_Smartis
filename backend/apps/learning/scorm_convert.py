@@ -93,6 +93,43 @@ def _render_quiz(block) -> str:
     return "".join(parts)
 
 
+def _quiz_data(block) -> dict:
+    quiz = block.get("dt", {}).get("q", {})
+    questions = []
+    for number, question_id in enumerate(quiz.get("o", []), start=1):
+        question = quiz.get("B", {}).get(question_id, {})
+        prompt = _plain_text(question.get("d", {})).strip() or f"Вопрос {number}"
+        answers = question.get("c", {})
+        options = []
+        for answer_id in answers.get("o", []):
+            answer = answers.get("B", {}).get(answer_id, {})
+            answer_text = _plain_text(answer.get("t", {})).strip()
+            if answer_text:
+                options.append({"text": answer_text, "correct": bool(answer.get("c"))})
+        if prompt and len(options) >= 2 and any(option["correct"] for option in options):
+            questions.append({"prompt": prompt, "options": options})
+    passing_score = block.get("ss", {}).get("m", {}).get("ps", 80)
+    return {"passing_score": max(0, min(100, int(passing_score))), "questions": questions}
+
+
+def _find_quiz(value) -> dict:
+    if isinstance(value, dict):
+        if value.get("t") == "Q":
+            quiz_data = _quiz_data(value)
+            if quiz_data["questions"]:
+                return quiz_data
+        for item in value.values():
+            found = _find_quiz(item)
+            if found:
+                return found
+    elif isinstance(value, list):
+        for item in value:
+            found = _find_quiz(item)
+            if found:
+                return found
+    return {}
+
+
 def _render_store(store) -> str:
     parts = []
     list_open = False
@@ -186,7 +223,7 @@ def _ispring_sections(document) -> list[tuple[str, str]]:
     return sections
 
 
-def extract_ispring_sections(source_course: Course) -> list[tuple[str, str]]:
+def _load_ispring_document(source_course: Course) -> dict:
     content_root = (Path(settings.MEDIA_ROOT) / source_course.scorm_content_dir).resolve()
     media_root = Path(settings.MEDIA_ROOT).resolve()
     if media_root not in content_root.parents or not content_root.is_dir():
@@ -196,7 +233,8 @@ def extract_ispring_sections(source_course: Course) -> list[tuple[str, str]]:
     for data_file in data_files:
         try:
             document = json.loads(data_file.read_text(encoding="utf-8-sig"))
-            return _ispring_sections(document)
+            _ispring_sections(document)
+            return document
         except (UnicodeError, json.JSONDecodeError, serializers.ValidationError):
             continue
     raise serializers.ValidationError(
@@ -204,9 +242,19 @@ def extract_ispring_sections(source_course: Course) -> list[tuple[str, str]]:
     )
 
 
+def extract_ispring_sections(source_course: Course) -> list[tuple[str, str]]:
+    return _ispring_sections(_load_ispring_document(source_course))
+
+
+def extract_ispring_quiz_data(source_course: Course) -> dict:
+    return _find_quiz(_load_ispring_document(source_course))
+
+
 @transaction.atomic
 def convert_ispring_scorm_to_native(source_course: Course, author) -> Course:
-    sections = extract_ispring_sections(source_course)
+    document = _load_ispring_document(source_course)
+    sections = _ispring_sections(document)
+    quiz_data = _find_quiz(document)
 
     converted = Course.objects.create(
         title=f"{source_course.title} — редактируемая копия"[:220],
@@ -224,8 +272,9 @@ def convert_ispring_scorm_to_native(source_course: Course, author) -> Course:
             Lesson(
                 course=converted,
                 title=title,
-                lesson_type=Lesson.Type.TEXT,
+                lesson_type=Lesson.Type.QUIZ if quiz_data and "тест" in title.casefold() else Lesson.Type.TEXT,
                 content=content,
+                quiz_data=quiz_data if quiz_data and "тест" in title.casefold() else {},
                 duration_minutes=minutes_per_section,
                 position=position,
                 is_required=True,
