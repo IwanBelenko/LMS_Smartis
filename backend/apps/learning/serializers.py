@@ -85,6 +85,12 @@ class CourseSerializer(serializers.ModelSerializer):
             "cover_original_name",
             "cover_size",
             "cover_uploaded_at",
+            "source_format",
+            "scorm_identifier",
+            "scorm_entry_point",
+            "scorm_original_name",
+            "scorm_size",
+            "scorm_imported_at",
             "author",
             "author_name",
             "status",
@@ -109,6 +115,12 @@ class CourseSerializer(serializers.ModelSerializer):
             "cover_original_name",
             "cover_size",
             "cover_uploaded_at",
+            "source_format",
+            "scorm_identifier",
+            "scorm_entry_point",
+            "scorm_original_name",
+            "scorm_size",
+            "scorm_imported_at",
         ]
 
     def get_author_name(self, obj):

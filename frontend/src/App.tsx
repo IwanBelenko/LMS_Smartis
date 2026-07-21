@@ -8,6 +8,8 @@ import {
   ChevronRight,
   CircleUserRound,
   Clock3,
+  Download,
+  FileArchive,
   FileText,
   GripVertical,
   Home,
@@ -66,7 +68,7 @@ type Lesson = {
   id?: number;
   client_key: string;
   title: string;
-  lesson_type: "text" | "video" | "link" | "file";
+  lesson_type: "text" | "video" | "link" | "file" | "scorm";
   lesson_type_label?: string;
   content: string;
   media_url: string;
@@ -87,6 +89,12 @@ type Course = {
   cover_original_name: string;
   cover_size: number;
   cover_uploaded_at?: string | null;
+  source_format: "native" | "scorm_12";
+  scorm_identifier: string;
+  scorm_entry_point: string;
+  scorm_original_name: string;
+  scorm_size: number;
+  scorm_imported_at?: string | null;
   author: number;
   author_name: string;
   status: "draft" | "published" | "archived";
@@ -478,6 +486,7 @@ const lessonTypeLabels: Record<Lesson["lesson_type"], string> = {
   video: "Видео",
   link: "Ссылка",
   file: "Файл",
+  scorm: "SCORM 1.2",
 };
 
 function newLesson(position: number): Lesson {
@@ -528,6 +537,8 @@ function CoursesView({ token }: { token: string }) {
   const [coverStyle, setCoverStyle] = useState<"standard" | "custom">("standard");
   const [coverFile, setCoverFile] = useState<File | null>(null);
   const [coverPreview, setCoverPreview] = useState("");
+  const [importingScorm, setImportingScorm] = useState(false);
+  const [exportingScormId, setExportingScormId] = useState<number | null>(null);
 
   async function load() {
     setLoading(true);
@@ -746,6 +757,51 @@ function CoursesView({ token }: { token: string }) {
     }
   }
 
+  async function importScorm(file: File) {
+    setImportingScorm(true);
+    setError("");
+    setNotice("");
+    try {
+      const body = new FormData();
+      body.append("package", file);
+      const imported = await apiUpload<Course>("/courses/import-scorm/", token, body);
+      setNotice(`Курс «${imported.title}» импортирован из SCORM 1.2`);
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось импортировать SCORM-пакет");
+    } finally {
+      setImportingScorm(false);
+    }
+  }
+
+  async function exportScorm(course: Course) {
+    setExportingScormId(course.id);
+    setError("");
+    try {
+      const response = await fetch(`${API}/courses/${course.id}/export-scorm/`, {
+        headers: { Authorization: `Token ${token}` },
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.detail || "Не удалось экспортировать курс");
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${course.title.replace(/[^a-zA-Zа-яА-Я0-9_-]+/g, "-") || `course-${course.id}`}-scorm-1.2.zip`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      setNotice(`Курс «${course.title}» экспортирован в SCORM 1.2`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось экспортировать курс");
+    } finally {
+      setExportingScormId(null);
+    }
+  }
+
   const editingCourse = typeof editingId === "number"
     ? courses.find((course) => course.id === editingId)
     : undefined;
@@ -757,6 +813,7 @@ function CoursesView({ token }: { token: string }) {
     if (type === "video") return <Video />;
     if (type === "link") return <Link2 />;
     if (type === "file") return <FileText />;
+    if (type === "scorm") return <FileArchive />;
     return <Type />;
   }
 
@@ -897,6 +954,16 @@ function CoursesView({ token }: { token: string }) {
                       </div>
                     )}
                   </div>
+                ) : activeLesson.lesson_type === "scorm" ? (
+                  <div className="longread-media-editor longread-scorm-editor">
+                    <span className="longread-media-icon"><FileArchive /></span>
+                    <h2>Курс SCORM 1.2</h2>
+                    <p>Пакет импортирован целиком. Его внутреннее содержимое нельзя редактировать как обычный лонгрид, но название, обложку и параметры курса можно изменить.</p>
+                    <div className="longread-file-chip">
+                      <FileArchive />
+                      <span><strong>{editingCourse?.scorm_original_name || "SCORM-пакет"}</strong><small>{formatFileSize(editingCourse?.scorm_size || 0)} · хранится на платформе</small></span>
+                    </div>
+                  </div>
                 ) : (
                   <div className="longread-media-editor">
                     <span className="longread-media-icon">{lessonIcon(activeLesson.lesson_type)}</span>
@@ -959,8 +1026,8 @@ function CoursesView({ token }: { token: string }) {
               </div>
             ) : activeLesson ? (
               <div className="longread-settings__body">
-                <label>Формат главы<select value={activeLesson.lesson_type} onChange={(event) => updateLesson(activeLessonIndex, { lesson_type: event.target.value as Lesson["lesson_type"] })}>
-                  {Object.entries(lessonTypeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                <label>Формат главы<select disabled={activeLesson.lesson_type === "scorm"} value={activeLesson.lesson_type} onChange={(event) => updateLesson(activeLessonIndex, { lesson_type: event.target.value as Lesson["lesson_type"] })}>
+                  {Object.entries(lessonTypeLabels).filter(([value]) => value !== "scorm" || activeLesson.lesson_type === "scorm").map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                 </select></label>
                 <label>Время на изучение, минут<input type="number" min="1" value={activeLesson.duration_minutes} onChange={(event) => updateLesson(activeLessonIndex, { duration_minutes: Number(event.target.value) })} required /></label>
                 <label className="check-field"><input type="checkbox" checked={activeLesson.is_required} onChange={(event) => updateLesson(activeLessonIndex, { is_required: event.target.checked })} /> Обязательная глава</label>
@@ -986,9 +1053,24 @@ function CoursesView({ token }: { token: string }) {
         title="Курсы"
         subtitle="Создание, редактирование и публикация учебных материалов"
         action={
-          <button className="primary-button" type="button" onClick={createCourse}>
-            <Plus /> Создать курс
-          </button>
+          <div className="page-actions">
+            <label className={importingScorm ? "secondary-button scorm-import scorm-import--busy" : "secondary-button scorm-import"}>
+              <FileArchive /> {importingScorm ? "Импортируем…" : "Импорт SCORM 1.2"}
+              <input
+                type="file"
+                accept="application/zip,.zip"
+                disabled={importingScorm}
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) void importScorm(file);
+                  event.currentTarget.value = "";
+                }}
+              />
+            </label>
+            <button className="primary-button" type="button" onClick={createCourse}>
+              <Plus /> Создать курс
+            </button>
+          </div>
         }
       />
       {error && <p className="form-error">{error}</p>}
@@ -1090,15 +1172,23 @@ function CoursesView({ token }: { token: string }) {
         {courses.map((course) => (
           <article className="panel course-card" key={course.id}>
             <div className="course-card__top">
-              <span className={`status status--${course.status}`}>{course.status_label}</span>
+              <div className="course-card__badges">
+                <span className={`status status--${course.status}`}>{course.status_label}</span>
+                {course.source_format === "scorm_12" && <span className="status status--scorm">SCORM 1.2</span>}
+              </div>
               <button className="icon-button" type="button" onClick={() => editCourse(course)} aria-label={`Редактировать ${course.title}`}><Pencil /></button>
             </div>
             <div><h2>{course.title}</h2><p>{course.description || "Описание пока не добавлено"}</p></div>
             <div className="course-meta"><span><FileText />{chapterCountLabel(course.lessons_count)}</span><span><Clock3 />{course.estimated_minutes} мин</span></div>
             <div className="course-card__footer"><span>{course.author_name}</span><span>Версия {course.version}</span></div>
-            <button className={course.status === "published" ? "secondary-button" : "primary-button"} type="button" onClick={() => void changePublication(course)}>
-              {course.status === "published" ? <><CheckCircle2 /> Опубликован</> : <><PlayCircle /> Опубликовать</>}
-            </button>
+            <div className="course-card__actions">
+              <button className="secondary-button" type="button" disabled={exportingScormId === course.id} onClick={() => void exportScorm(course)}>
+                <Download /> {exportingScormId === course.id ? "Экспорт…" : "SCORM 1.2"}
+              </button>
+              <button className={course.status === "published" ? "secondary-button" : "primary-button"} type="button" onClick={() => void changePublication(course)}>
+                {course.status === "published" ? <><CheckCircle2 /> Опубликован</> : <><PlayCircle /> Опубликовать</>}
+              </button>
+            </div>
           </article>
         ))}
         {!loading && !courses.length && (

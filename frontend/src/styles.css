@@ -132,6 +132,7 @@ svg { width: 20px; height: 20px; flex: 0 0 auto; }
   display: flex; align-items: center; justify-content: space-between; gap: 18px;
 }
 .page-header p, .section-heading p, .panel p { margin-top: 5px; color: var(--muted); }
+.page-actions { display: flex; align-items: center; gap: 8px; }
 .primary-button, .secondary-button {
   min-height: 42px; padding: 9px 15px; border-radius: 10px; display: inline-flex;
   align-items: center; justify-content: center; gap: 7px; cursor: pointer; font-weight: 700;
@@ -141,6 +142,10 @@ svg { width: 20px; height: 20px; flex: 0 0 auto; }
 .primary-button:disabled { opacity: 0.65; cursor: wait; }
 .secondary-button { border: 1px solid var(--border); background: var(--surface-soft); color: var(--foreground); }
 .secondary-button:hover { background: var(--surface-hover); }
+.secondary-button:disabled { opacity: 0.58; cursor: wait; }
+.scorm-import { display: inline-flex; color: var(--foreground); cursor: pointer; }
+.scorm-import input { display: none; }
+.scorm-import--busy { opacity: 0.65; cursor: wait; }
 .panel, .stat-card {
   border: 1px solid var(--border); border-radius: 16px; background: var(--surface); box-shadow: var(--shadow);
 }
@@ -210,6 +215,7 @@ td:first-child span { color: var(--muted); font-size: 0.8rem; }
 .status--published { background: color-mix(in srgb, var(--brand) 28%, var(--surface)); }
 .status--draft { color: var(--warning); background: color-mix(in srgb, var(--warning) 14%, var(--surface)); }
 .status--blocked { color: var(--danger); }
+.status--scorm { color: var(--foreground); background: color-mix(in srgb, var(--brand) 18%, var(--surface)); }
 .course-editor { display: grid; gap: 20px; }
 .course-fields { display: grid; grid-template-columns: minmax(0, 1fr) 190px; gap: 14px; }
 .field-wide { grid-column: 1 / -1; }
@@ -402,6 +408,7 @@ td:first-child span { color: var(--muted); font-size: 0.8rem; }
 .longread-media-editor { min-height: 420px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; text-align: center; }
 .longread-media-editor > p { max-width: 420px; color: var(--muted); line-height: 1.5; }
 .longread-media-editor > input { max-width: 520px; margin-top: 10px; }
+.longread-scorm-editor .longread-file-chip { max-width: 520px; }
 .longread-media-icon { width: 52px; height: 52px; border-radius: 15px; display: grid; place-items: center; background: color-mix(in srgb, var(--brand) 22%, var(--surface)); color: var(--foreground); }
 .longread-media-icon svg { width: 24px; height: 24px; }
 .longread-upload-zone {
@@ -449,6 +456,7 @@ td:first-child span { color: var(--muted); font-size: 0.8rem; }
 .course-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
 .course-card { min-height: 290px; display: flex; flex-direction: column; gap: 17px; }
 .course-card__top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.course-card__badges { display: flex; flex-wrap: wrap; gap: 6px; }
 .course-card h2 { font-size: 1.15rem; }
 .course-card p { line-height: 1.5; }
 .course-meta { display: flex; flex-wrap: wrap; gap: 14px; color: var(--muted); font-size: 0.84rem; }
@@ -458,6 +466,8 @@ td:first-child span { color: var(--muted); font-size: 0.8rem; }
   margin-top: auto; padding-top: 13px; border-top: 1px solid var(--border);
   display: flex; justify-content: space-between; gap: 10px; color: var(--muted); font-size: 0.78rem;
 }
+.course-card__actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+.course-card__actions .primary-button, .course-card__actions .secondary-button { min-width: 0; padding-right: 9px; padding-left: 9px; font-size: 0.82rem; }
 .course-empty { grid-column: 1 / -1; }
 .empty {
   min-height: 340px; display: flex; flex-direction: column; align-items: center;
@@ -519,6 +529,7 @@ td:first-child span { color: var(--muted); font-size: 0.8rem; }
 }
 @media (max-width: 520px) {
   .page-header, .section-heading, .department-bar, .lesson-heading { align-items: flex-start; flex-direction: column; }
+  .page-actions { width: 100%; align-items: stretch; flex-direction: column; }
   .current-course { grid-template-columns: 1fr; }
   .rank-row { grid-template-columns: 24px 60px minmax(90px, 1fr) 42px; gap: 5px; }
   .department-bar form { width: 100%; align-items: stretch; flex-direction: column; }

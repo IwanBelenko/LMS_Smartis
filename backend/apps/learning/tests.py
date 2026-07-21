@@ -1,4 +1,6 @@
+import io
 import tempfile
+import zipfile
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
@@ -7,6 +9,22 @@ from rest_framework.test import APIClient
 from apps.identity.models import User
 
 from .models import Course
+
+
+def make_scorm_12_package(title="Курс из SCORM"):
+    manifest = f'''<?xml version="1.0" encoding="UTF-8"?>
+<manifest identifier="imported-course" version="1.2"
+ xmlns="http://www.imsproject.org/xsd/imscp_rootv1p1p2"
+ xmlns:adlcp="http://www.adlnet.org/xsd/adlcp_rootv1p2">
+ <metadata><schema>ADL SCORM</schema><schemaversion>1.2</schemaversion></metadata>
+ <organizations default="ORG1"><organization identifier="ORG1"><title>{title}</title><item identifier="ITEM1" identifierref="RES1"><title>{title}</title></item></organization></organizations>
+ <resources><resource identifier="RES1" type="webcontent" adlcp:scormtype="sco" href="index.html"><file href="index.html"/></resource></resources>
+</manifest>'''
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("imsmanifest.xml", manifest)
+        archive.writestr("index.html", "<!doctype html><title>SCORM</title><p>Курс</p>")
+    return SimpleUploadedFile("course-scorm.zip", output.getvalue(), content_type="application/zip")
 
 
 class CourseApiTests(TestCase):
@@ -189,6 +207,36 @@ class CourseApiTests(TestCase):
             self.assertEqual(response.status_code, 200)
             self.assertEqual(response.data["cover_style"], Course.CoverStyle.STANDARD)
             self.assertEqual(response.data["cover_url"], "")
+
+    def test_scorm_12_package_is_imported_as_course(self):
+        self.client.force_authenticate(self.admin)
+        with tempfile.TemporaryDirectory() as media_root, self.settings(MEDIA_ROOT=media_root):
+            response = self.client.post(
+                "/api/v1/courses/import-scorm/",
+                {"package": make_scorm_12_package()},
+                format="multipart",
+            )
+            self.assertEqual(response.status_code, 201)
+            self.assertEqual(response.data["title"], "Курс из SCORM")
+            self.assertEqual(response.data["source_format"], Course.SourceFormat.SCORM_12)
+            self.assertEqual(response.data["lessons"][0]["lesson_type"], "scorm")
+            self.assertEqual(response.data["scorm_entry_point"], "index.html")
+
+    def test_native_course_is_exported_as_valid_scorm_12(self):
+        self.client.force_authenticate(self.admin)
+        created = self.client.post("/api/v1/courses/", self.course_payload(), format="json").data
+
+        response = self.client.get(f"/api/v1/courses/{created['id']}/export-scorm/")
+        self.assertEqual(response.status_code, 200)
+        package_bytes = b"".join(response.streaming_content)
+        with zipfile.ZipFile(io.BytesIO(package_bytes)) as archive:
+            self.assertIn("imsmanifest.xml", archive.namelist())
+            self.assertIn("index.html", archive.namelist())
+            manifest = archive.read("imsmanifest.xml").decode("utf-8")
+            player = archive.read("index.html").decode("utf-8")
+        self.assertIn("<schemaversion>1.2</schemaversion>", manifest)
+        self.assertIn("LMSInitialize", player)
+        self.assertIn("cmi.core.lesson_status", player)
 
     def test_editing_published_course_returns_it_to_draft(self):
         self.client.force_authenticate(self.admin)

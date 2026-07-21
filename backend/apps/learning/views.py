@@ -1,8 +1,10 @@
 from pathlib import Path
 
 from django.conf import settings
+from django.http import FileResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from django.utils.text import slugify
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, MultiPartParser
@@ -12,6 +14,7 @@ from apps.identity.models import User
 
 from .models import Course, Lesson
 from .permissions import IsCourseManagerOrReadOnly
+from .scorm import build_scorm_12_package, extract_scorm_package, inspect_scorm_package
 from .serializers import CourseSerializer, LessonSerializer
 
 
@@ -30,6 +33,58 @@ class CourseViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(author=self.request.user)
+
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path="import-scorm",
+        parser_classes=[MultiPartParser, FormParser],
+    )
+    def import_scorm(self, request):
+        package = request.FILES.get("package")
+        if not package:
+            return Response({"detail": "Выберите ZIP-пакет SCORM 1.2"}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            manifest = inspect_scorm_package(package)
+        except Exception as exc:
+            if hasattr(exc, "detail"):
+                return Response({"detail": exc.detail}, status=status.HTTP_400_BAD_REQUEST)
+            raise
+
+        course = Course.objects.create(
+            title=manifest.title,
+            description=f"Импортировано из SCORM 1.2 · {Path(package.name).name}",
+            author=request.user,
+            source_format=Course.SourceFormat.SCORM_12,
+            scorm_identifier=manifest.identifier,
+            scorm_original_name=Path(package.name).name[:255],
+            scorm_size=package.size,
+            scorm_imported_at=timezone.now(),
+        )
+        try:
+            course.scorm_package.save(Path(package.name).name, package, save=True)
+            Lesson.objects.create(
+                course=course,
+                title=manifest.title,
+                lesson_type=Lesson.Type.SCORM,
+                duration_minutes=30,
+                position=0,
+                is_required=True,
+            )
+            extract_scorm_package(course, manifest)
+        except Exception:
+            course.delete()
+            raise
+        return Response(self.get_serializer(course).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["get"], url_path="export-scorm")
+    def export_scorm(self, request, pk=None):
+        course = self.get_object()
+        filename = f"{slugify(course.title, allow_unicode=True) or f'course-{course.id}'}-scorm-1.2.zip"
+        if course.source_format == Course.SourceFormat.SCORM_12 and course.scorm_package:
+            return FileResponse(course.scorm_package.open("rb"), as_attachment=True, filename=filename)
+        package = build_scorm_12_package(course)
+        return FileResponse(package, as_attachment=True, filename=filename)
 
     @action(detail=True, methods=["post"])
     def publish(self, request, pk=None):
