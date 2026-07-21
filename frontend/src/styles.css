@@ -73,8 +73,11 @@ svg { width: 20px; height: 20px; flex: 0 0 auto; }
 .app-shell--sidebar-closed { grid-template-columns: 0 minmax(0, 1fr); }
 .app-shell--sidebar-closed .sidebar { transform: translateX(-100%); pointer-events: none; }
 .sidebar-backdrop { display: none; }
-.brand { display: flex; align-items: center; }
-.brand__wordmark { display: block; width: 184px; max-width: 100%; height: auto; }
+.brand { width: 100%; display: flex; align-items: center; }
+.brand__wordmark { display: block; width: 100%; height: auto; }
+.brand__wordmark--dark { display: none; }
+:root[data-theme="dark"] .brand__wordmark--light { display: none; }
+:root[data-theme="dark"] .brand__wordmark--dark { display: block; }
 .brand--login .brand__wordmark { width: 230px; }
 .visually-hidden {
   width: 1px; height: 1px; padding: 0; margin: -1px; position: absolute; overflow: hidden;

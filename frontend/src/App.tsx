@@ -27,14 +27,16 @@ import {
 } from "lucide-react";
 import type { FormEvent } from "react";
 import { lazy, Suspense, useEffect, useState } from "react";
-import smartisWordmark from "./assets/smartis-wordmark.png";
+import smartisWordmarkDark from "./assets/smartis-wordmark-dark.png";
+import smartisWordmarkLight from "./assets/smartis-wordmark-light.png";
 
 const RichTextEditor = lazy(() => import("./RichTextEditor"));
 
 function Brand({ login = false }: { login?: boolean }) {
   return (
     <div className={login ? "brand brand--login" : "brand"}>
-      <img className="brand__wordmark" src={smartisWordmark} alt="Smartis" />
+      <img className="brand__wordmark brand__wordmark--light" src={smartisWordmarkLight} alt="Smartis" />
+      <img className="brand__wordmark brand__wordmark--dark" src={smartisWordmarkDark} alt="" aria-hidden="true" />
       <span className="visually-hidden">Smartis LMS</span>
     </div>
   );
