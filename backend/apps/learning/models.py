@@ -1,5 +1,15 @@
+import uuid
+from pathlib import Path
+
 from django.conf import settings
 from django.db import models
+from django.db.models.signals import post_delete
+from django.dispatch import receiver
+
+
+def lesson_video_path(instance, filename):
+    suffix = Path(filename).suffix.lower()
+    return f"courses/{instance.course_id}/videos/{uuid.uuid4().hex}{suffix}"
 
 
 class Course(models.Model):
@@ -44,6 +54,10 @@ class Lesson(models.Model):
     lesson_type = models.CharField("Тип", max_length=20, choices=Type.choices, default=Type.TEXT)
     content = models.TextField("Содержание", blank=True)
     media_url = models.URLField("Ссылка на материал", blank=True)
+    video_file = models.FileField("Видеофайл", upload_to=lesson_video_path, blank=True)
+    video_original_name = models.CharField("Исходное имя видео", max_length=255, blank=True)
+    video_size = models.PositiveBigIntegerField("Размер видео", default=0)
+    video_uploaded_at = models.DateTimeField("Дата загрузки видео", null=True, blank=True)
     duration_minutes = models.PositiveIntegerField("Длительность, минут", default=5)
     position = models.PositiveIntegerField("Позиция", default=0)
     is_required = models.BooleanField("Обязательный", default=True)
@@ -60,3 +74,9 @@ class Lesson(models.Model):
 
     def __str__(self) -> str:
         return self.title
+
+
+@receiver(post_delete, sender=Lesson)
+def delete_lesson_video(sender, instance, **kwargs):
+    if instance.video_file:
+        instance.video_file.delete(save=False)

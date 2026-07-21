@@ -1,4 +1,5 @@
 from django.db import models, transaction
+import nh3
 from rest_framework import serializers
 
 from .models import Course, Lesson
@@ -7,6 +8,7 @@ from .models import Course, Lesson
 class LessonSerializer(serializers.ModelSerializer):
     id = serializers.IntegerField(required=False)
     lesson_type_label = serializers.CharField(source="get_lesson_type_display", read_only=True)
+    video_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Lesson
@@ -17,14 +19,48 @@ class LessonSerializer(serializers.ModelSerializer):
             "lesson_type_label",
             "content",
             "media_url",
+            "video_url",
+            "video_original_name",
+            "video_size",
+            "video_uploaded_at",
             "duration_minutes",
             "position",
             "is_required",
         ]
+        read_only_fields = ["video_url", "video_original_name", "video_size", "video_uploaded_at"]
+
+    def get_video_url(self, obj):
+        if not obj.video_file:
+            return ""
+        request = self.context.get("request")
+        return request.build_absolute_uri(obj.video_file.url) if request else obj.video_file.url
+
+    def validate_content(self, value):
+        return nh3.clean(
+            value,
+            tags={
+                "p", "br", "h1", "h2", "h3", "h4", "strong", "b", "em", "i", "s", "del",
+                "ul", "ol", "li", "blockquote", "pre", "code", "a", "span", "hr",
+            },
+            clean_content_tags={"script", "style", "iframe", "object", "embed"},
+            attributes={
+                "a": {"href", "target"},
+                "span": {"style"},
+                "p": {"style"},
+                "h1": {"style"},
+                "h2": {"style"},
+                "h3": {"style"},
+                "h4": {"style"},
+            },
+            filter_style_properties={
+                "font-family", "font-size", "color", "background-color", "line-height", "text-align",
+            },
+            url_schemes={"http", "https", "mailto"},
+        )
 
     def validate(self, attrs):
         lesson_type = attrs.get("lesson_type", getattr(self.instance, "lesson_type", Lesson.Type.TEXT))
-        if lesson_type in {Lesson.Type.VIDEO, Lesson.Type.LINK, Lesson.Type.FILE} and not attrs.get(
+        if lesson_type in {Lesson.Type.LINK, Lesson.Type.FILE} and not attrs.get(
             "media_url", getattr(self.instance, "media_url", "")
         ):
             raise serializers.ValidationError({"media_url": "Добавьте ссылку на материал"})
@@ -92,6 +128,8 @@ class CourseSerializer(serializers.ModelSerializer):
             self._sync_lessons(instance, lessons)
         if changed:
             instance.version += 1
+            if instance.status == Course.Status.PUBLISHED:
+                instance.status = Course.Status.DRAFT
         instance.save()
         return instance
 

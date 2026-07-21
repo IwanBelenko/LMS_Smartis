@@ -7,6 +7,7 @@ services:
     volumes:
       - ./infra/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
+      - media_data:/srv/media:ro
     depends_on:
       api: { condition: service_healthy }
       web: { condition: service_healthy }
@@ -36,6 +37,7 @@ services:
       db: { condition: service_healthy }
       redis: { condition: service_healthy }
       minio: { condition: service_healthy }
+    volumes: ["media_data:/app/media"]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health/')"]
       interval: 10s
@@ -83,3 +85,4 @@ volumes:
   redis_data:
   minio_data:
   caddy_data:
+  media_data:

@@ -3,5 +3,9 @@
 	handle /api/* { reverse_proxy api:8000 }
 	handle /admin/* { reverse_proxy api:8000 }
 	handle /static/* { reverse_proxy api:8000 }
+	handle /media/* {
+		root * /srv
+		file_server
+	}
 	handle { reverse_proxy web:80 }
 }

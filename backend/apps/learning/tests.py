@@ -1,3 +1,6 @@
+import tempfile
+
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from rest_framework.test import APIClient
 
@@ -114,3 +117,68 @@ class CourseApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["version"], 2)
         self.assertEqual([item["title"] for item in response.data["lessons"]], ["Практика", "Знакомство"])
+
+    def test_rich_text_is_sanitized_and_keeps_safe_formatting(self):
+        self.client.force_authenticate(self.admin)
+        payload = self.course_payload()
+        payload["lessons"][0]["content"] = (
+            '<h2 style="text-align:center">Заголовок</h2>'
+            '<p><span style="font-family:Georgia;font-size:24px;color:#7ea935">Текст</span></p>'
+            '<script>alert("xss")</script><a href="javascript:alert(1)" onclick="alert(1)">ссылка</a>'
+        )
+        response = self.client.post("/api/v1/courses/", payload, format="json")
+
+        self.assertEqual(response.status_code, 201)
+        content = response.data["lessons"][0]["content"]
+        self.assertIn("text-align:center", content)
+        self.assertIn("font-family:Georgia", content)
+        self.assertNotIn("script", content)
+        self.assertNotIn("javascript", content)
+        self.assertNotIn("onclick", content)
+
+    def test_video_is_uploaded_to_platform_before_publication(self):
+        self.client.force_authenticate(self.admin)
+        payload = self.course_payload("Видеокурс")
+        payload["lessons"] = [
+            {
+                "title": "Обзор платформы",
+                "lesson_type": "video",
+                "duration_minutes": 8,
+                "position": 0,
+                "is_required": True,
+            }
+        ]
+        with tempfile.TemporaryDirectory() as media_root, self.settings(MEDIA_ROOT=media_root):
+            created = self.client.post("/api/v1/courses/", payload, format="json").data
+            course_id = created["id"]
+            lesson_id = created["lessons"][0]["id"]
+
+            response = self.client.post(f"/api/v1/courses/{course_id}/publish/")
+            self.assertEqual(response.status_code, 400)
+
+            video = SimpleUploadedFile("overview.mp4", b"fake-video-content", content_type="video/mp4")
+            response = self.client.post(
+                f"/api/v1/courses/{course_id}/lessons/{lesson_id}/video/",
+                {"video": video},
+                format="multipart",
+            )
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.data["video_original_name"], "overview.mp4")
+            self.assertTrue(response.data["video_url"].endswith(".mp4"))
+
+            response = self.client.post(f"/api/v1/courses/{course_id}/publish/")
+            self.assertEqual(response.status_code, 200)
+
+    def test_editing_published_course_returns_it_to_draft(self):
+        self.client.force_authenticate(self.admin)
+        created = self.client.post("/api/v1/courses/", self.course_payload(), format="json").data
+        self.client.post(f"/api/v1/courses/{created['id']}/publish/")
+
+        response = self.client.patch(
+            f"/api/v1/courses/{created['id']}/",
+            {"title": "Новая версия курса"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["status"], Course.Status.DRAFT)
+        self.assertEqual(response.data["version"], 2)

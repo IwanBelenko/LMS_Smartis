@@ -20,12 +20,15 @@ import {
   Settings,
   Trash2,
   Trophy,
+  Upload,
   Users,
   Workflow,
   X,
 } from "lucide-react";
 import type { FormEvent } from "react";
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
+
+const RichTextEditor = lazy(() => import("./RichTextEditor"));
 
 type ViewId = "home" | "trajectory" | "ranking" | "analytics" | "users" | "courses" | "settings";
 type User = {
@@ -43,11 +46,16 @@ type User = {
 type Department = { id: number; name: string; code: string; is_active: boolean };
 type Lesson = {
   id?: number;
+  client_key: string;
   title: string;
   lesson_type: "text" | "video" | "link" | "file";
   lesson_type_label?: string;
   content: string;
   media_url: string;
+  video_url: string;
+  video_original_name: string;
+  video_size: number;
+  video_uploaded_at?: string | null;
   duration_minutes: number;
   position: number;
   is_required: boolean;
@@ -92,6 +100,19 @@ async function apiRequest<T>(
     throw new Error(String(message));
   }
   return response.status === 204 ? (undefined as T) : response.json();
+}
+
+async function apiUpload<T>(path: string, token: string, body: FormData): Promise<T> {
+  const response = await fetch(API + path, {
+    method: "POST",
+    headers: { Authorization: "Token " + token },
+    body,
+  });
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.detail || "Не удалось загрузить файл");
+  }
+  return response.json();
 }
 
 function ThemeSwitch({ dark, onChange }: { dark: boolean; onChange: () => void }) {
@@ -441,14 +462,24 @@ const lessonTypeLabels: Record<Lesson["lesson_type"], string> = {
 
 function newLesson(position: number): Lesson {
   return {
+    client_key: crypto.randomUUID(),
     title: "",
     lesson_type: "text",
     content: "",
     media_url: "",
+    video_url: "",
+    video_original_name: "",
+    video_size: 0,
     duration_minutes: 5,
     position,
     is_required: true,
   };
+}
+
+function formatFileSize(bytes: number) {
+  if (!bytes) return "";
+  const megabytes = bytes / (1024 * 1024);
+  return megabytes >= 1 ? `${megabytes.toFixed(1)} МБ` : `${Math.ceil(bytes / 1024)} КБ`;
 }
 
 function CoursesView({ token }: { token: string }) {
@@ -464,6 +495,7 @@ function CoursesView({ token }: { token: string }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [videoFiles, setVideoFiles] = useState<Record<string, File>>({});
 
   async function load() {
     setLoading(true);
@@ -484,6 +516,7 @@ function CoursesView({ token }: { token: string }) {
     setForm({ title: "", description: "", estimated_minutes: 30, lessons: [newLesson(0)] });
     setError("");
     setNotice("");
+    setVideoFiles({});
   }
 
   function editCourse(course: Course) {
@@ -492,10 +525,15 @@ function CoursesView({ token }: { token: string }) {
       title: course.title,
       description: course.description,
       estimated_minutes: course.estimated_minutes,
-      lessons: course.lessons.map((lesson, position) => ({ ...lesson, position })),
+      lessons: course.lessons.map((lesson, position) => ({
+        ...lesson,
+        client_key: `lesson-${lesson.id ?? crypto.randomUUID()}`,
+        position,
+      })),
     });
     setError("");
     setNotice("");
+    setVideoFiles({});
   }
 
   function updateLesson(index: number, update: Partial<Lesson>) {
@@ -508,6 +546,14 @@ function CoursesView({ token }: { token: string }) {
   }
 
   function removeLesson(index: number) {
+    const removedKey = form.lessons[index]?.client_key;
+    if (removedKey) {
+      setVideoFiles((current) => {
+        const next = { ...current };
+        delete next[removedKey];
+        return next;
+      });
+    }
     setForm((current) => ({
       ...current,
       lessons: current.lessons.filter((_, lessonIndex) => lessonIndex !== index)
@@ -537,6 +583,11 @@ function CoursesView({ token }: { token: string }) {
     setNotice("");
     try {
       const isNew = editingId === "new";
+      const pendingUploads = form.lessons.map((lesson, position) => ({
+        position,
+        clientKey: lesson.client_key,
+        file: videoFiles[lesson.client_key],
+      })).filter((item) => item.file);
       const saved = await apiRequest<Course>(
         isNew ? "/courses/" : `/courses/${editingId}/`,
         token,
@@ -544,18 +595,58 @@ function CoursesView({ token }: { token: string }) {
           method: isNew ? "POST" : "PATCH",
           body: JSON.stringify({
             ...form,
-            lessons: form.lessons.map((lesson, position) => ({ ...lesson, position })),
+            lessons: form.lessons.map((lesson, position) => ({
+              id: lesson.id,
+              title: lesson.title,
+              lesson_type: lesson.lesson_type,
+              content: lesson.content,
+              media_url: lesson.media_url,
+              duration_minutes: lesson.duration_minutes,
+              position,
+              is_required: lesson.is_required,
+            })),
           }),
         },
       );
+      let savedLessons = saved.lessons.map((lesson, position) => ({
+        ...lesson,
+        client_key: form.lessons[position]?.client_key ?? `lesson-${lesson.id ?? crypto.randomUUID()}`,
+      }));
       setEditingId(saved.id);
       setForm({
         title: saved.title,
         description: saved.description,
         estimated_minutes: saved.estimated_minutes,
-        lessons: saved.lessons,
+        lessons: savedLessons,
       });
-      setNotice(isNew ? "Курс создан и сохранён как черновик" : "Изменения сохранены");
+      for (const upload of pendingUploads) {
+        const savedLesson = savedLessons[upload.position];
+        if (!savedLesson.id || !upload.file) continue;
+        const body = new FormData();
+        body.append("video", upload.file);
+        const uploaded = await apiUpload<Lesson>(
+          `/courses/${saved.id}/lessons/${savedLesson.id}/video/`,
+          token,
+          body,
+        );
+        savedLessons = savedLessons.map((lesson) => lesson.id === uploaded.id
+          ? { ...uploaded, client_key: upload.clientKey }
+          : lesson);
+      }
+      setForm({
+        title: saved.title,
+        description: saved.description,
+        estimated_minutes: saved.estimated_minutes,
+        lessons: savedLessons,
+      });
+      setVideoFiles({});
+      setNotice(
+        editingCourse?.status === "published" && saved.status === "draft"
+          ? "Новая версия сохранена как черновик — проверьте её и опубликуйте"
+          : pendingUploads.length
+          ? `Изменения сохранены · загружено видео: ${pendingUploads.length}`
+          : isNew ? "Курс создан и сохранён как черновик" : "Изменения сохранены",
+      );
       await load();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Не удалось сохранить курс");
@@ -614,7 +705,7 @@ function CoursesView({ token }: { token: string }) {
           </div>
           <div className="lesson-list">
             {form.lessons.map((lesson, index) => (
-              <article className="lesson-editor" key={lesson.id ?? `new-${index}`}>
+              <article className="lesson-editor" key={lesson.client_key}>
                 <div className="lesson-editor__top">
                   <span className="lesson-number">{index + 1}</span>
                   <strong>{lesson.title || "Новый урок"}</strong>
@@ -631,7 +722,43 @@ function CoursesView({ token }: { token: string }) {
                   </select></label>
                   <label>Минут<input type="number" min="1" value={lesson.duration_minutes} onChange={(event) => updateLesson(index, { duration_minutes: Number(event.target.value) })} required /></label>
                   {lesson.lesson_type === "text" ? (
-                    <label className="field-wide">Содержание<textarea value={lesson.content} onChange={(event) => updateLesson(index, { content: event.target.value })} placeholder="Текст урока" /></label>
+                    <div className="field-wide rich-editor-field">
+                      <span className="field-label">Содержание</span>
+                      <Suspense fallback={<div className="rich-editor rich-editor--loading">Загружаем редактор…</div>}>
+                        <RichTextEditor value={lesson.content} onChange={(content) => updateLesson(index, { content })} />
+                      </Suspense>
+                    </div>
+                  ) : lesson.lesson_type === "video" ? (
+                    <div className="field-wide video-upload-field">
+                      <span className="field-label">Видеофайл</span>
+                      {lesson.video_url && !videoFiles[lesson.client_key] && (
+                        <video className="video-preview" controls preload="metadata" src={lesson.video_url}>
+                          Ваш браузер не поддерживает просмотр видео.
+                        </video>
+                      )}
+                      <div className="video-upload-row">
+                        <label className="upload-button">
+                          <Upload /> {lesson.video_url ? "Заменить видео" : "Выбрать видео"}
+                          <input
+                            type="file"
+                            accept="video/mp4,video/webm,video/quicktime,video/x-m4v,.mp4,.webm,.mov,.m4v"
+                            onChange={(event) => {
+                              const file = event.target.files?.[0];
+                              if (file) setVideoFiles((current) => ({ ...current, [lesson.client_key]: file }));
+                            }}
+                          />
+                        </label>
+                        <div className="video-file-info">
+                          {videoFiles[lesson.client_key] ? (
+                            <><strong>{videoFiles[lesson.client_key].name}</strong><span>{formatFileSize(videoFiles[lesson.client_key].size)} · загрузится при сохранении</span></>
+                          ) : lesson.video_original_name ? (
+                            <><strong>{lesson.video_original_name}</strong><span>{formatFileSize(lesson.video_size)} · хранится на платформе</span></>
+                          ) : (
+                            <span>MP4, WebM, MOV или M4V · до 500 МБ</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
                   ) : (
                     <label className="field-wide">Ссылка на материал<input type="url" value={lesson.media_url} onChange={(event) => updateLesson(index, { media_url: event.target.value })} placeholder="https://…" required /></label>
                   )}
