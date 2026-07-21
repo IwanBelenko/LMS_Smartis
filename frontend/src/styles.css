@@ -175,10 +175,17 @@ svg { width: 20px; height: 20px; flex: 0 0 auto; }
   border-radius: 999px; background: var(--surface-soft);
 }
 .track > span { position: absolute; top: 5px; right: 7px; color: var(--muted); }
-.spider { position: absolute; top: 4px; width: 30px; height: 22px; color: var(--foreground); }
-.spider path { fill: none; stroke: currentColor; stroke-linecap: round; }
-.spider ellipse { fill: var(--brand); stroke: currentColor; }
-.spider circle { fill: currentColor; }
+.spider {
+  position: absolute; top: 1px; width: 38px; height: 29px; color: var(--brand);
+  filter: drop-shadow(0 2px 2px rgba(35, 48, 26, 0.18));
+  animation: spider-scuttle 0.72s ease-in-out infinite alternate;
+}
+.spider path { fill: none; stroke: currentColor; stroke-width: 7; stroke-linecap: round; stroke-linejoin: round; }
+.spider ellipse { fill: currentColor; }
+@keyframes spider-scuttle {
+  from { transform: translateY(1px) rotate(-2deg); }
+  to { transform: translateY(-1px) rotate(2deg); }
+}
 .form-panel { display: grid; gap: 18px; }
 .user-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 label { display: grid; gap: 6px; color: var(--muted); font-size: 0.85rem; font-weight: 650; }

@@ -323,10 +323,9 @@ function PageHeader({
 
 function Spider({ progress }: { progress: number }) {
   return (
-    <svg className="spider" style={{ left: "calc(" + progress + "% - 15px)" }} viewBox="0 0 30 22">
-      <path d="M10 6 5 1M10 9 2 7M10 14 2 17M10 17 5 21M20 6l5-5M20 9l8-2M20 14l8 3M20 17l5 4" />
-      <ellipse cx="15" cy="11" rx="7" ry="6.5" />
-      <circle cx="13" cy="9.5" r="1" /><circle cx="17" cy="9.5" r="1" />
+    <svg className="spider" style={{ left: "calc(" + progress + "% - 19px)" }} viewBox="0 0 44 34" aria-hidden="true">
+      <path d="M15 13C10 11 8 7 6 4M13 17 3 14M15 21c-5 2-7 6-8 9M29 13c5-2 7-6 9-9M31 17l10-3M29 21c5 2 7 6 8 9" />
+      <ellipse cx="22" cy="18" rx="12.5" ry="9" />
     </svg>
   );
 }
