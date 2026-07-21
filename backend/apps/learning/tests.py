@@ -1,4 +1,5 @@
 import io
+import json
 import tempfile
 import zipfile
 from pathlib import Path
@@ -12,7 +13,7 @@ from apps.identity.models import User
 from .models import Course
 
 
-def make_scorm_12_package(title="Курс из SCORM", filename="course-scorm.zip"):
+def make_scorm_12_package(title="Курс из SCORM", filename="course-scorm.zip", extra_files=None):
     manifest = f'''<?xml version="1.0" encoding="UTF-8"?>
 <manifest identifier="imported-course" version="1.2"
  xmlns="http://www.imsproject.org/xsd/imscp_rootv1p1p2"
@@ -25,6 +26,8 @@ def make_scorm_12_package(title="Курс из SCORM", filename="course-scorm.zi
     with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("imsmanifest.xml", manifest)
         archive.writestr("index.html", "<!doctype html><title>SCORM</title><p>Курс</p>")
+        for path, content in (extra_files or {}).items():
+            archive.writestr(path, content)
     return SimpleUploadedFile(filename, output.getvalue(), content_type="application/zip")
 
 
@@ -279,6 +282,70 @@ class CourseApiTests(TestCase):
             self.assertFalse(Path(old_package).exists())
             self.assertFalse(Path(old_content_dir).exists())
             self.assertTrue(Path(Course.objects.get(id=course.id).scorm_package.path).exists())
+
+    def test_ispring_scorm_can_be_converted_to_editable_native_copy(self):
+        self.client.force_authenticate(self.admin)
+        ispring_document = {
+            "content": {
+                "c": {
+                    "B": {
+                        "course": {
+                            "cs": {
+                                "b": {
+                                    "o": ["heading", "paragraph", "quiz"],
+                                    "B": {
+                                        "heading": {"t": "p", "v": "h2", "c": [{"t": "1. Введение"}]},
+                                        "paragraph": {"t": "p", "v": "text", "c": [{"t": "Редактируемый текст"}]},
+                                        "quiz": {
+                                            "t": "Q",
+                                            "dt": {
+                                                "q": {
+                                                    "o": ["question"],
+                                                    "B": {
+                                                        "question": {
+                                                            "d": {"b": {"o": ["q"], "B": {"q": {"t": "p", "c": [{"t": "Вопрос?"}]}}}},
+                                                            "c": {
+                                                                "o": ["answer"],
+                                                                "B": {
+                                                                    "answer": {
+                                                                        "c": True,
+                                                                        "t": {"b": {"o": ["a"], "B": {"a": {"t": "p", "c": [{"t": "Ответ"}]}}}},
+                                                                    }
+                                                                },
+                                                            },
+                                                        }
+                                                    },
+                                                }
+                                            },
+                                        },
+                                    },
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        with tempfile.TemporaryDirectory() as media_root, self.settings(MEDIA_ROOT=media_root):
+            imported = self.client.post(
+                "/api/v1/courses/import-scorm/",
+                {
+                    "package": make_scorm_12_package(
+                        "iSpring",
+                        extra_files={"data-1.json": json.dumps(ispring_document, ensure_ascii=False)},
+                    )
+                },
+                format="multipart",
+            ).data
+
+            response = self.client.post(f"/api/v1/courses/{imported['id']}/convert-to-native/")
+
+            self.assertEqual(response.status_code, 201)
+            self.assertEqual(response.data["source_format"], Course.SourceFormat.NATIVE)
+            self.assertEqual(response.data["lessons"][0]["title"], "1. Введение")
+            self.assertIn("Редактируемый текст", response.data["lessons"][0]["content"])
+            self.assertIn("Вопрос?", response.data["lessons"][0]["content"])
+            self.assertEqual(Course.objects.filter(id=imported["id"], source_format="scorm_12").count(), 1)
 
     def test_editing_published_course_returns_it_to_draft(self):
         self.client.force_authenticate(self.admin)

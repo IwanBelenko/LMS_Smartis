@@ -409,6 +409,10 @@ td:first-child span { color: var(--muted); font-size: 0.8rem; }
 .longread-media-editor > p { max-width: 420px; color: var(--muted); line-height: 1.5; }
 .longread-media-editor > input { max-width: 520px; margin-top: 10px; }
 .longread-scorm-editor .longread-file-chip { max-width: 520px; }
+.scorm-edit-actions { width: min(100%, 620px); display: grid; gap: 12px; }
+.scorm-edit-actions > .primary-button { justify-self: center; }
+.scorm-edit-actions > p { margin: 0; color: var(--muted); line-height: 1.55; }
+.scorm-edit-actions .longread-upload-zone { min-height: 180px; }
 .longread-media-icon { width: 52px; height: 52px; border-radius: 15px; display: grid; place-items: center; background: color-mix(in srgb, var(--brand) 22%, var(--surface)); color: var(--foreground); }
 .longread-media-icon svg { width: 24px; height: 24px; }
 .longread-upload-zone {

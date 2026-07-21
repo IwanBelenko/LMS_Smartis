@@ -10,7 +10,7 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.utils.text import slugify
 from django.views.decorators.clickjacking import xframe_options_exempt
-from rest_framework import status, viewsets
+from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
@@ -20,6 +20,7 @@ from apps.identity.models import User
 from .models import Course, Lesson
 from .permissions import IsCourseManagerOrReadOnly
 from .scorm import build_scorm_12_package, ensure_scorm_runtime_bridge, extract_scorm_package, inspect_scorm_package
+from .scorm_convert import convert_ispring_scorm_to_native
 from .serializers import CourseSerializer, LessonSerializer
 
 
@@ -145,6 +146,17 @@ class CourseViewSet(viewsets.ModelViewSet):
             course.status = Course.Status.DRAFT
         course.save(update_fields=["version", "status", "updated_at"])
         return Response(self.get_serializer(course).data)
+
+    @action(detail=True, methods=["post"], url_path="convert-to-native")
+    def convert_to_native(self, request, pk=None):
+        course = self.get_object()
+        if course.source_format != Course.SourceFormat.SCORM_12:
+            return Response({"detail": "Этот курс уже доступен в редакторе Smartis"}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            converted = convert_ispring_scorm_to_native(course, request.user)
+        except serializers.ValidationError as exc:
+            return Response({"detail": exc.detail}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(self.get_serializer(converted).data, status=status.HTTP_201_CREATED)
 
     @staticmethod
     def _remove_scorm_content(relative_dir, keep=""):

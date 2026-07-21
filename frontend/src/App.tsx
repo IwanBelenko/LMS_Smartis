@@ -8,6 +8,7 @@ import {
   ChevronRight,
   CircleUserRound,
   Clock3,
+  Copy,
   Download,
   Eye,
   FileArchive,
@@ -621,6 +622,7 @@ function CoursesView({ token }: { token: string }) {
   const [coverPreview, setCoverPreview] = useState("");
   const [importingScorm, setImportingScorm] = useState(false);
   const [replacingScormId, setReplacingScormId] = useState<number | null>(null);
+  const [convertingScormId, setConvertingScormId] = useState<number | null>(null);
   const [exportingScormId, setExportingScormId] = useState<number | null>(null);
   const [previewCourse, setPreviewCourse] = useState<Course | null>(null);
   const [previewStep, setPreviewStep] = useState(-1);
@@ -898,6 +900,22 @@ function CoursesView({ token }: { token: string }) {
     }
   }
 
+  async function convertScorm(course: Course) {
+    setConvertingScormId(course.id);
+    setError("");
+    setNotice("");
+    try {
+      const converted = await apiRequest<Course>(`/courses/${course.id}/convert-to-native/`, token, { method: "POST" });
+      await load();
+      editCourse(converted);
+      setNotice(`Создана редактируемая копия «${converted.title}» · исходный SCORM сохранён`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось преобразовать SCORM в редактируемый курс");
+    } finally {
+      setConvertingScormId(null);
+    }
+  }
+
   async function exportScorm(course: Course) {
     setExportingScormId(course.id);
     setError("");
@@ -1161,25 +1179,36 @@ function CoursesView({ token }: { token: string }) {
                       <span><strong>{editingCourse?.scorm_original_name || "SCORM-пакет"}</strong><small>{formatFileSize(editingCourse?.scorm_size || 0)} · хранится на платформе</small></span>
                     </div>
                     {editingCourse && (
-                      <label className={replacingScormId === editingCourse.id ? "longread-upload-zone scorm-import--busy" : "longread-upload-zone"}>
-                        <span className="longread-media-icon"><Upload /></span>
-                        <strong>{replacingScormId === editingCourse.id ? "Заменяем пакет…" : "Загрузить новую версию"}</strong>
-                        <span>ZIP · курс, назначения и карточка сохранятся</span>
-                        <input
-                          type="file"
-                          accept="application/zip,.zip"
-                          disabled={replacingScormId === editingCourse.id}
-                          onChange={(event) => {
-                            const file = event.target.files?.[0];
-                            if (file) void replaceScorm(editingCourse, file);
-                            event.currentTarget.value = "";
-                          }}
-                        />
-                      </label>
+                      <div className="scorm-edit-actions">
+                        <button
+                          className="primary-button"
+                          type="button"
+                          disabled={convertingScormId === editingCourse.id}
+                          onClick={() => void convertScorm(editingCourse)}
+                        >
+                          <Copy /> {convertingScormId === editingCourse.id ? "Преобразуем…" : "Создать редактируемую копию"}
+                        </button>
+                        <p>Для лонгридов iSpring перенесём заголовки, текст, списки, вкладки и вопросы теста. Исходный SCORM останется без изменений.</p>
+                        <label className={replacingScormId === editingCourse.id ? "longread-upload-zone scorm-import--busy" : "longread-upload-zone"}>
+                          <span className="longread-media-icon"><Upload /></span>
+                          <strong>{replacingScormId === editingCourse.id ? "Заменяем пакет…" : "Загрузить новую версию ZIP"}</strong>
+                          <span>Курс, назначения и карточка сохранятся</span>
+                          <input
+                            type="file"
+                            accept="application/zip,.zip"
+                            disabled={replacingScormId === editingCourse.id}
+                            onChange={(event) => {
+                              const file = event.target.files?.[0];
+                              if (file) void replaceScorm(editingCourse, file);
+                              event.currentTarget.value = "";
+                            }}
+                          />
+                        </label>
+                      </div>
                     )}
                     <div className="longread-info-card scorm-edit-capabilities">
                       <span>Можно изменить</span><strong>Название, описание, обложку, длительность</strong>
-                      <span>Содержимое</span><strong>Через замену ZIP новой версией</strong>
+                      <span>Содержимое</span><strong>Через редактируемую копию или замену ZIP</strong>
                     </div>
                   </div>
                 ) : (
