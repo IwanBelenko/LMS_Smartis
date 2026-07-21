@@ -1625,7 +1625,7 @@ function CoursesView({ token }: { token: string }) {
               <button className="secondary-button" type="button" disabled={exportingScormId === course.id} onClick={() => void exportScorm(course)}>
                 <Download /> {exportingScormId === course.id ? "Экспорт…" : "SCORM 1.2"}
               </button>
-              <button className={course.status === "published" ? "secondary-button" : "primary-button"} type="button" onClick={() => void changePublication(course)}>
+              <button className="secondary-button" type="button" onClick={() => void changePublication(course)}>
                 {course.status === "published" ? <><CheckCircle2 /> Опубликован</> : <><PlayCircle /> Опубликовать</>}
               </button>
             </div>
