@@ -9,6 +9,7 @@ import {
   CircleUserRound,
   Clock3,
   Download,
+  Eye,
   FileArchive,
   FileText,
   GripVertical,
@@ -34,7 +35,7 @@ import {
   X,
 } from "lucide-react";
 import type { FormEvent } from "react";
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import smartisWordmarkDark from "./assets/smartis-wordmark-dark.png";
 import smartisWordmarkLight from "./assets/smartis-wordmark-light.png";
 
@@ -519,6 +520,87 @@ function chapterCountLabel(count: number) {
   return `${count} ${word}`;
 }
 
+function CoursePreviewModal({
+  course,
+  step,
+  onStep,
+  onClose,
+  scormLaunchUrl,
+  scormRuntime,
+  scormFrameRef,
+}: {
+  course: Course;
+  step: number;
+  onStep: (step: number) => void;
+  onClose: () => void;
+  scormLaunchUrl: string;
+  scormRuntime: { status: string; score: string };
+  scormFrameRef: React.RefObject<HTMLIFrameElement | null>;
+}) {
+  const lesson = step >= 0 ? course.lessons[step] : undefined;
+  const isLastStep = step >= course.lessons.length - 1;
+  return (
+    <div className="course-preview-overlay" role="dialog" aria-modal="true" aria-label={`Предпросмотр курса ${course.title}`}>
+      <section className="course-preview-modal">
+        <header className="course-preview-header">
+          <div><span>Предпросмотр</span><strong>{course.title}</strong></div>
+          {course.source_format === "scorm_12" && (
+            <div className="scorm-runtime-summary"><span>{scormRuntime.status}</span><strong>Баллы: {scormRuntime.score}</strong></div>
+          )}
+          <button className="icon-button" type="button" onClick={onClose} aria-label="Закрыть предпросмотр"><X /></button>
+        </header>
+        {course.source_format === "scorm_12" ? (
+          scormLaunchUrl ? (
+            <iframe
+              ref={scormFrameRef}
+              className="scorm-preview-frame"
+              src={scormLaunchUrl}
+              title={`SCORM: ${course.title}`}
+              sandbox="allow-scripts allow-forms allow-popups allow-downloads allow-same-origin"
+              allow="fullscreen"
+            />
+          ) : <div className="course-preview-loading">Подготавливаем SCORM-курс…</div>
+        ) : (
+          <div className="native-course-preview">
+            {!lesson ? (
+              <article
+                className={course.cover_style === "custom" && course.cover_url ? "native-preview-page native-preview-cover native-preview-cover--image" : "native-preview-page native-preview-cover"}
+                style={course.cover_style === "custom" && course.cover_url ? { backgroundImage: `linear-gradient(90deg, rgba(8,12,7,.82), rgba(8,12,7,.35)), url(${course.cover_url})` } : undefined}
+              >
+                <span className="longread-eyebrow">SMARTIS · ОБУЧЕНИЕ</span>
+                <h1>{course.title}</h1>
+                <p>{course.description || "Описание курса пока не добавлено"}</p>
+                <div className="longread-cover-meta"><span><BookOpen />{chapterCountLabel(course.lessons.length)}</span><span><Clock3 />{course.estimated_minutes} минут</span></div>
+              </article>
+            ) : (
+              <article className="native-preview-page native-preview-lesson">
+                <div className="longread-chapter-kicker"><span>Глава {step + 1}</span><span>{lessonTypeLabels[lesson.lesson_type]}</span></div>
+                <h1>{lesson.title}</h1>
+                {lesson.lesson_type === "text" ? (
+                  <div className="native-preview-content" dangerouslySetInnerHTML={{ __html: lesson.content || "<p>Содержание пока не добавлено.</p>" }} />
+                ) : lesson.lesson_type === "video" ? (
+                  lesson.video_url ? <video className="native-preview-video" src={lesson.video_url} controls /> : <div className="native-preview-placeholder"><Video /><p>Видео появится после сохранения и загрузки файла.</p></div>
+                ) : lesson.lesson_type === "scorm" ? (
+                  <div className="native-preview-placeholder"><FileArchive /><p>SCORM-пакет открывается в отдельном режиме просмотра.</p></div>
+                ) : (
+                  <div className="native-preview-placeholder"><Link2 /><p>Материал откроется в новой вкладке.</p><a className="primary-button" href={lesson.media_url} target="_blank" rel="noreferrer">Открыть материал</a></div>
+                )}
+              </article>
+            )}
+            <footer className="native-preview-navigation">
+              <button className="secondary-button" type="button" disabled={step < 0} onClick={() => onStep(step - 1)}><ChevronLeft /> Назад</button>
+              <span>{step < 0 ? "Обложка" : `${step + 1} / ${course.lessons.length}`}</span>
+              <button className="primary-button" type="button" onClick={() => isLastStep ? onClose() : onStep(step + 1)}>
+                {course.lessons.length === 0 || isLastStep ? "Завершить" : step < 0 ? "Начать" : "Далее"}<ChevronRight />
+              </button>
+            </footer>
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
 function CoursesView({ token }: { token: string }) {
   const [courses, setCourses] = useState<Course[]>([]);
   const [editingId, setEditingId] = useState<number | null | "new">(null);
@@ -539,6 +621,11 @@ function CoursesView({ token }: { token: string }) {
   const [coverPreview, setCoverPreview] = useState("");
   const [importingScorm, setImportingScorm] = useState(false);
   const [exportingScormId, setExportingScormId] = useState<number | null>(null);
+  const [previewCourse, setPreviewCourse] = useState<Course | null>(null);
+  const [previewStep, setPreviewStep] = useState(-1);
+  const [scormLaunchUrl, setScormLaunchUrl] = useState("");
+  const [scormRuntime, setScormRuntime] = useState({ status: "Не начат", score: "—" });
+  const scormFrameRef = useRef<HTMLIFrameElement>(null);
 
   async function load() {
     setLoading(true);
@@ -553,6 +640,25 @@ function CoursesView({ token }: { token: string }) {
   }
 
   useEffect(() => { void load(); }, []);
+
+  useEffect(() => {
+    if (!previewCourse || previewCourse.source_format !== "scorm_12") return undefined;
+    const handleMessage = (event: MessageEvent) => {
+      if (event.source !== scormFrameRef.current?.contentWindow || event.data?.type !== "smartis-scorm-1.2") return;
+      if (event.data.action === "initialize") {
+        setScormRuntime((current) => ({ ...current, status: "В процессе" }));
+      }
+      if (event.data.action === "set" && event.data.key === "cmi.core.lesson_status") {
+        const labels: Record<string, string> = { completed: "Завершён", passed: "Пройден", failed: "Не пройден", incomplete: "В процессе" };
+        setScormRuntime((current) => ({ ...current, status: labels[event.data.value] || event.data.value }));
+      }
+      if (event.data.action === "set" && event.data.key === "cmi.core.score.raw") {
+        setScormRuntime((current) => ({ ...current, score: event.data.value || "—" }));
+      }
+    };
+    window.addEventListener("message", handleMessage);
+    return () => window.removeEventListener("message", handleMessage);
+  }, [previewCourse]);
 
   function createCourse() {
     setEditingId("new");
@@ -802,6 +908,60 @@ function CoursesView({ token }: { token: string }) {
     }
   }
 
+  async function openCoursePreview(course: Course) {
+    setError("");
+    try {
+      let launchUrl = "";
+      if (course.source_format === "scorm_12") {
+        const launch = await apiRequest<{ launch_url: string }>(`/courses/${course.id}/scorm-launch/`, token);
+        launchUrl = launch.launch_url;
+      }
+      setScormRuntime({ status: "Не начат", score: "—" });
+      setScormLaunchUrl(launchUrl);
+      setPreviewStep(-1);
+      setPreviewCourse(course);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось открыть предпросмотр");
+    }
+  }
+
+  function previewCurrentCourse() {
+    const draftCourse: Course = {
+      ...(editingCourse || {
+        id: 0,
+        author: 0,
+        author_name: "",
+        status: "draft",
+        status_label: "Черновик",
+        version: 1,
+        updated_at: "",
+        source_format: "native",
+        scorm_identifier: "",
+        scorm_entry_point: "",
+        scorm_original_name: "",
+        scorm_size: 0,
+        cover_original_name: "",
+        cover_size: 0,
+        lessons_count: form.lessons.length,
+        lessons: form.lessons,
+      }),
+      title: form.title || "Курс без названия",
+      description: form.description,
+      estimated_minutes: form.estimated_minutes,
+      cover_style: coverStyle,
+      cover_url: coverStyle === "custom" ? coverPreview : "",
+      lessons_count: form.lessons.length,
+      lessons: form.lessons,
+    };
+    if (draftCourse.source_format === "scorm_12" && draftCourse.id) {
+      void openCoursePreview(draftCourse);
+      return;
+    }
+    setScormLaunchUrl("");
+    setPreviewStep(-1);
+    setPreviewCourse(draftCourse);
+  }
+
   const editingCourse = typeof editingId === "number"
     ? courses.find((course) => course.id === editingId)
     : undefined;
@@ -817,6 +977,18 @@ function CoursesView({ token }: { token: string }) {
     return <Type />;
   }
 
+  const previewModal = previewCourse ? (
+    <CoursePreviewModal
+      course={previewCourse}
+      step={previewStep}
+      onStep={setPreviewStep}
+      onClose={() => { setPreviewCourse(null); setScormLaunchUrl(""); }}
+      scormLaunchUrl={scormLaunchUrl}
+      scormRuntime={scormRuntime}
+      scormFrameRef={scormFrameRef}
+    />
+  ) : null;
+
   if (editingId !== null) {
     return (
       <form className="longread-editor" onSubmit={saveCourse}>
@@ -829,6 +1001,9 @@ function CoursesView({ token }: { token: string }) {
             <strong>{form.title || "Курс без названия"}</strong>
           </div>
           <div className="longread-editor__actions">
+            <button className="secondary-button" type="button" onClick={previewCurrentCourse}>
+              <Eye /> Предпросмотр
+            </button>
             {editingCourse && (
               <button className="secondary-button" type="button" onClick={() => void changePublication(editingCourse)}>
                 {editingCourse.status === "published" ? "Снять с публикации" : "Опубликовать"}
@@ -1043,6 +1218,7 @@ function CoursesView({ token }: { token: string }) {
             ) : null}
           </aside>
         </div>
+        {previewModal}
       </form>
     );
   }
@@ -1182,6 +1358,9 @@ function CoursesView({ token }: { token: string }) {
             <div className="course-meta"><span><FileText />{chapterCountLabel(course.lessons_count)}</span><span><Clock3 />{course.estimated_minutes} мин</span></div>
             <div className="course-card__footer"><span>{course.author_name}</span><span>Версия {course.version}</span></div>
             <div className="course-card__actions">
+              <button className="primary-button course-card__open-scorm" type="button" onClick={() => void openCoursePreview(course)}>
+                <Eye /> Предпросмотр
+              </button>
               <button className="secondary-button" type="button" disabled={exportingScormId === course.id} onClick={() => void exportScorm(course)}>
                 <Download /> {exportingScormId === course.id ? "Экспорт…" : "SCORM 1.2"}
               </button>
@@ -1195,6 +1374,7 @@ function CoursesView({ token }: { token: string }) {
           <section className="panel empty course-empty"><BookOpen /><h2>Создайте первый курс</h2><p>Добавьте уроки и опубликуйте курс для сотрудников.</p><button className="primary-button" type="button" onClick={createCourse}><Plus /> Создать курс</button></section>
         )}
       </section>
+      {previewModal}
     </>
   );
 }

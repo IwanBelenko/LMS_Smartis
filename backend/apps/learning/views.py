@@ -1,10 +1,14 @@
+import mimetypes
 from pathlib import Path
+from urllib.parse import quote
 
 from django.conf import settings
-from django.http import FileResponse
+from django.core import signing
+from django.http import FileResponse, HttpResponseNotFound
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.utils.text import slugify
+from django.views.decorators.clickjacking import xframe_options_exempt
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, MultiPartParser
@@ -14,7 +18,7 @@ from apps.identity.models import User
 
 from .models import Course, Lesson
 from .permissions import IsCourseManagerOrReadOnly
-from .scorm import build_scorm_12_package, extract_scorm_package, inspect_scorm_package
+from .scorm import build_scorm_12_package, ensure_scorm_runtime_bridge, extract_scorm_package, inspect_scorm_package
 from .serializers import CourseSerializer, LessonSerializer
 
 
@@ -85,6 +89,18 @@ class CourseViewSet(viewsets.ModelViewSet):
             return FileResponse(course.scorm_package.open("rb"), as_attachment=True, filename=filename)
         package = build_scorm_12_package(course)
         return FileResponse(package, as_attachment=True, filename=filename)
+
+    @action(detail=True, methods=["get"], url_path="scorm-launch")
+    def scorm_launch(self, request, pk=None):
+        course = self.get_object()
+        if course.source_format != Course.SourceFormat.SCORM_12:
+            return Response({"detail": "Этот курс не является SCORM 1.2"}, status=status.HTTP_400_BAD_REQUEST)
+        ensure_scorm_runtime_bridge(course)
+        token = signing.TimestampSigner(salt="learning.scorm-content").sign(str(course.id))
+        entry_point = quote(course.scorm_entry_point, safe="/")
+        relative_url = f"/scorm-content/{course.id}/{quote(token)}/{entry_point}"
+        origin = settings.SCORM_CONTENT_ORIGIN or request.build_absolute_uri("/").rstrip("/")
+        return Response({"launch_url": f"{origin}{relative_url}"})
 
     @action(detail=True, methods=["post"])
     def publish(self, request, pk=None):
@@ -212,3 +228,31 @@ class CourseViewSet(viewsets.ModelViewSet):
             course.status = Course.Status.DRAFT
         course.save(update_fields=["version", "status", "updated_at"])
         return Response(LessonSerializer(lesson, context=self.get_serializer_context()).data)
+
+
+@xframe_options_exempt
+def scorm_content(request, course_id, token, asset_path):
+    try:
+        signed_course_id = signing.TimestampSigner(salt="learning.scorm-content").unsign(
+            token,
+            max_age=8 * 60 * 60,
+        )
+    except signing.BadSignature:
+        return HttpResponseNotFound()
+
+    if signed_course_id != str(course_id):
+        return HttpResponseNotFound()
+
+    course = get_object_or_404(Course, pk=course_id, source_format=Course.SourceFormat.SCORM_12)
+    content_root = (Path(settings.MEDIA_ROOT) / course.scorm_content_dir).resolve()
+    requested_file = (content_root / asset_path).resolve()
+    if content_root not in requested_file.parents or not requested_file.is_file():
+        return HttpResponseNotFound()
+
+    content_type, encoding = mimetypes.guess_type(requested_file.name)
+    response = FileResponse(requested_file.open("rb"), content_type=content_type or "application/octet-stream")
+    if encoding:
+        response["Content-Encoding"] = encoding
+    response["Cache-Control"] = "private, max-age=3600"
+    response["Referrer-Policy"] = "no-referrer"
+    return response

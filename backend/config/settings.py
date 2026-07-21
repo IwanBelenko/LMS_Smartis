@@ -95,6 +95,10 @@ STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
+SCORM_CONTENT_ORIGIN = os.getenv(
+    "SCORM_CONTENT_ORIGIN",
+    "http://127.0.0.1:8000" if DEBUG else "",
+).rstrip("/")
 MAX_VIDEO_UPLOAD_SIZE = int(os.getenv("MAX_VIDEO_UPLOAD_SIZE", 500 * 1024 * 1024))
 MAX_COVER_UPLOAD_SIZE = int(os.getenv("MAX_COVER_UPLOAD_SIZE", 10 * 1024 * 1024))
 MAX_SCORM_UPLOAD_SIZE = int(os.getenv("MAX_SCORM_UPLOAD_SIZE", 1024 * 1024 * 1024))

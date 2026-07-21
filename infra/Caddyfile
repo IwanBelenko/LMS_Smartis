@@ -1,8 +1,15 @@
+http://{$SCORM_HOST:scorm.localhost} {
+	encode zstd gzip
+	handle /scorm-content/* { reverse_proxy api:8000 }
+	handle { respond 404 }
+}
+
 :80 {
 	encode zstd gzip
 	handle /api/* { reverse_proxy api:8000 }
 	handle /admin/* { reverse_proxy api:8000 }
 	handle /static/* { reverse_proxy api:8000 }
+	handle /scorm-content/* { respond 404 }
 	handle /media/* {
 		root * /srv
 		file_server

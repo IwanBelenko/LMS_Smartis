@@ -4,6 +4,8 @@ services:
     image: caddy:2.10-alpine
     restart: unless-stopped
     ports: ["${HTTP_PORT:-80}:80"]
+    environment:
+      SCORM_HOST: "${SCORM_HOST:-scorm.localhost}"
     volumes:
       - ./infra/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
@@ -26,6 +28,7 @@ services:
       DJANGO_SECRET_KEY: "${DJANGO_SECRET_KEY:-unsafe-development-key}"
       DJANGO_DEBUG: "${DJANGO_DEBUG:-true}"
       DJANGO_ALLOWED_HOSTS: "${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1,api}"
+      SCORM_CONTENT_ORIGIN: "${SCORM_CONTENT_ORIGIN:-http://scorm.localhost}"
       POSTGRES_DB: "${POSTGRES_DB:-smartis_lms}"
       POSTGRES_USER: "${POSTGRES_USER:-smartis}"
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-smartis_local_password}"

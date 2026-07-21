@@ -23,6 +23,45 @@ class ScormManifest:
     members: tuple[str, ...]
 
 
+SCORM_BRIDGE = """<script data-smartis-scorm-bridge>
+(function(){
+  if(window.API) return;
+  var values={"cmi.core.lesson_status":"not attempted","cmi.core.score.raw":"","cmi.core.session_time":"00:00:00"};
+  function send(action,key,value){try{window.parent.postMessage({type:"smartis-scorm-1.2",action:action,key:key||"",value:value||""},"*")}catch(e){}}
+  window.API={
+    LMSInitialize:function(){send("initialize");return "true"},
+    LMSFinish:function(){send("finish");return "true"},
+    LMSGetValue:function(key){return Object.prototype.hasOwnProperty.call(values,key)?values[key]:""},
+    LMSSetValue:function(key,value){values[key]=String(value);send("set",key,String(value));return "true"},
+    LMSCommit:function(){send("commit");return "true"},
+    LMSGetLastError:function(){return "0"},
+    LMSGetErrorString:function(){return "No error"},
+    LMSGetDiagnostic:function(){return ""}
+  };
+})();
+</script>"""
+
+
+def ensure_scorm_runtime_bridge(course: Course) -> Path:
+    media_root = Path(settings.MEDIA_ROOT).resolve()
+    launch_file = (media_root / course.scorm_content_dir / course.scorm_entry_point).resolve()
+    if media_root not in launch_file.parents or not launch_file.is_file():
+        raise serializers.ValidationError("Стартовый файл SCORM не найден")
+    if launch_file.suffix.lower() not in {".html", ".htm"}:
+        return launch_file
+    try:
+        launch_html = launch_file.read_text(encoding="utf-8-sig")
+        if "data-smartis-scorm-bridge" not in launch_html:
+            lower_html = launch_html.lower()
+            head_start = lower_html.find("<head")
+            insert_at = lower_html.find(">", head_start) + 1 if head_start >= 0 else 0
+            launch_html = launch_html[:insert_at] + SCORM_BRIDGE + launch_html[insert_at:]
+            launch_file.write_text(launch_html, encoding="utf-8")
+    except UnicodeError:
+        pass
+    return launch_file
+
+
 def _safe_member_name(name: str) -> str:
     if "\\" in name:
         raise serializers.ValidationError("SCORM-пакет содержит недопустимый путь")
@@ -140,6 +179,7 @@ def extract_scorm_package(course: Course, manifest: ScormManifest) -> None:
     course.scorm_content_dir = relative_dir.as_posix()
     course.scorm_entry_point = manifest.entry_point
     course.save(update_fields=["scorm_content_dir", "scorm_entry_point", "updated_at"])
+    ensure_scorm_runtime_bridge(course)
 
 
 def _lesson_markup(lesson: Lesson, asset_paths: dict[int, str]) -> str:

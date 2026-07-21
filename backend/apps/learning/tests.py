@@ -222,6 +222,20 @@ class CourseApiTests(TestCase):
             self.assertEqual(response.data["lessons"][0]["lesson_type"], "scorm")
             self.assertEqual(response.data["scorm_entry_point"], "index.html")
 
+            launch = self.client.get(f"/api/v1/courses/{response.data['id']}/scorm-launch/")
+            self.assertEqual(launch.status_code, 200)
+            launch_path = launch.data["launch_url"].removeprefix("http://127.0.0.1:8000")
+            self.assertTrue(launch_path.startswith(f"/scorm-content/{response.data['id']}/"))
+            self.assertTrue(launch.data["launch_url"].endswith("/index.html"))
+            player = self.client.get(launch_path)
+            self.assertEqual(player.status_code, 200)
+            self.assertNotIn("X-Frame-Options", player)
+            self.assertIn(b"data-smartis-scorm-bridge", b"".join(player.streaming_content))
+            launch_file = Course.objects.get(id=response.data["id"])
+            html_path = f"{media_root}/{launch_file.scorm_content_dir}/index.html"
+            with open(html_path, encoding="utf-8") as imported_html:
+                self.assertIn("data-smartis-scorm-bridge", imported_html.read())
+
     def test_native_course_is_exported_as_valid_scorm_12(self):
         self.client.force_authenticate(self.admin)
         created = self.client.post("/api/v1/courses/", self.course_payload(), format="json").data
