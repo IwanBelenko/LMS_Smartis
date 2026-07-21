@@ -1,4 +1,5 @@
 import mimetypes
+import shutil
 from pathlib import Path
 from urllib.parse import quote
 
@@ -80,6 +81,79 @@ class CourseViewSet(viewsets.ModelViewSet):
             course.delete()
             raise
         return Response(self.get_serializer(course).data, status=status.HTTP_201_CREATED)
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="replace-scorm",
+        parser_classes=[MultiPartParser, FormParser],
+    )
+    def replace_scorm(self, request, pk=None):
+        course = self.get_object()
+        if course.source_format != Course.SourceFormat.SCORM_12:
+            return Response({"detail": "Этот курс не является SCORM 1.2"}, status=status.HTTP_400_BAD_REQUEST)
+        package = request.FILES.get("package")
+        if not package:
+            return Response({"detail": "Выберите новую версию ZIP-пакета"}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            manifest = inspect_scorm_package(package)
+        except Exception as exc:
+            if hasattr(exc, "detail"):
+                return Response({"detail": exc.detail}, status=status.HTTP_400_BAD_REQUEST)
+            raise
+
+        old_package_name = course.scorm_package.name
+        old_content_dir = course.scorm_content_dir
+        old_values = {
+            "scorm_package": old_package_name,
+            "scorm_identifier": course.scorm_identifier,
+            "scorm_entry_point": course.scorm_entry_point,
+            "scorm_content_dir": old_content_dir,
+            "scorm_original_name": course.scorm_original_name,
+            "scorm_size": course.scorm_size,
+            "scorm_imported_at": course.scorm_imported_at,
+        }
+        storage = course.scorm_package.storage
+        new_package_name = ""
+        try:
+            course.scorm_package.save(Path(package.name).name, package, save=False)
+            new_package_name = course.scorm_package.name
+            course.scorm_identifier = manifest.identifier
+            course.scorm_original_name = Path(package.name).name[:255]
+            course.scorm_size = package.size
+            course.scorm_imported_at = timezone.now()
+            course.save(
+                update_fields=[
+                    "scorm_package", "scorm_identifier", "scorm_original_name", "scorm_size",
+                    "scorm_imported_at", "updated_at",
+                ]
+            )
+            extract_scorm_package(course, manifest)
+        except Exception:
+            if new_package_name and new_package_name != old_package_name:
+                storage.delete(new_package_name)
+            for field, value in old_values.items():
+                setattr(course, field, value)
+            course.save(update_fields=[*old_values, "updated_at"])
+            raise
+
+        if old_package_name and old_package_name != new_package_name:
+            storage.delete(old_package_name)
+        self._remove_scorm_content(old_content_dir, keep=course.scorm_content_dir)
+        course.version += 1
+        if course.status == Course.Status.PUBLISHED:
+            course.status = Course.Status.DRAFT
+        course.save(update_fields=["version", "status", "updated_at"])
+        return Response(self.get_serializer(course).data)
+
+    @staticmethod
+    def _remove_scorm_content(relative_dir, keep=""):
+        if not relative_dir or relative_dir == keep:
+            return
+        media_root = Path(settings.MEDIA_ROOT).resolve()
+        content_dir = (media_root / relative_dir).resolve()
+        if content_dir != media_root and media_root in content_dir.parents:
+            shutil.rmtree(content_dir, ignore_errors=True)
 
     @action(detail=True, methods=["get"], url_path="export-scorm")
     def export_scorm(self, request, pk=None):

@@ -1,6 +1,7 @@
 import io
 import tempfile
 import zipfile
+from pathlib import Path
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
@@ -11,7 +12,7 @@ from apps.identity.models import User
 from .models import Course
 
 
-def make_scorm_12_package(title="Курс из SCORM"):
+def make_scorm_12_package(title="Курс из SCORM", filename="course-scorm.zip"):
     manifest = f'''<?xml version="1.0" encoding="UTF-8"?>
 <manifest identifier="imported-course" version="1.2"
  xmlns="http://www.imsproject.org/xsd/imscp_rootv1p1p2"
@@ -24,7 +25,7 @@ def make_scorm_12_package(title="Курс из SCORM"):
     with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("imsmanifest.xml", manifest)
         archive.writestr("index.html", "<!doctype html><title>SCORM</title><p>Курс</p>")
-    return SimpleUploadedFile("course-scorm.zip", output.getvalue(), content_type="application/zip")
+    return SimpleUploadedFile(filename, output.getvalue(), content_type="application/zip")
 
 
 class CourseApiTests(TestCase):
@@ -251,6 +252,33 @@ class CourseApiTests(TestCase):
         self.assertIn("<schemaversion>1.2</schemaversion>", manifest)
         self.assertIn("LMSInitialize", player)
         self.assertIn("cmi.core.lesson_status", player)
+
+    def test_scorm_package_can_be_replaced_without_creating_a_new_course(self):
+        self.client.force_authenticate(self.admin)
+        with tempfile.TemporaryDirectory() as media_root, self.settings(MEDIA_ROOT=media_root):
+            created = self.client.post(
+                "/api/v1/courses/import-scorm/",
+                {"package": make_scorm_12_package()},
+                format="multipart",
+            ).data
+            course = Course.objects.get(id=created["id"])
+            old_package = course.scorm_package.path
+            old_content_dir = f"{media_root}/{course.scorm_content_dir}"
+
+            response = self.client.post(
+                f"/api/v1/courses/{course.id}/replace-scorm/",
+                {"package": make_scorm_12_package("Обновлённый пакет", "course-v2.zip")},
+                format="multipart",
+            )
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.data["id"], course.id)
+            self.assertEqual(response.data["title"], "Курс из SCORM")
+            self.assertEqual(response.data["scorm_original_name"], "course-v2.zip")
+            self.assertEqual(response.data["version"], 2)
+            self.assertFalse(Path(old_package).exists())
+            self.assertFalse(Path(old_content_dir).exists())
+            self.assertTrue(Path(Course.objects.get(id=course.id).scorm_package.path).exists())
 
     def test_editing_published_course_returns_it_to_draft(self):
         self.client.force_authenticate(self.admin)

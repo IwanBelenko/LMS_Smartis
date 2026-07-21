@@ -620,6 +620,7 @@ function CoursesView({ token }: { token: string }) {
   const [coverFile, setCoverFile] = useState<File | null>(null);
   const [coverPreview, setCoverPreview] = useState("");
   const [importingScorm, setImportingScorm] = useState(false);
+  const [replacingScormId, setReplacingScormId] = useState<number | null>(null);
   const [exportingScormId, setExportingScormId] = useState<number | null>(null);
   const [previewCourse, setPreviewCourse] = useState<Course | null>(null);
   const [previewStep, setPreviewStep] = useState(-1);
@@ -880,6 +881,23 @@ function CoursesView({ token }: { token: string }) {
     }
   }
 
+  async function replaceScorm(course: Course, file: File) {
+    setReplacingScormId(course.id);
+    setError("");
+    setNotice("");
+    try {
+      const body = new FormData();
+      body.append("package", file);
+      const replaced = await apiUpload<Course>(`/courses/${course.id}/replace-scorm/`, token, body);
+      setNotice(`Пакет заменён · курс обновлён до версии ${replaced.version}`);
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось заменить SCORM-пакет");
+    } finally {
+      setReplacingScormId(null);
+    }
+  }
+
   async function exportScorm(course: Course) {
     setExportingScormId(course.id);
     setError("");
@@ -997,7 +1015,7 @@ function CoursesView({ token }: { token: string }) {
             <ChevronLeft /> К курсам
           </button>
           <div className="longread-editor__identity">
-            <span>Редактор лонгрида</span>
+            <span>{editingCourse?.source_format === "scorm_12" ? "Редактор SCORM 1.2" : "Редактор лонгрида"}</span>
             <strong>{form.title || "Курс без названия"}</strong>
           </div>
           <div className="longread-editor__actions">
@@ -1022,7 +1040,9 @@ function CoursesView({ token }: { token: string }) {
           <aside className="longread-outline">
             <div className="longread-panel-heading">
               <div><span>Структура</span><strong>{chapterCountLabel(form.lessons.length)}</strong></div>
-              <button className="mini-button" type="button" onClick={addLesson} aria-label="Добавить главу"><Plus /></button>
+              {editingCourse?.source_format !== "scorm_12" && (
+                <button className="mini-button" type="button" onClick={addLesson} aria-label="Добавить главу"><Plus /></button>
+              )}
             </div>
             <nav className="longread-sections" aria-label="Структура курса">
               <button
@@ -1046,7 +1066,9 @@ function CoursesView({ token }: { token: string }) {
                 </button>
               ))}
             </nav>
-            <button className="longread-add-chapter" type="button" onClick={addLesson}><Plus /> Добавить главу</button>
+            {editingCourse?.source_format !== "scorm_12" && (
+              <button className="longread-add-chapter" type="button" onClick={addLesson}><Plus /> Добавить главу</button>
+            )}
           </aside>
 
           <main className="longread-canvas-wrap">
@@ -1138,6 +1160,27 @@ function CoursesView({ token }: { token: string }) {
                       <FileArchive />
                       <span><strong>{editingCourse?.scorm_original_name || "SCORM-пакет"}</strong><small>{formatFileSize(editingCourse?.scorm_size || 0)} · хранится на платформе</small></span>
                     </div>
+                    {editingCourse && (
+                      <label className={replacingScormId === editingCourse.id ? "longread-upload-zone scorm-import--busy" : "longread-upload-zone"}>
+                        <span className="longread-media-icon"><Upload /></span>
+                        <strong>{replacingScormId === editingCourse.id ? "Заменяем пакет…" : "Загрузить новую версию"}</strong>
+                        <span>ZIP · курс, назначения и карточка сохранятся</span>
+                        <input
+                          type="file"
+                          accept="application/zip,.zip"
+                          disabled={replacingScormId === editingCourse.id}
+                          onChange={(event) => {
+                            const file = event.target.files?.[0];
+                            if (file) void replaceScorm(editingCourse, file);
+                            event.currentTarget.value = "";
+                          }}
+                        />
+                      </label>
+                    )}
+                    <div className="longread-info-card scorm-edit-capabilities">
+                      <span>Можно изменить</span><strong>Название, описание, обложку, длительность</strong>
+                      <span>Содержимое</span><strong>Через замену ZIP новой версией</strong>
+                    </div>
                   </div>
                 ) : (
                   <div className="longread-media-editor">
@@ -1154,9 +1197,11 @@ function CoursesView({ token }: { token: string }) {
                     />
                   </div>
                 )}
-                <button className="longread-add-divider" type="button" onClick={addLesson}>
-                  <span><Plus /></span> Добавить следующую главу
-                </button>
+                {editingCourse?.source_format !== "scorm_12" && (
+                  <button className="longread-add-divider" type="button" onClick={addLesson}>
+                    <span><Plus /></span> Добавить следующую главу
+                  </button>
+                )}
               </article>
             ) : null}
           </main>
@@ -1206,14 +1251,18 @@ function CoursesView({ token }: { token: string }) {
                 </select></label>
                 <label>Время на изучение, минут<input type="number" min="1" value={activeLesson.duration_minutes} onChange={(event) => updateLesson(activeLessonIndex, { duration_minutes: Number(event.target.value) })} required /></label>
                 <label className="check-field"><input type="checkbox" checked={activeLesson.is_required} onChange={(event) => updateLesson(activeLessonIndex, { is_required: event.target.checked })} /> Обязательная глава</label>
-                <div className="longread-settings__actions">
-                  <span>Положение в курсе</span>
-                  <div>
-                    <button className="mini-button" type="button" disabled={activeLessonIndex === 0} onClick={() => moveLesson(activeLessonIndex, -1)} aria-label="Переместить выше"><ArrowUp /></button>
-                    <button className="mini-button" type="button" disabled={activeLessonIndex === form.lessons.length - 1} onClick={() => moveLesson(activeLessonIndex, 1)} aria-label="Переместить ниже"><ArrowDown /></button>
-                  </div>
-                </div>
-                <button className="longread-delete" type="button" onClick={() => removeLesson(activeLessonIndex)}><Trash2 /> Удалить главу</button>
+                {editingCourse?.source_format !== "scorm_12" && (
+                  <>
+                    <div className="longread-settings__actions">
+                      <span>Положение в курсе</span>
+                      <div>
+                        <button className="mini-button" type="button" disabled={activeLessonIndex === 0} onClick={() => moveLesson(activeLessonIndex, -1)} aria-label="Переместить выше"><ArrowUp /></button>
+                        <button className="mini-button" type="button" disabled={activeLessonIndex === form.lessons.length - 1} onClick={() => moveLesson(activeLessonIndex, 1)} aria-label="Переместить ниже"><ArrowDown /></button>
+                      </div>
+                    </div>
+                    <button className="longread-delete" type="button" onClick={() => removeLesson(activeLessonIndex)}><Trash2 /> Удалить главу</button>
+                  </>
+                )}
               </div>
             ) : null}
           </aside>
