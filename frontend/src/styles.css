@@ -73,10 +73,12 @@ svg { width: 20px; height: 20px; flex: 0 0 auto; }
 .app-shell--sidebar-closed { grid-template-columns: 0 minmax(0, 1fr); }
 .app-shell--sidebar-closed .sidebar { transform: translateX(-100%); pointer-events: none; }
 .sidebar-backdrop { display: none; }
-.brand { display: flex; align-items: center; gap: 10px; font-weight: 700; }
-.brand__mark {
-  width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center;
-  background: var(--brand); color: var(--brand-foreground);
+.brand { display: flex; align-items: center; }
+.brand__wordmark { display: block; width: 184px; max-width: 100%; height: auto; }
+.brand--login .brand__wordmark { width: 230px; }
+.visually-hidden {
+  width: 1px; height: 1px; padding: 0; margin: -1px; position: absolute; overflow: hidden;
+  clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
 }
 .nav-group { display: grid; gap: 5px; }
 .nav-group > p {

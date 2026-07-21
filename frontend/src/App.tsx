@@ -27,8 +27,18 @@ import {
 } from "lucide-react";
 import type { FormEvent } from "react";
 import { lazy, Suspense, useEffect, useState } from "react";
+import smartisWordmark from "./assets/smartis-wordmark.png";
 
 const RichTextEditor = lazy(() => import("./RichTextEditor"));
+
+function Brand({ login = false }: { login?: boolean }) {
+  return (
+    <div className={login ? "brand brand--login" : "brand"}>
+      <img className="brand__wordmark" src={smartisWordmark} alt="Smartis" />
+      <span className="visually-hidden">Smartis LMS</span>
+    </div>
+  );
+}
 
 type ViewId = "home" | "trajectory" | "ranking" | "analytics" | "users" | "courses" | "settings";
 type User = {
@@ -156,10 +166,7 @@ function LoginPage({ onLogin }: { onLogin: (token: string, user: User) => void }
   return (
     <main className="login-page">
       <section className="login-card">
-        <div className="brand brand--login">
-          <span className="brand__mark">S</span>
-          <span>Smartis LMS</span>
-        </div>
+        <Brand login />
         <div>
           <h1>Вход в систему</h1>
           <p>Используйте корпоративную почту</p>
@@ -237,7 +244,7 @@ function Sidebar({
     ));
   return (
     <aside className="sidebar" aria-hidden={!open} inert={!open}>
-      <div className="brand"><span className="brand__mark">S</span><span className="brand__name">Smartis LMS</span></div>
+      <Brand />
       <nav className="nav-group" aria-label="Обучение">
         <p>Обучение</p>
         {group(nav)}
