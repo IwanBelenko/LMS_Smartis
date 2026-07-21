@@ -1,15 +1,24 @@
 import {
+  ArrowDown,
+  ArrowUp,
   BarChart3,
   BookOpen,
+  CheckCircle2,
   ChevronRight,
   CircleUserRound,
+  Clock3,
+  FileText,
   Home,
   LogOut,
   PanelLeftClose,
   PanelLeftOpen,
+  Pencil,
+  PlayCircle,
   Plus,
   Route,
+  Save,
   Settings,
+  Trash2,
   Trophy,
   Users,
   Workflow,
@@ -32,6 +41,31 @@ type User = {
   department_name: string | null;
 };
 type Department = { id: number; name: string; code: string; is_active: boolean };
+type Lesson = {
+  id?: number;
+  title: string;
+  lesson_type: "text" | "video" | "link" | "file";
+  lesson_type_label?: string;
+  content: string;
+  media_url: string;
+  duration_minutes: number;
+  position: number;
+  is_required: boolean;
+};
+type Course = {
+  id: number;
+  title: string;
+  description: string;
+  author: number;
+  author_name: string;
+  status: "draft" | "published" | "archived";
+  status_label: string;
+  estimated_minutes: number;
+  version: number;
+  lessons_count: number;
+  lessons: Lesson[];
+  updated_at: string;
+};
 
 const API = "/api/v1";
 
@@ -163,6 +197,11 @@ function Sidebar({
   onTheme: () => void;
   onLogout: () => void;
 }) {
+  const visibleAdminNav = user.role === "admin"
+    ? adminNav
+    : user.role === "author"
+      ? adminNav.filter((item) => item.id === "courses")
+      : [];
   const group = (items: typeof nav | typeof adminNav) =>
     items.map(({ id, label, icon: Icon }) => (
       <button
@@ -182,10 +221,12 @@ function Sidebar({
         <p>Обучение</p>
         {group(nav)}
       </nav>
-      <nav className="nav-group" aria-label="Администрирование">
-        <p>Администрирование</p>
-        {group(adminNav)}
-      </nav>
+      {visibleAdminNav.length > 0 && (
+        <nav className="nav-group" aria-label="Администрирование">
+          <p>Администрирование</p>
+          {group(visibleAdminNav)}
+        </nav>
+      )}
       <div className="sidebar__footer">
         <div className="user-chip">
           <CircleUserRound aria-hidden="true" />
@@ -391,6 +432,248 @@ function UsersView({ token }: { token: string }) {
   );
 }
 
+const lessonTypeLabels: Record<Lesson["lesson_type"], string> = {
+  text: "Текст",
+  video: "Видео",
+  link: "Ссылка",
+  file: "Файл",
+};
+
+function newLesson(position: number): Lesson {
+  return {
+    title: "",
+    lesson_type: "text",
+    content: "",
+    media_url: "",
+    duration_minutes: 5,
+    position,
+    is_required: true,
+  };
+}
+
+function CoursesView({ token }: { token: string }) {
+  const [courses, setCourses] = useState<Course[]>([]);
+  const [editingId, setEditingId] = useState<number | null | "new">(null);
+  const [form, setForm] = useState({
+    title: "",
+    description: "",
+    estimated_minutes: 30,
+    lessons: [newLesson(0)],
+  });
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+
+  async function load() {
+    setLoading(true);
+    try {
+      setCourses(await apiRequest<Course[]>("/courses/", token));
+      setError("");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось загрузить курсы");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { void load(); }, []);
+
+  function createCourse() {
+    setEditingId("new");
+    setForm({ title: "", description: "", estimated_minutes: 30, lessons: [newLesson(0)] });
+    setError("");
+    setNotice("");
+  }
+
+  function editCourse(course: Course) {
+    setEditingId(course.id);
+    setForm({
+      title: course.title,
+      description: course.description,
+      estimated_minutes: course.estimated_minutes,
+      lessons: course.lessons.map((lesson, position) => ({ ...lesson, position })),
+    });
+    setError("");
+    setNotice("");
+  }
+
+  function updateLesson(index: number, update: Partial<Lesson>) {
+    setForm((current) => ({
+      ...current,
+      lessons: current.lessons.map((lesson, lessonIndex) =>
+        lessonIndex === index ? { ...lesson, ...update } : lesson,
+      ),
+    }));
+  }
+
+  function removeLesson(index: number) {
+    setForm((current) => ({
+      ...current,
+      lessons: current.lessons.filter((_, lessonIndex) => lessonIndex !== index)
+        .map((lesson, position) => ({ ...lesson, position })),
+    }));
+  }
+
+  function moveLesson(index: number, direction: -1 | 1) {
+    setForm((current) => {
+      const target = index + direction;
+      if (target < 0 || target >= current.lessons.length) return current;
+      const lessons = [...current.lessons];
+      const [lesson] = lessons.splice(index, 1);
+      lessons.splice(target, 0, lesson);
+      return { ...current, lessons: lessons.map((item, position) => ({ ...item, position })) };
+    });
+  }
+
+  async function saveCourse(event: FormEvent) {
+    event.preventDefault();
+    if (!form.lessons.length) {
+      setError("Добавьте хотя бы один урок");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    setNotice("");
+    try {
+      const isNew = editingId === "new";
+      const saved = await apiRequest<Course>(
+        isNew ? "/courses/" : `/courses/${editingId}/`,
+        token,
+        {
+          method: isNew ? "POST" : "PATCH",
+          body: JSON.stringify({
+            ...form,
+            lessons: form.lessons.map((lesson, position) => ({ ...lesson, position })),
+          }),
+        },
+      );
+      setEditingId(saved.id);
+      setForm({
+        title: saved.title,
+        description: saved.description,
+        estimated_minutes: saved.estimated_minutes,
+        lessons: saved.lessons,
+      });
+      setNotice(isNew ? "Курс создан и сохранён как черновик" : "Изменения сохранены");
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось сохранить курс");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function changePublication(course: Course) {
+    setError("");
+    setNotice("");
+    try {
+      const action = course.status === "published" ? "unpublish" : "publish";
+      const saved = await apiRequest<Course>(`/courses/${course.id}/${action}/`, token, { method: "POST" });
+      setNotice(saved.status === "published" ? "Курс опубликован" : "Курс возвращён в черновики");
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось изменить статус курса");
+    }
+  }
+
+  const editingCourse = typeof editingId === "number"
+    ? courses.find((course) => course.id === editingId)
+    : undefined;
+
+  return (
+    <>
+      <PageHeader
+        title="Курсы"
+        subtitle="Создание, редактирование и публикация учебных материалов"
+        action={
+          <button className="primary-button" type="button" onClick={createCourse}>
+            <Plus /> Создать курс
+          </button>
+        }
+      />
+      {error && <p className="form-error">{error}</p>}
+      {notice && <p className="form-notice"><CheckCircle2 />{notice}</p>}
+      {editingId !== null && (
+        <form className="panel course-editor" onSubmit={saveCourse}>
+          <div className="section-heading">
+            <div>
+              <h2>{editingId === "new" ? "Новый курс" : "Редактирование курса"}</h2>
+              <p>{editingCourse ? `${editingCourse.status_label} · версия ${editingCourse.version}` : "Заполните основную информацию"}</p>
+            </div>
+            <button className="icon-button" type="button" onClick={() => setEditingId(null)} aria-label="Закрыть редактор"><X /></button>
+          </div>
+          <div className="course-fields">
+            <label>Название курса<input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} placeholder="Например, Основы продукта Smartis" required /></label>
+            <label>Длительность, минут<input type="number" min="1" value={form.estimated_minutes} onChange={(event) => setForm({ ...form, estimated_minutes: Number(event.target.value) })} required /></label>
+            <label className="field-wide">Краткое описание<textarea value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} placeholder="Что сотрудник узнает и чему научится" /></label>
+          </div>
+          <div className="lesson-heading">
+            <div><h2>Уроки</h2><p>{form.lessons.length} в курсе</p></div>
+            <button className="secondary-button" type="button" onClick={() => setForm({ ...form, lessons: [...form.lessons, newLesson(form.lessons.length)] })}><Plus /> Добавить урок</button>
+          </div>
+          <div className="lesson-list">
+            {form.lessons.map((lesson, index) => (
+              <article className="lesson-editor" key={lesson.id ?? `new-${index}`}>
+                <div className="lesson-editor__top">
+                  <span className="lesson-number">{index + 1}</span>
+                  <strong>{lesson.title || "Новый урок"}</strong>
+                  <div className="lesson-actions">
+                    <button className="mini-button" type="button" disabled={index === 0} onClick={() => moveLesson(index, -1)} aria-label="Переместить выше"><ArrowUp /></button>
+                    <button className="mini-button" type="button" disabled={index === form.lessons.length - 1} onClick={() => moveLesson(index, 1)} aria-label="Переместить ниже"><ArrowDown /></button>
+                    <button className="mini-button mini-button--danger" type="button" onClick={() => removeLesson(index)} aria-label="Удалить урок"><Trash2 /></button>
+                  </div>
+                </div>
+                <div className="lesson-fields">
+                  <label>Название<input value={lesson.title} onChange={(event) => updateLesson(index, { title: event.target.value })} required /></label>
+                  <label>Формат<select value={lesson.lesson_type} onChange={(event) => updateLesson(index, { lesson_type: event.target.value as Lesson["lesson_type"] })}>
+                    {Object.entries(lessonTypeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                  </select></label>
+                  <label>Минут<input type="number" min="1" value={lesson.duration_minutes} onChange={(event) => updateLesson(index, { duration_minutes: Number(event.target.value) })} required /></label>
+                  {lesson.lesson_type === "text" ? (
+                    <label className="field-wide">Содержание<textarea value={lesson.content} onChange={(event) => updateLesson(index, { content: event.target.value })} placeholder="Текст урока" /></label>
+                  ) : (
+                    <label className="field-wide">Ссылка на материал<input type="url" value={lesson.media_url} onChange={(event) => updateLesson(index, { media_url: event.target.value })} placeholder="https://…" required /></label>
+                  )}
+                  <label className="check-field"><input type="checkbox" checked={lesson.is_required} onChange={(event) => updateLesson(index, { is_required: event.target.checked })} /> Обязательный урок</label>
+                </div>
+              </article>
+            ))}
+            {!form.lessons.length && <div className="empty-lessons"><FileText /><p>В курсе пока нет уроков</p></div>}
+          </div>
+          <div className="editor-footer">
+            <button className="primary-button" type="submit" disabled={saving}><Save />{saving ? "Сохраняем…" : "Сохранить"}</button>
+            {editingCourse && (
+              <button className="secondary-button" type="button" onClick={() => void changePublication(editingCourse)}>
+                {editingCourse.status === "published" ? "Снять с публикации" : "Опубликовать"}
+              </button>
+            )}
+          </div>
+        </form>
+      )}
+      <section className="course-grid" aria-busy={loading}>
+        {courses.map((course) => (
+          <article className="panel course-card" key={course.id}>
+            <div className="course-card__top">
+              <span className={`status status--${course.status}`}>{course.status_label}</span>
+              <button className="icon-button" type="button" onClick={() => editCourse(course)} aria-label={`Редактировать ${course.title}`}><Pencil /></button>
+            </div>
+            <div><h2>{course.title}</h2><p>{course.description || "Описание пока не добавлено"}</p></div>
+            <div className="course-meta"><span><FileText />{course.lessons_count} уроков</span><span><Clock3 />{course.estimated_minutes} мин</span></div>
+            <div className="course-card__footer"><span>{course.author_name}</span><span>Версия {course.version}</span></div>
+            <button className={course.status === "published" ? "secondary-button" : "primary-button"} type="button" onClick={() => void changePublication(course)}>
+              {course.status === "published" ? <><CheckCircle2 /> Опубликован</> : <><PlayCircle /> Опубликовать</>}
+            </button>
+          </article>
+        ))}
+        {!loading && !courses.length && (
+          <section className="panel empty course-empty"><BookOpen /><h2>Создайте первый курс</h2><p>Добавьте уроки и опубликуйте курс для сотрудников.</p><button className="primary-button" type="button" onClick={createCourse}><Plus /> Создать курс</button></section>
+        )}
+      </section>
+    </>
+  );
+}
+
 function Placeholder({ active }: { active: ViewId }) {
   const labels: Record<string, string> = {
     trajectory: "Траектория обучения", ranking: "Рейтинг", analytics: "Аналитика дэйликов",
@@ -483,7 +766,15 @@ function App() {
             {sidebarOpen ? <PanelLeftClose aria-hidden="true" /> : <PanelLeftOpen aria-hidden="true" />}
           </button>
         </div>
-        {active === "home" ? <HomeView user={user} /> : active === "users" ? <UsersView token={token} /> : <Placeholder active={active} />}
+        {active === "home" ? (
+          <HomeView user={user} />
+        ) : active === "users" ? (
+          <UsersView token={token} />
+        ) : active === "courses" ? (
+          <CoursesView token={token} />
+        ) : (
+          <Placeholder active={active} />
+        )}
       </main>
     </div>
   );
