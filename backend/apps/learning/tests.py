@@ -286,6 +286,7 @@ class CourseApiTests(TestCase):
     def test_ispring_scorm_can_be_converted_to_editable_native_copy(self):
         self.client.force_authenticate(self.admin)
         ispring_document = {
+            "metadata_url": "https://example.com/additional-guide",
             "content": {
                 "c": {
                     "B": {
@@ -295,7 +296,14 @@ class CourseApiTests(TestCase):
                                     "o": ["heading", "paragraph", "quiz"],
                                     "B": {
                                         "heading": {"t": "p", "v": "h2", "c": [{"t": "1. Введение"}]},
-                                        "paragraph": {"t": "p", "v": "text", "c": [{"t": "Редактируемый текст"}]},
+                                        "paragraph": {
+                                            "t": "p",
+                                            "v": "text",
+                                            "c": [
+                                                {"t": "Редактируемый текст и "},
+                                                {"t": "документация", "m": {"#": ["https://example.com/docs"]}},
+                                            ],
+                                        },
                                         "quiz": {
                                             "t": "Q",
                                             "dt": {
@@ -345,6 +353,10 @@ class CourseApiTests(TestCase):
             self.assertEqual(response.data["lessons"][0]["title"], "1. Введение")
             self.assertIn("Редактируемый текст", response.data["lessons"][0]["content"])
             self.assertIn("Вопрос?", response.data["lessons"][0]["content"])
+            all_content = "".join(lesson["content"] for lesson in response.data["lessons"])
+            self.assertIn('href="https://example.com/docs"', all_content)
+            self.assertIn('href="https://example.com/additional-guide"', all_content)
+            self.assertEqual(response.data["lessons"][-1]["title"], "Ссылки из исходного курса")
             self.assertEqual(Course.objects.filter(id=imported["id"], source_format="scorm_12").count(), 1)
 
     def test_editing_published_course_returns_it_to_draft(self):

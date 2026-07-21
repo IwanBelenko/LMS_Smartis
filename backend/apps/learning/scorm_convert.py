@@ -1,5 +1,6 @@
 import html
 import json
+from urllib.parse import urlsplit
 from pathlib import Path
 
 from django.conf import settings
@@ -27,6 +28,51 @@ def _plain_text(value) -> str:
             for key in block_store.get("o", [])
         )
     return ""
+
+
+def _safe_url(value) -> str:
+    if not isinstance(value, str):
+        return ""
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        return ""
+    return value if parsed.scheme in {"http", "https"} and parsed.netloc else ""
+
+
+def _rich_text(value) -> str:
+    characters = value.get("c", []) if isinstance(value, dict) else []
+    if not isinstance(characters, list):
+        return html.escape(_plain_text(value))
+    parts = []
+    active_url = ""
+    for character in characters:
+        if not isinstance(character, dict):
+            continue
+        text = str(character.get("t", ""))
+        marks = character.get("m", {}).get("#", []) if isinstance(character.get("m"), dict) else []
+        url = next((_safe_url(item) for item in marks if _safe_url(item)), "") if isinstance(marks, list) else ""
+        if url != active_url:
+            if active_url:
+                parts.append("</a>")
+            if url:
+                parts.append(
+                    f'<a href="{html.escape(url, quote=True)}" target="_blank" rel="noopener noreferrer">'
+                )
+            active_url = url
+        parts.append(html.escape(text))
+    if active_url:
+        parts.append("</a>")
+    return "".join(parts)
+
+
+def _collect_urls(value) -> set[str]:
+    if isinstance(value, dict):
+        return set().union(*(_collect_urls(item) for item in value.values())) if value else set()
+    if isinstance(value, list):
+        return set().union(*(_collect_urls(item) for item in value)) if value else set()
+    url = _safe_url(value)
+    return {url} if url else set()
 
 
 def _render_quiz(block) -> str:
@@ -65,15 +111,15 @@ def _render_store(store) -> str:
             if not list_open:
                 parts.append("<ul>")
                 list_open = True
-            parts.append(f"<li>{html.escape(text)}</li>")
+            parts.append(f"<li>{_rich_text(block) or html.escape(text)}</li>")
             continue
         close_list()
         if block_type == "p":
             tag = block.get("v") if block.get("v") in {"h1", "h2", "h3", "h4"} else "p"
             if text:
-                parts.append(f"<{tag}>{html.escape(text)}</{tag}>")
+                parts.append(f"<{tag}>{_rich_text(block) or html.escape(text)}</{tag}>")
         elif block_type == "n" and text:
-            parts.append(f"<blockquote>{html.escape(text)}</blockquote>")
+            parts.append(f"<blockquote>{_rich_text(block) or html.escape(text)}</blockquote>")
         elif block_type == "c":
             parts.append("<p><em>Изображение сохранено в исходной SCORM-версии курса.</em></p>")
         elif block_type in {"ac", "tb"}:
@@ -129,11 +175,18 @@ def _ispring_sections(document) -> list[tuple[str, str]]:
     flush()
     if not sections:
         raise serializers.ValidationError("В лонгриде iSpring не найдено редактируемое содержимое")
+    source_urls = sorted(_collect_urls(document))
+    if source_urls:
+        links = "".join(
+            f'<li><a href="{html.escape(url, quote=True)}" target="_blank" '
+            f'rel="noopener noreferrer">{html.escape(url)}</a></li>'
+            for url in source_urls
+        )
+        sections.append(("Ссылки из исходного курса", f"<p>Все адреса, найденные в исходном пакете:</p><ul>{links}</ul>"))
     return sections
 
 
-@transaction.atomic
-def convert_ispring_scorm_to_native(source_course: Course, author) -> Course:
+def extract_ispring_sections(source_course: Course) -> list[tuple[str, str]]:
     content_root = (Path(settings.MEDIA_ROOT) / source_course.scorm_content_dir).resolve()
     media_root = Path(settings.MEDIA_ROOT).resolve()
     if media_root not in content_root.parents or not content_root.is_dir():
@@ -143,14 +196,17 @@ def convert_ispring_scorm_to_native(source_course: Course, author) -> Course:
     for data_file in data_files:
         try:
             document = json.loads(data_file.read_text(encoding="utf-8-sig"))
-            sections = _ispring_sections(document)
-            break
+            return _ispring_sections(document)
         except (UnicodeError, json.JSONDecodeError, serializers.ValidationError):
             continue
-    else:
-        raise serializers.ValidationError(
-            "Автоматическое преобразование пока поддерживает лонгриды iSpring, подобные MacroData"
-        )
+    raise serializers.ValidationError(
+        "Автоматическое преобразование пока поддерживает лонгриды iSpring, подобные MacroData"
+    )
+
+
+@transaction.atomic
+def convert_ispring_scorm_to_native(source_course: Course, author) -> Course:
+    sections = extract_ispring_sections(source_course)
 
     converted = Course.objects.create(
         title=f"{source_course.title} — редактируемая копия"[:220],
