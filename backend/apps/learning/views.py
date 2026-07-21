@@ -60,6 +60,55 @@ class CourseViewSet(viewsets.ModelViewSet):
     @action(
         detail=True,
         methods=["post", "delete"],
+        url_path="cover",
+        parser_classes=[MultiPartParser, FormParser],
+    )
+    def cover(self, request, pk=None):
+        course = self.get_object()
+
+        if request.method == "DELETE":
+            if course.cover_file:
+                course.cover_file.delete(save=False)
+            course.cover_file = ""
+            course.cover_original_name = ""
+            course.cover_size = 0
+            course.cover_uploaded_at = None
+            course.cover_style = Course.CoverStyle.STANDARD
+        else:
+            cover = request.FILES.get("cover")
+            if not cover:
+                return Response({"detail": "Выберите изображение для обложки"}, status=status.HTTP_400_BAD_REQUEST)
+            suffix = Path(cover.name).suffix.lower()
+            allowed_suffixes = {".jpg", ".jpeg", ".png", ".webp"}
+            allowed_types = {"image/jpeg", "image/png", "image/webp"}
+            if suffix not in allowed_suffixes or cover.content_type not in allowed_types:
+                return Response(
+                    {"detail": "Для обложки поддерживаются JPG, PNG и WebP"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if cover.size > settings.MAX_COVER_UPLOAD_SIZE:
+                max_mb = settings.MAX_COVER_UPLOAD_SIZE // (1024 * 1024)
+                return Response(
+                    {"detail": f"Размер обложки не должен превышать {max_mb} МБ"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if course.cover_file:
+                course.cover_file.delete(save=False)
+            course.cover_file = cover
+            course.cover_original_name = Path(cover.name).name[:255]
+            course.cover_size = cover.size
+            course.cover_uploaded_at = timezone.now()
+            course.cover_style = Course.CoverStyle.CUSTOM
+
+        course.version += 1
+        if course.status == Course.Status.PUBLISHED:
+            course.status = Course.Status.DRAFT
+        course.save()
+        return Response(self.get_serializer(course).data)
+
+    @action(
+        detail=True,
+        methods=["post", "delete"],
         url_path=r"lessons/(?P<lesson_id>\d+)/video",
         parser_classes=[MultiPartParser, FormParser],
     )

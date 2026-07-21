@@ -72,6 +72,7 @@ class CourseSerializer(serializers.ModelSerializer):
     author_name = serializers.SerializerMethodField()
     status_label = serializers.CharField(source="get_status_display", read_only=True)
     lessons_count = serializers.IntegerField(source="lessons.count", read_only=True)
+    cover_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Course
@@ -79,6 +80,11 @@ class CourseSerializer(serializers.ModelSerializer):
             "id",
             "title",
             "description",
+            "cover_style",
+            "cover_url",
+            "cover_original_name",
+            "cover_size",
+            "cover_uploaded_at",
             "author",
             "author_name",
             "status",
@@ -99,10 +105,20 @@ class CourseSerializer(serializers.ModelSerializer):
             "published_at",
             "created_at",
             "updated_at",
+            "cover_url",
+            "cover_original_name",
+            "cover_size",
+            "cover_uploaded_at",
         ]
 
     def get_author_name(self, obj):
         return obj.author.get_full_name() or obj.author.email
+
+    def get_cover_url(self, obj):
+        if not obj.cover_file:
+            return ""
+        request = self.context.get("request")
+        return request.build_absolute_uri(obj.cover_file.url) if request else obj.cover_file.url
 
     def validate_lessons(self, lessons):
         positions = [lesson.get("position", index) for index, lesson in enumerate(lessons)]

@@ -125,7 +125,7 @@ svg { width: 20px; height: 20px; flex: 0 0 auto; }
   min-width: 0; padding: 32px clamp(20px, 4vw, 48px) 48px;
   display: flex; flex-direction: column; gap: 22px;
 }
-.main-content:has(.longread-editor) { padding-right: 20px; padding-left: 20px; }
+.main-content:has(.longread-editor) { padding-right: 12px; padding-left: 12px; }
 .app-toolbar { min-height: 40px; display: flex; align-items: center; }
 .menu-button { background: var(--surface); box-shadow: var(--shadow); }
 .page-header, .section-heading {
@@ -300,8 +300,8 @@ td:first-child span { color: var(--muted); font-size: 0.8rem; }
 .editor-footer { display: flex; align-items: center; gap: 10px; padding-top: 4px; }
 .longread-editor { display: grid; gap: 14px; }
 .longread-editor__topbar {
-  min-height: 68px; padding: 11px 14px; border: 1px solid var(--border); border-radius: 16px;
-  display: grid; grid-template-columns: minmax(150px, 1fr) auto minmax(240px, 1fr); align-items: center; gap: 16px;
+  min-height: 60px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 11px;
+  display: grid; grid-template-columns: minmax(140px, 1fr) auto minmax(230px, 1fr); align-items: center; gap: 8px;
   background: var(--surface); box-shadow: var(--shadow);
 }
 .longread-back {
@@ -315,23 +315,23 @@ td:first-child span { color: var(--muted); font-size: 0.8rem; }
 .longread-editor__actions { display: flex; justify-content: flex-end; gap: 8px; }
 .longread-message { margin: 0; }
 .longread-workspace {
-  min-width: 0; display: grid; grid-template-columns: 190px minmax(500px, 1fr) 220px; align-items: start; gap: 14px;
+  min-width: 0; display: grid; grid-template-columns: 170px minmax(580px, 1fr) 200px; align-items: start; gap: 6px;
 }
 .longread-outline, .longread-settings {
-  position: sticky; top: 18px; border: 1px solid var(--border); border-radius: 14px;
+  position: sticky; top: 12px; border: 1px solid var(--border); border-radius: 10px;
   background: var(--surface); box-shadow: var(--shadow); overflow: hidden;
 }
 .longread-panel-heading {
-  min-height: 64px; padding: 12px 13px; border-bottom: 1px solid var(--border);
+  min-height: 52px; padding: 8px 9px; border-bottom: 1px solid var(--border);
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
 }
 .longread-panel-heading > div { display: grid; gap: 2px; }
 .longread-panel-heading span { color: var(--muted); font-size: 0.72rem; font-weight: 750; letter-spacing: 0.07em; text-transform: uppercase; }
 .longread-panel-heading strong { font-size: 0.92rem; }
 .longread-panel-heading > svg { width: 18px; color: var(--muted); }
-.longread-sections { padding: 8px; display: grid; gap: 4px; }
+.longread-sections { padding: 5px; display: grid; gap: 2px; }
 .longread-section {
-  width: 100%; min-width: 0; min-height: 56px; padding: 8px; border: 1px solid transparent; border-radius: 10px;
+  width: 100%; min-width: 0; min-height: 50px; padding: 6px; border: 1px solid transparent; border-radius: 8px;
   display: grid; grid-template-columns: 24px minmax(0, 1fr); align-items: center; gap: 7px;
   background: transparent; color: var(--foreground); text-align: left; cursor: pointer;
 }
@@ -348,22 +348,29 @@ td:first-child span { color: var(--muted); font-size: 0.8rem; }
 .longread-section__icon svg { width: 14px; }
 .longread-section__grip { display: none; width: 14px; color: var(--muted); }
 .longread-add-chapter {
-  width: calc(100% - 16px); min-height: 38px; margin: 0 8px 8px; padding: 8px; border: 1px dashed var(--border); border-radius: 9px;
+  width: calc(100% - 10px); min-height: 36px; margin: 0 5px 5px; padding: 7px; border: 1px dashed var(--border); border-radius: 8px;
   display: flex; align-items: center; justify-content: center; gap: 6px; background: transparent; color: var(--muted); cursor: pointer;
 }
 .longread-add-chapter:hover { border-color: var(--brand); color: var(--foreground); background: var(--surface-soft); }
 .longread-add-chapter svg { width: 17px; }
 .longread-canvas-wrap {
-  min-width: 0; min-height: 760px; padding: clamp(14px, 2vw, 28px); border: 1px solid var(--border); border-radius: 16px;
+  min-width: 0; min-height: 740px; padding: 6px; border: 1px solid var(--border); border-radius: 10px;
   display: flex; justify-content: center; background: var(--surface-soft);
 }
 .longread-page {
-  width: min(760px, 100%); min-height: 680px; padding: clamp(32px, 3vw, 50px);
-  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent); border-radius: 12px;
+  width: min(900px, 100%); min-height: 720px; padding: clamp(28px, 2.5vw, 40px);
+  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent); border-radius: 8px;
   background: var(--surface); box-shadow: 0 16px 50px rgba(22, 31, 17, 0.12);
 }
 :root[data-theme="dark"] .longread-page { box-shadow: 0 18px 55px rgba(0, 0, 0, 0.32); }
-.longread-page--cover { min-height: 680px; position: relative; overflow: hidden; display: flex; flex-direction: column; justify-content: center; }
+.longread-page--cover { min-height: 720px; position: relative; overflow: hidden; display: flex; flex-direction: column; justify-content: center; }
+.longread-cover-content { position: relative; z-index: 2; display: flex; flex-direction: column; justify-content: center; }
+.longread-cover-image { position: absolute; inset: 0; z-index: 0; width: 100%; height: 100%; object-fit: cover; }
+.longread-page--custom-cover::before { content: ""; position: absolute; inset: 0; z-index: 1; background: linear-gradient(90deg, rgba(8, 12, 7, 0.82), rgba(8, 12, 7, 0.48) 65%, rgba(8, 12, 7, 0.22)); }
+.longread-page--custom-cover, .longread-page--custom-cover .longread-title-input, .longread-page--custom-cover .longread-lead-input { color: #fff; }
+.longread-page--custom-cover .longread-eyebrow { color: #b5dc72; }
+.longread-page--custom-cover .longread-cover-meta { color: #edf3e9; }
+.longread-page--custom-cover .longread-cover-decoration { display: none; }
 .longread-eyebrow, .longread-chapter-kicker {
   color: var(--brand-hover); font-size: 0.74rem; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase;
 }
@@ -417,8 +424,20 @@ td:first-child span { color: var(--muted); font-size: 0.8rem; }
 .longread-add-divider span { width: 32px; height: 32px; border: 1px solid var(--border); border-radius: 50%; display: grid; place-items: center; background: var(--surface); }
 .longread-add-divider svg { width: 16px; }
 .longread-add-divider:hover { color: var(--foreground); }
-.longread-settings__body { padding: 14px; display: grid; gap: 16px; }
+.longread-settings__body { padding: 10px; display: grid; gap: 12px; }
 .longread-settings__body .check-field { grid-column: auto; }
+.longread-cover-setting { display: grid; gap: 7px; }
+.longread-cover-toggle { padding: 3px; border: 1px solid var(--border); border-radius: 8px; display: grid; grid-template-columns: 1fr 1fr; gap: 3px; background: var(--surface-soft); }
+.longread-cover-option { min-height: 32px; padding: 5px 6px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-size: 0.72rem; font-weight: 750; cursor: pointer; }
+.longread-cover-option--active { background: var(--surface); color: var(--foreground); box-shadow: 0 2px 7px rgba(22, 31, 17, 0.1); }
+.longread-cover-upload { min-width: 0; padding: 9px; border: 1px dashed var(--border); border-radius: 8px; display: flex; align-items: center; gap: 8px; background: var(--surface-soft); cursor: pointer; }
+.longread-cover-upload:hover { border-color: var(--brand); }
+.longread-cover-upload > svg { width: 18px; color: var(--brand); }
+.longread-cover-upload > span { min-width: 0; display: grid; gap: 2px; }
+.longread-cover-upload strong, .longread-cover-upload small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.longread-cover-upload strong { color: var(--foreground); font-size: 0.72rem; }
+.longread-cover-upload small { color: var(--muted); font-size: 0.64rem; }
+.longread-cover-upload input { display: none; }
 .longread-info-card { padding: 12px; border: 1px solid var(--border); border-radius: 10px; display: grid; grid-template-columns: 1fr auto; gap: 9px; background: var(--surface-soft); font-size: 0.8rem; }
 .longread-info-card span { color: var(--muted); }
 .longread-help { color: var(--muted); font-size: 0.78rem; line-height: 1.5; }

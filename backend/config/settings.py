@@ -96,6 +96,7 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 MAX_VIDEO_UPLOAD_SIZE = int(os.getenv("MAX_VIDEO_UPLOAD_SIZE", 500 * 1024 * 1024))
+MAX_COVER_UPLOAD_SIZE = int(os.getenv("MAX_COVER_UPLOAD_SIZE", 10 * 1024 * 1024))
 FILE_UPLOAD_MAX_MEMORY_SIZE = 5 * 1024 * 1024
 STORAGES = {
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},

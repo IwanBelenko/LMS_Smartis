@@ -169,6 +169,27 @@ class CourseApiTests(TestCase):
             response = self.client.post(f"/api/v1/courses/{course_id}/publish/")
             self.assertEqual(response.status_code, 200)
 
+    def test_custom_cover_is_uploaded_and_can_be_reset(self):
+        self.client.force_authenticate(self.admin)
+        with tempfile.TemporaryDirectory() as media_root, self.settings(MEDIA_ROOT=media_root):
+            created = self.client.post("/api/v1/courses/", self.course_payload(), format="json").data
+            cover = SimpleUploadedFile("smartis-cover.png", b"fake-image-content", content_type="image/png")
+
+            response = self.client.post(
+                f"/api/v1/courses/{created['id']}/cover/",
+                {"cover": cover},
+                format="multipart",
+            )
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.data["cover_style"], Course.CoverStyle.CUSTOM)
+            self.assertEqual(response.data["cover_original_name"], "smartis-cover.png")
+            self.assertTrue(response.data["cover_url"].endswith(".png"))
+
+            response = self.client.delete(f"/api/v1/courses/{created['id']}/cover/")
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.data["cover_style"], Course.CoverStyle.STANDARD)
+            self.assertEqual(response.data["cover_url"], "")
+
     def test_editing_published_course_returns_it_to_draft(self):
         self.client.force_authenticate(self.admin)
         created = self.client.post("/api/v1/courses/", self.course_payload(), format="json").data

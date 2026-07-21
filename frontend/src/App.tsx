@@ -82,6 +82,11 @@ type Course = {
   id: number;
   title: string;
   description: string;
+  cover_style: "standard" | "custom";
+  cover_url: string;
+  cover_original_name: string;
+  cover_size: number;
+  cover_uploaded_at?: string | null;
   author: number;
   author_name: string;
   status: "draft" | "published" | "archived";
@@ -520,6 +525,9 @@ function CoursesView({ token }: { token: string }) {
   const [notice, setNotice] = useState("");
   const [videoFiles, setVideoFiles] = useState<Record<string, File>>({});
   const [activeSection, setActiveSection] = useState<string>("cover");
+  const [coverStyle, setCoverStyle] = useState<"standard" | "custom">("standard");
+  const [coverFile, setCoverFile] = useState<File | null>(null);
+  const [coverPreview, setCoverPreview] = useState("");
 
   async function load() {
     setLoading(true);
@@ -542,6 +550,9 @@ function CoursesView({ token }: { token: string }) {
     setNotice("");
     setVideoFiles({});
     setActiveSection("cover");
+    setCoverStyle("standard");
+    setCoverFile(null);
+    setCoverPreview("");
   }
 
   function editCourse(course: Course) {
@@ -560,6 +571,9 @@ function CoursesView({ token }: { token: string }) {
     setNotice("");
     setVideoFiles({});
     setActiveSection("cover");
+    setCoverStyle(course.cover_style || "standard");
+    setCoverFile(null);
+    setCoverPreview(course.cover_url || "");
   }
 
   function addLesson() {
@@ -624,6 +638,11 @@ function CoursesView({ token }: { token: string }) {
       setError("Добавьте название главы");
       return;
     }
+    if (coverStyle === "custom" && !coverFile && !coverPreview) {
+      setActiveSection("cover");
+      setError("Загрузите изображение для своей обложки");
+      return;
+    }
     setSaving(true);
     setError("");
     setNotice("");
@@ -634,13 +653,14 @@ function CoursesView({ token }: { token: string }) {
         clientKey: lesson.client_key,
         file: videoFiles[lesson.client_key],
       })).filter((item) => item.file);
-      const saved = await apiRequest<Course>(
+      let saved = await apiRequest<Course>(
         isNew ? "/courses/" : `/courses/${editingId}/`,
         token,
         {
           method: isNew ? "POST" : "PATCH",
           body: JSON.stringify({
             ...form,
+            cover_style: coverStyle,
             lessons: form.lessons.map((lesson, position) => ({
               id: lesson.id,
               title: lesson.title,
@@ -654,6 +674,11 @@ function CoursesView({ token }: { token: string }) {
           }),
         },
       );
+      if (coverStyle === "custom" && coverFile) {
+        const coverBody = new FormData();
+        coverBody.append("cover", coverFile);
+        saved = await apiUpload<Course>(`/courses/${saved.id}/cover/`, token, coverBody);
+      }
       let savedLessons = saved.lessons.map((lesson, position) => ({
         ...lesson,
         client_key: form.lessons[position]?.client_key ?? `lesson-${lesson.id ?? crypto.randomUUID()}`,
@@ -686,9 +711,16 @@ function CoursesView({ token }: { token: string }) {
         lessons: savedLessons,
       });
       setVideoFiles({});
+      setCoverStyle(saved.cover_style);
+      setCoverPreview(saved.cover_url);
+      setCoverFile(null);
       setNotice(
         editingCourse?.status === "published" && saved.status === "draft"
           ? "Новая версия сохранена как черновик — проверьте её и опубликуйте"
+          : coverFile && pendingUploads.length
+          ? `Изменения сохранены · загружены обложка и видео: ${pendingUploads.length}`
+          : coverFile
+          ? "Изменения сохранены · обложка загружена"
           : pendingUploads.length
           ? `Изменения сохранены · загружено видео: ${pendingUploads.length}`
           : isNew ? "Курс создан и сохранён как черновик" : "Изменения сохранены",
@@ -787,7 +819,9 @@ function CoursesView({ token }: { token: string }) {
 
           <main className="longread-canvas-wrap">
             {activeSection === "cover" ? (
-              <article className="longread-page longread-page--cover">
+              <article className={coverStyle === "custom" && coverPreview ? "longread-page longread-page--cover longread-page--custom-cover" : "longread-page longread-page--cover"}>
+                {coverStyle === "custom" && coverPreview && <img className="longread-cover-image" src={coverPreview} alt="" />}
+                <div className="longread-cover-content">
                 <span className="longread-eyebrow">SMARTIS · ОБУЧЕНИЕ</span>
                 <textarea
                   className="longread-title-input"
@@ -808,6 +842,7 @@ function CoursesView({ token }: { token: string }) {
                 <div className="longread-cover-meta">
                   <span><BookOpen />{chapterCountLabel(form.lessons.length)}</span>
                   <span><Clock3 />{form.estimated_minutes} минут</span>
+                </div>
                 </div>
                 <div className="longread-cover-decoration" aria-hidden="true"><span /><span /><span /></div>
               </article>
@@ -891,6 +926,30 @@ function CoursesView({ token }: { token: string }) {
             </div>
             {activeSection === "cover" ? (
               <div className="longread-settings__body">
+                <div className="longread-cover-setting">
+                  <span className="field-label">Оформление</span>
+                  <div className="longread-cover-toggle">
+                    <button className={coverStyle === "standard" ? "longread-cover-option longread-cover-option--active" : "longread-cover-option"} type="button" onClick={() => setCoverStyle("standard")}>Стандартная</button>
+                    <button className={coverStyle === "custom" ? "longread-cover-option longread-cover-option--active" : "longread-cover-option"} type="button" onClick={() => setCoverStyle("custom")}>Своя</button>
+                  </div>
+                  {coverStyle === "custom" && (
+                    <label className="longread-cover-upload">
+                      <Upload />
+                      <span><strong>{coverFile || coverPreview ? "Заменить изображение" : "Загрузить изображение"}</strong><small>{coverFile?.name || editingCourse?.cover_original_name || "JPG, PNG или WebP · до 10 МБ"}</small></span>
+                      <input
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+                        onChange={(event) => {
+                          const file = event.target.files?.[0];
+                          if (!file) return;
+                          if (coverPreview.startsWith("blob:")) URL.revokeObjectURL(coverPreview);
+                          setCoverFile(file);
+                          setCoverPreview(URL.createObjectURL(file));
+                        }}
+                      />
+                    </label>
+                  )}
+                </div>
                 <label>Ожидаемая длительность, минут<input type="number" min="1" value={form.estimated_minutes} onChange={(event) => setForm({ ...form, estimated_minutes: Number(event.target.value) })} required /></label>
                 <div className="longread-info-card">
                   <span>Статус</span><strong>{editingCourse?.status_label || "Черновик"}</strong>

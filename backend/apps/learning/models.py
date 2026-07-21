@@ -12,14 +12,30 @@ def lesson_video_path(instance, filename):
     return f"courses/{instance.course_id}/videos/{uuid.uuid4().hex}{suffix}"
 
 
+def course_cover_path(instance, filename):
+    suffix = Path(filename).suffix.lower()
+    return f"courses/{instance.id}/cover/{uuid.uuid4().hex}{suffix}"
+
+
 class Course(models.Model):
     class Status(models.TextChoices):
         DRAFT = "draft", "Черновик"
         PUBLISHED = "published", "Опубликован"
         ARCHIVED = "archived", "В архиве"
 
+    class CoverStyle(models.TextChoices):
+        STANDARD = "standard", "Стандартная"
+        CUSTOM = "custom", "Своя обложка"
+
     title = models.CharField("Название", max_length=220)
     description = models.TextField("Описание", blank=True)
+    cover_style = models.CharField(
+        "Тип обложки", max_length=20, choices=CoverStyle.choices, default=CoverStyle.STANDARD
+    )
+    cover_file = models.FileField("Файл обложки", upload_to=course_cover_path, blank=True)
+    cover_original_name = models.CharField("Исходное имя обложки", max_length=255, blank=True)
+    cover_size = models.PositiveBigIntegerField("Размер обложки", default=0)
+    cover_uploaded_at = models.DateTimeField("Дата загрузки обложки", null=True, blank=True)
     author = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         verbose_name="Автор",
@@ -80,3 +96,9 @@ class Lesson(models.Model):
 def delete_lesson_video(sender, instance, **kwargs):
     if instance.video_file:
         instance.video_file.delete(save=False)
+
+
+@receiver(post_delete, sender=Course)
+def delete_course_cover(sender, instance, **kwargs):
+    if instance.cover_file:
+        instance.cover_file.delete(save=False)
