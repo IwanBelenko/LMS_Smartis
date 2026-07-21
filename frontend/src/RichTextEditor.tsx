@@ -23,9 +23,10 @@ type RichTextEditorProps = {
   value: string;
   onChange: (html: string) => void;
   label?: string;
+  variant?: "default" | "longread";
 };
 
-export default function RichTextEditor({ value, onChange, label = "Содержание урока" }: RichTextEditorProps) {
+export default function RichTextEditor({ value, onChange, label = "Содержание урока", variant = "default" }: RichTextEditorProps) {
   const editor = useEditor({
     extensions: [
       StarterKit,
@@ -82,7 +83,7 @@ export default function RichTextEditor({ value, onChange, label = "Содерж�
   }
 
   return (
-    <div className="rich-editor">
+    <div className={variant === "longread" ? "rich-editor rich-editor--longread" : "rich-editor"}>
       <div className="rich-editor__toolbar" role="toolbar" aria-label="Форматирование текста">
         <select
           className="editor-select editor-select--format"

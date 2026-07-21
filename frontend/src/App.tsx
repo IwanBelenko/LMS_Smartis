@@ -4,11 +4,14 @@ import {
   BarChart3,
   BookOpen,
   CheckCircle2,
+  ChevronLeft,
   ChevronRight,
   CircleUserRound,
   Clock3,
   FileText,
+  GripVertical,
   Home,
+  Link2,
   LogOut,
   PanelLeftClose,
   PanelLeftOpen,
@@ -18,10 +21,13 @@ import {
   Route,
   Save,
   Settings,
+  Settings2,
   Trash2,
   Trophy,
+  Type,
   Upload,
   Users,
+  Video,
   Workflow,
   X,
 } from "lucide-react";
@@ -491,6 +497,14 @@ function formatFileSize(bytes: number) {
   return megabytes >= 1 ? `${megabytes.toFixed(1)} МБ` : `${Math.ceil(bytes / 1024)} КБ`;
 }
 
+function chapterCountLabel(count: number) {
+  const lastTwo = count % 100;
+  const last = count % 10;
+  const word = last === 1 && lastTwo !== 11 ? "глава"
+    : last >= 2 && last <= 4 && (lastTwo < 12 || lastTwo > 14) ? "главы" : "глав";
+  return `${count} ${word}`;
+}
+
 function CoursesView({ token }: { token: string }) {
   const [courses, setCourses] = useState<Course[]>([]);
   const [editingId, setEditingId] = useState<number | null | "new">(null);
@@ -505,6 +519,7 @@ function CoursesView({ token }: { token: string }) {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [videoFiles, setVideoFiles] = useState<Record<string, File>>({});
+  const [activeSection, setActiveSection] = useState<string>("cover");
 
   async function load() {
     setLoading(true);
@@ -526,6 +541,7 @@ function CoursesView({ token }: { token: string }) {
     setError("");
     setNotice("");
     setVideoFiles({});
+    setActiveSection("cover");
   }
 
   function editCourse(course: Course) {
@@ -543,6 +559,13 @@ function CoursesView({ token }: { token: string }) {
     setError("");
     setNotice("");
     setVideoFiles({});
+    setActiveSection("cover");
+  }
+
+  function addLesson() {
+    const lesson = newLesson(form.lessons.length);
+    setForm((current) => ({ ...current, lessons: [...current.lessons, lesson] }));
+    setActiveSection(lesson.client_key);
   }
 
   function updateLesson(index: number, update: Partial<Lesson>) {
@@ -568,6 +591,9 @@ function CoursesView({ token }: { token: string }) {
       lessons: current.lessons.filter((_, lessonIndex) => lessonIndex !== index)
         .map((lesson, position) => ({ ...lesson, position })),
     }));
+    if (removedKey === activeSection) {
+      setActiveSection(form.lessons[index - 1]?.client_key ?? form.lessons[index + 1]?.client_key ?? "cover");
+    }
   }
 
   function moveLesson(index: number, direction: -1 | 1) {
@@ -583,8 +609,19 @@ function CoursesView({ token }: { token: string }) {
 
   async function saveCourse(event: FormEvent) {
     event.preventDefault();
+    if (!form.title.trim()) {
+      setActiveSection("cover");
+      setError("Добавьте название курса");
+      return;
+    }
     if (!form.lessons.length) {
       setError("Добавьте хотя бы один урок");
+      return;
+    }
+    const untitledLesson = form.lessons.find((lesson) => !lesson.title.trim());
+    if (untitledLesson) {
+      setActiveSection(untitledLesson.client_key);
+      setError("Добавьте название главы");
       return;
     }
     setSaving(true);
@@ -680,6 +717,209 @@ function CoursesView({ token }: { token: string }) {
   const editingCourse = typeof editingId === "number"
     ? courses.find((course) => course.id === editingId)
     : undefined;
+
+  const activeLessonIndex = form.lessons.findIndex((lesson) => lesson.client_key === activeSection);
+  const activeLesson = activeLessonIndex >= 0 ? form.lessons[activeLessonIndex] : undefined;
+
+  function lessonIcon(type: Lesson["lesson_type"]) {
+    if (type === "video") return <Video />;
+    if (type === "link") return <Link2 />;
+    if (type === "file") return <FileText />;
+    return <Type />;
+  }
+
+  if (editingId !== null) {
+    return (
+      <form className="longread-editor" onSubmit={saveCourse}>
+        <header className="longread-editor__topbar">
+          <button className="longread-back" type="button" onClick={() => setEditingId(null)}>
+            <ChevronLeft /> К курсам
+          </button>
+          <div className="longread-editor__identity">
+            <span>Редактор лонгрида</span>
+            <strong>{form.title || "Курс без названия"}</strong>
+          </div>
+          <div className="longread-editor__actions">
+            {editingCourse && (
+              <button className="secondary-button" type="button" onClick={() => void changePublication(editingCourse)}>
+                {editingCourse.status === "published" ? "Снять с публикации" : "Опубликовать"}
+              </button>
+            )}
+            <button className="primary-button" type="submit" disabled={saving}>
+              <Save />{saving ? "Сохраняем…" : "Сохранить"}
+            </button>
+          </div>
+        </header>
+
+        {error && <p className="form-error longread-message">{error}</p>}
+        {notice && <p className="form-notice longread-message"><CheckCircle2 />{notice}</p>}
+
+        <div className="longread-workspace">
+          <aside className="longread-outline">
+            <div className="longread-panel-heading">
+              <div><span>Структура</span><strong>{chapterCountLabel(form.lessons.length)}</strong></div>
+              <button className="mini-button" type="button" onClick={addLesson} aria-label="Добавить главу"><Plus /></button>
+            </div>
+            <nav className="longread-sections" aria-label="Структура курса">
+              <button
+                className={activeSection === "cover" ? "longread-section longread-section--active" : "longread-section"}
+                type="button"
+                onClick={() => setActiveSection("cover")}
+              >
+                <span className="longread-section__icon"><BookOpen /></span>
+                <span><strong>Обложка</strong><small>Название и описание</small></span>
+              </button>
+              {form.lessons.map((lesson, index) => (
+                <button
+                  className={activeSection === lesson.client_key ? "longread-section longread-section--active" : "longread-section"}
+                  type="button"
+                  key={lesson.client_key}
+                  onClick={() => setActiveSection(lesson.client_key)}
+                >
+                  <GripVertical className="longread-section__grip" />
+                  <span className="longread-section__number">{index + 1}</span>
+                  <span><strong>{lesson.title || "Новая глава"}</strong><small>{lessonTypeLabels[lesson.lesson_type]} · {lesson.duration_minutes} мин</small></span>
+                </button>
+              ))}
+            </nav>
+            <button className="longread-add-chapter" type="button" onClick={addLesson}><Plus /> Добавить главу</button>
+          </aside>
+
+          <main className="longread-canvas-wrap">
+            {activeSection === "cover" ? (
+              <article className="longread-page longread-page--cover">
+                <span className="longread-eyebrow">SMARTIS · ОБУЧЕНИЕ</span>
+                <textarea
+                  className="longread-title-input"
+                  rows={2}
+                  value={form.title}
+                  onChange={(event) => setForm({ ...form, title: event.target.value })}
+                  placeholder="Название курса"
+                  aria-label="Название курса"
+                  required
+                />
+                <textarea
+                  className="longread-lead-input"
+                  value={form.description}
+                  onChange={(event) => setForm({ ...form, description: event.target.value })}
+                  placeholder="Коротко расскажите, чему научится сотрудник и зачем ему этот курс"
+                  aria-label="Описание курса"
+                />
+                <div className="longread-cover-meta">
+                  <span><BookOpen />{chapterCountLabel(form.lessons.length)}</span>
+                  <span><Clock3 />{form.estimated_minutes} минут</span>
+                </div>
+                <div className="longread-cover-decoration" aria-hidden="true"><span /><span /><span /></div>
+              </article>
+            ) : activeLesson ? (
+              <article className="longread-page longread-page--chapter">
+                <div className="longread-chapter-kicker">
+                  <span>Глава {activeLessonIndex + 1}</span>
+                  <span>{lessonTypeLabels[activeLesson.lesson_type]}</span>
+                </div>
+                <textarea
+                  className="longread-title-input longread-title-input--chapter"
+                  rows={2}
+                  value={activeLesson.title}
+                  onChange={(event) => updateLesson(activeLessonIndex, { title: event.target.value })}
+                  placeholder="Название главы"
+                  aria-label="Название главы"
+                  required
+                />
+                {activeLesson.lesson_type === "text" ? (
+                  <Suspense fallback={<div className="rich-editor rich-editor--loading">Загружаем редактор…</div>}>
+                    <RichTextEditor
+                      value={activeLesson.content}
+                      onChange={(content) => updateLesson(activeLessonIndex, { content })}
+                      label={`Содержание главы ${activeLessonIndex + 1}`}
+                      variant="longread"
+                    />
+                  </Suspense>
+                ) : activeLesson.lesson_type === "video" ? (
+                  <div className="longread-media-editor">
+                    {activeLesson.video_url && !videoFiles[activeLesson.client_key] && (
+                      <video className="video-preview" controls preload="metadata" src={activeLesson.video_url}>
+                        Ваш браузер не поддерживает просмотр видео.
+                      </video>
+                    )}
+                    <label className="longread-upload-zone">
+                      <span className="longread-media-icon"><Upload /></span>
+                      <strong>{activeLesson.video_url ? "Заменить видео" : "Загрузить видео"}</strong>
+                      <span>MP4, WebM, MOV или M4V · до 500 МБ</span>
+                      <input
+                        type="file"
+                        accept="video/mp4,video/webm,video/quicktime,video/x-m4v,.mp4,.webm,.mov,.m4v"
+                        onChange={(event) => {
+                          const file = event.target.files?.[0];
+                          if (file) setVideoFiles((current) => ({ ...current, [activeLesson.client_key]: file }));
+                        }}
+                      />
+                    </label>
+                    {(videoFiles[activeLesson.client_key] || activeLesson.video_original_name) && (
+                      <div className="longread-file-chip">
+                        <Video />
+                        <span><strong>{videoFiles[activeLesson.client_key]?.name || activeLesson.video_original_name}</strong><small>{videoFiles[activeLesson.client_key] ? `${formatFileSize(videoFiles[activeLesson.client_key].size)} · загрузится при сохранении` : `${formatFileSize(activeLesson.video_size)} · хранится на платформе`}</small></span>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="longread-media-editor">
+                    <span className="longread-media-icon">{lessonIcon(activeLesson.lesson_type)}</span>
+                    <h2>{activeLesson.lesson_type === "link" ? "Добавьте ссылку" : "Добавьте материал"}</h2>
+                    <p>Сотрудник откроет материал прямо из этой главы курса.</p>
+                    <input
+                      type="url"
+                      value={activeLesson.media_url}
+                      onChange={(event) => updateLesson(activeLessonIndex, { media_url: event.target.value })}
+                      placeholder="https://…"
+                      aria-label="Ссылка на материал"
+                      required
+                    />
+                  </div>
+                )}
+                <button className="longread-add-divider" type="button" onClick={addLesson}>
+                  <span><Plus /></span> Добавить следующую главу
+                </button>
+              </article>
+            ) : null}
+          </main>
+
+          <aside className="longread-settings">
+            <div className="longread-panel-heading">
+              <div><span>Настройки</span><strong>{activeSection === "cover" ? "Курс" : "Глава"}</strong></div>
+              <Settings2 />
+            </div>
+            {activeSection === "cover" ? (
+              <div className="longread-settings__body">
+                <label>Ожидаемая длительность, минут<input type="number" min="1" value={form.estimated_minutes} onChange={(event) => setForm({ ...form, estimated_minutes: Number(event.target.value) })} required /></label>
+                <div className="longread-info-card">
+                  <span>Статус</span><strong>{editingCourse?.status_label || "Черновик"}</strong>
+                  <span>Версия</span><strong>{editingCourse?.version || 1}</strong>
+                </div>
+                <p className="longread-help">Обложка, название и описание будут первыми элементами, которые увидит сотрудник.</p>
+              </div>
+            ) : activeLesson ? (
+              <div className="longread-settings__body">
+                <label>Формат главы<select value={activeLesson.lesson_type} onChange={(event) => updateLesson(activeLessonIndex, { lesson_type: event.target.value as Lesson["lesson_type"] })}>
+                  {Object.entries(lessonTypeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                </select></label>
+                <label>Время на изучение, минут<input type="number" min="1" value={activeLesson.duration_minutes} onChange={(event) => updateLesson(activeLessonIndex, { duration_minutes: Number(event.target.value) })} required /></label>
+                <label className="check-field"><input type="checkbox" checked={activeLesson.is_required} onChange={(event) => updateLesson(activeLessonIndex, { is_required: event.target.checked })} /> Обязательная глава</label>
+                <div className="longread-settings__actions">
+                  <span>Положение в курсе</span>
+                  <div>
+                    <button className="mini-button" type="button" disabled={activeLessonIndex === 0} onClick={() => moveLesson(activeLessonIndex, -1)} aria-label="Переместить выше"><ArrowUp /></button>
+                    <button className="mini-button" type="button" disabled={activeLessonIndex === form.lessons.length - 1} onClick={() => moveLesson(activeLessonIndex, 1)} aria-label="Переместить ниже"><ArrowDown /></button>
+                  </div>
+                </div>
+                <button className="longread-delete" type="button" onClick={() => removeLesson(activeLessonIndex)}><Trash2 /> Удалить главу</button>
+              </div>
+            ) : null}
+          </aside>
+        </div>
+      </form>
+    );
+  }
 
   return (
     <>
@@ -795,7 +1035,7 @@ function CoursesView({ token }: { token: string }) {
               <button className="icon-button" type="button" onClick={() => editCourse(course)} aria-label={`Редактировать ${course.title}`}><Pencil /></button>
             </div>
             <div><h2>{course.title}</h2><p>{course.description || "Описание пока не добавлено"}</p></div>
-            <div className="course-meta"><span><FileText />{course.lessons_count} уроков</span><span><Clock3 />{course.estimated_minutes} мин</span></div>
+            <div className="course-meta"><span><FileText />{chapterCountLabel(course.lessons_count)}</span><span><Clock3 />{course.estimated_minutes} мин</span></div>
             <div className="course-card__footer"><span>{course.author_name}</span><span>Версия {course.version}</span></div>
             <button className={course.status === "published" ? "secondary-button" : "primary-button"} type="button" onClick={() => void changePublication(course)}>
               {course.status === "published" ? <><CheckCircle2 /> Опубликован</> : <><PlayCircle /> Опубликовать</>}
