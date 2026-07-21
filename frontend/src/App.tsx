@@ -5,6 +5,8 @@ import {
   CircleUserRound,
   Home,
   LogOut,
+  PanelLeftClose,
+  PanelLeftOpen,
   Plus,
   Route,
   Settings,
@@ -147,6 +149,7 @@ const adminNav = [
 function Sidebar({
   active,
   user,
+  open,
   dark,
   onNavigate,
   onTheme,
@@ -154,6 +157,7 @@ function Sidebar({
 }: {
   active: ViewId;
   user: User;
+  open: boolean;
   dark: boolean;
   onNavigate: (view: ViewId) => void;
   onTheme: () => void;
@@ -168,12 +172,12 @@ function Sidebar({
         onClick={() => onNavigate(id)}
       >
         <Icon aria-hidden="true" />
-        {label}
+        <span className="nav-item__label">{label}</span>
       </button>
     ));
   return (
-    <aside className="sidebar">
-      <div className="brand"><span className="brand__mark">S</span><span>Smartis LMS</span></div>
+    <aside className="sidebar" aria-hidden={!open} inert={!open}>
+      <div className="brand"><span className="brand__mark">S</span><span className="brand__name">Smartis LMS</span></div>
       <nav className="nav-group" aria-label="Обучение">
         <p>Обучение</p>
         {group(nav)}
@@ -405,11 +409,18 @@ function App() {
   const [user, setUser] = useState<User | null>(null);
   const [active, setActive] = useState<ViewId>("home");
   const [dark, setDark] = useState(() => localStorage.getItem("smartis-theme") === "dark");
+  const [sidebarOpen, setSidebarOpen] = useState(
+    () => localStorage.getItem("smartis-sidebar") !== "closed",
+  );
 
   useEffect(() => {
     document.documentElement.dataset.theme = dark ? "dark" : "light";
     localStorage.setItem("smartis-theme", dark ? "dark" : "light");
   }, [dark]);
+
+  useEffect(() => {
+    localStorage.setItem("smartis-sidebar", sidebarOpen ? "open" : "closed");
+  }, [sidebarOpen]);
 
   useEffect(() => {
     if (!token) return;
@@ -434,19 +445,44 @@ function App() {
     setUser(null);
   }
 
+  function navigate(view: ViewId) {
+    setActive(view);
+    if (window.matchMedia("(max-width: 760px)").matches) setSidebarOpen(false);
+  }
+
   if (!token || !user) return <LoginPage onLogin={login} />;
 
   return (
-    <div className="app-shell">
+    <div className={"app-shell " + (sidebarOpen ? "app-shell--sidebar-open" : "app-shell--sidebar-closed")}>
       <Sidebar
         active={active}
         user={user}
+        open={sidebarOpen}
         dark={dark}
-        onNavigate={setActive}
+        onNavigate={navigate}
         onTheme={() => setDark((value) => !value)}
         onLogout={() => void logout()}
       />
+      {sidebarOpen && (
+        <button
+          className="sidebar-backdrop"
+          type="button"
+          aria-label="Закрыть боковое меню"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
       <main className="main-content">
+        <div className="app-toolbar">
+          <button
+            className="icon-button menu-button"
+            type="button"
+            aria-expanded={sidebarOpen}
+            aria-label={sidebarOpen ? "Скрыть боковое меню" : "Открыть боковое меню"}
+            onClick={() => setSidebarOpen((value) => !value)}
+          >
+            {sidebarOpen ? <PanelLeftClose aria-hidden="true" /> : <PanelLeftOpen aria-hidden="true" />}
+          </button>
+        </div>
         {active === "home" ? <HomeView user={user} /> : active === "users" ? <UsersView token={token} /> : <Placeholder active={active} />}
       </main>
     </div>

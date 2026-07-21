@@ -55,8 +55,10 @@ svg { width: 20px; height: 20px; flex: 0 0 auto; }
   margin: 0 auto;
   display: grid;
   grid-template-columns: 250px minmax(0, 1fr);
+  transition: grid-template-columns 220ms ease;
 }
 .sidebar {
+  width: 250px;
   min-height: 100vh;
   padding: 24px 18px;
   border-right: 1px solid var(--border);
@@ -64,7 +66,13 @@ svg { width: 20px; height: 20px; flex: 0 0 auto; }
   display: flex;
   flex-direction: column;
   gap: 28px;
+  transform: translateX(0);
+  transition: transform 220ms ease;
+  z-index: 30;
 }
+.app-shell--sidebar-closed { grid-template-columns: 0 minmax(0, 1fr); }
+.app-shell--sidebar-closed .sidebar { transform: translateX(-100%); pointer-events: none; }
+.sidebar-backdrop { display: none; }
 .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; }
 .brand__mark {
   width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center;
@@ -112,6 +120,8 @@ svg { width: 20px; height: 20px; flex: 0 0 auto; }
   min-width: 0; padding: 32px clamp(20px, 4vw, 48px) 48px;
   display: flex; flex-direction: column; gap: 22px;
 }
+.app-toolbar { min-height: 40px; display: flex; align-items: center; }
+.menu-button { background: var(--surface); box-shadow: var(--shadow); }
 .page-header, .section-heading {
   display: flex; align-items: center; justify-content: space-between; gap: 18px;
 }
@@ -210,7 +220,16 @@ td:first-child span { color: var(--muted); font-size: 0.8rem; }
 
 @media (max-width: 760px) {
   .app-shell { display: block; }
-  .sidebar { min-height: auto; border-right: 0; border-bottom: 1px solid var(--border); gap: 16px; }
+  .sidebar {
+    width: min(290px, 86vw); min-height: 100vh; position: fixed; inset: 0 auto 0 0;
+    border-right: 1px solid var(--border); gap: 16px; overflow-y: auto;
+  }
+  .app-shell--sidebar-closed .sidebar { transform: translateX(-100%); }
+  .app-shell--sidebar-open .sidebar { transform: translateX(0); }
+  .sidebar-backdrop {
+    display: block; position: fixed; inset: 0 0 0 min(290px, 86vw); z-index: 20; border: 0;
+    background: rgba(0, 0, 0, 0.42); cursor: pointer;
+  }
   .nav-group { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .nav-group > p { grid-column: 1 / -1; }
   .sidebar__footer { margin-top: 0; }
