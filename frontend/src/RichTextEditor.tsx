@@ -22,16 +22,19 @@ import {
   Undo2,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 
 type RichTextEditorProps = {
   value: string;
   onChange: (html: string) => void;
   label?: string;
   variant?: "default" | "longread";
+  toolbarContainer?: HTMLElement | null;
 };
 
-export default function RichTextEditor({ value, onChange, label = "Содержание урока", variant = "default" }: RichTextEditorProps) {
+export default function RichTextEditor({ value, onChange, label = "Содержание урока", variant = "default", toolbarContainer = null }: RichTextEditorProps) {
   const [highlightColor, setHighlightColor] = useState("#fff1a8");
+  const [, refreshSelection] = useState(0);
   const editor = useEditor({
     extensions: [
       StarterKit,
@@ -56,6 +59,15 @@ export default function RichTextEditor({ value, onChange, label = "Содерж�
       editor.commands.setContent(value || "<p></p>", { emitUpdate: false });
     }
   }, [editor, value]);
+
+  useEffect(() => {
+    if (!editor) return;
+    const updateToolbar = () => refreshSelection((version) => version + 1);
+    editor.on("selectionUpdate", updateToolbar);
+    return () => {
+      editor.off("selectionUpdate", updateToolbar);
+    };
+  }, [editor]);
 
   if (!editor) return <div className="rich-editor rich-editor--loading">Загружаем редактор…</div>;
   const currentEditor = editor;
@@ -89,9 +101,8 @@ export default function RichTextEditor({ value, onChange, label = "Содерж�
     currentEditor.chain().focus().extendMarkRange("link").setLink({ href: url, target: "_blank" }).run();
   }
 
-  return (
-    <div className={variant === "longread" ? "rich-editor rich-editor--longread" : "rich-editor"}>
-      <div className="rich-editor__toolbar" role="toolbar" aria-label="Форматирование текста">
+  const toolbar = (
+      <div className={variant === "longread" ? "rich-editor__toolbar rich-editor__toolbar--longread" : "rich-editor__toolbar"} role="toolbar" aria-label="Форматирование текста">
         {variant === "longread" && <span className="editor-toolbar-title">Форматирование</span>}
         <select
           className="editor-select editor-select--format"
@@ -209,6 +220,11 @@ export default function RichTextEditor({ value, onChange, label = "Содерж�
           {button("Очистить форматирование", () => editor.chain().focus().unsetAllMarks().clearNodes().run(), <Eraser />)}
         </span>
       </div>
+  );
+
+  return (
+    <div className={variant === "longread" ? "rich-editor rich-editor--longread" : "rich-editor"}>
+      {toolbarContainer ? createPortal(toolbar, toolbarContainer) : toolbar}
       <EditorContent editor={editor} />
     </div>
   );

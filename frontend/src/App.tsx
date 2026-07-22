@@ -967,6 +967,7 @@ function CoursesView({ token, user }: { token: string; user: User }) {
   const [courseView, setCourseView] = useState<"cards" | "compact" | "list">(
     () => (localStorage.getItem("smartis-course-view") as "cards" | "compact" | "list") || "cards",
   );
+  const [longreadToolbarDock, setLongreadToolbarDock] = useState<HTMLDivElement | null>(null);
   const scormFrameRef = useRef<HTMLIFrameElement>(null);
 
   async function load() {
@@ -1628,6 +1629,7 @@ function CoursesView({ token, user }: { token: string; user: User }) {
                       onChange={(content) => updateLesson(activeLessonIndex, { content })}
                       label={`Содержание главы ${activeLessonIndex + 1}`}
                       variant="longread"
+                      toolbarContainer={longreadToolbarDock}
                     />
                   </Suspense>
                 ) : activeLesson.lesson_type === "quiz" ? (
@@ -1725,7 +1727,7 @@ function CoursesView({ token, user }: { token: string; user: User }) {
             ) : null}
           </main>
 
-          <aside className="longread-settings">
+          <aside className={activeLesson?.lesson_type === "text" ? "longread-settings longread-settings--with-editor" : "longread-settings"}>
             <div className="longread-panel-heading">
               <div><span>Настройки</span><strong>{activeSection === "cover" ? "Курс" : "Глава"}</strong></div>
               <Settings2 />
@@ -1773,10 +1775,10 @@ function CoursesView({ token, user }: { token: string; user: User }) {
               </div>
             ) : activeLesson ? (
               <div className="longread-settings__body">
-                <label>Формат главы<select disabled={activeLesson.lesson_type === "scorm"} value={activeLesson.lesson_type} onChange={(event) => updateLesson(activeLessonIndex, { lesson_type: event.target.value as Lesson["lesson_type"] })}>
+                <label>Формат<select disabled={activeLesson.lesson_type === "scorm"} value={activeLesson.lesson_type} onChange={(event) => updateLesson(activeLessonIndex, { lesson_type: event.target.value as Lesson["lesson_type"] })}>
                   {Object.entries(lessonTypeLabels).filter(([value]) => value !== "scorm" || activeLesson.lesson_type === "scorm").map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                 </select></label>
-                <label>Время на изучение, минут<input type="number" min="1" value={activeLesson.duration_minutes} onChange={(event) => updateLesson(activeLessonIndex, { duration_minutes: Number(event.target.value) })} required /></label>
+                <label>Время, мин<input type="number" min="1" value={activeLesson.duration_minutes} onChange={(event) => updateLesson(activeLessonIndex, { duration_minutes: Number(event.target.value) })} required /></label>
                 <label className="check-field"><input type="checkbox" checked={activeLesson.is_required} onChange={(event) => updateLesson(activeLessonIndex, { is_required: event.target.checked })} /> Обязательная глава</label>
                 {editingCourse?.source_format !== "scorm_12" && (
                   <>
@@ -1792,6 +1794,7 @@ function CoursesView({ token, user }: { token: string; user: User }) {
                 )}
               </div>
             ) : null}
+            {activeLesson?.lesson_type === "text" && <div className="longread-toolbar-dock" ref={setLongreadToolbarDock} />}
           </aside>
         </div>
         {previewModal}
