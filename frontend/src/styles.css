@@ -713,11 +713,17 @@ svg { width: 18px; height: 18px; }
   width: min(280px, calc(100vw - 24px)); height: calc(100dvh - 24px); min-height: 0;
   padding: 16px 12px; position: fixed; inset: 12px auto 12px 12px; z-index: 50;
   border: 1px solid var(--border); border-radius: 12px; overflow-y: auto;
-  background: var(--surface); box-shadow: 0 18px 55px rgba(15, 15, 15, 0.2);
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  box-shadow: 0 18px 55px rgba(15, 15, 15, 0.2);
+  backdrop-filter: blur(16px) saturate(120%);
+  -webkit-backdrop-filter: blur(16px) saturate(120%);
   gap: 18px; opacity: 1; visibility: visible;
   transform: translateX(0); transition: transform 180ms ease, opacity 180ms ease, visibility 180ms ease;
 }
-:root[data-theme="dark"] .sidebar { box-shadow: 0 20px 60px rgba(0, 0, 0, 0.48); }
+:root[data-theme="dark"] .sidebar {
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.48);
+}
 .app-shell--sidebar-closed .sidebar {
   opacity: 0; visibility: hidden; transform: translateX(calc(-100% - 24px)); pointer-events: none;
 }
