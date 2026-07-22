@@ -244,6 +244,7 @@ function Sidebar({
   open,
   dark,
   onNavigate,
+  onClose,
   onTheme,
   onLogout,
 }: {
@@ -252,6 +253,7 @@ function Sidebar({
   open: boolean;
   dark: boolean;
   onNavigate: (view: ViewId) => void;
+  onClose: () => void;
   onTheme: () => void;
   onLogout: () => void;
 }) {
@@ -274,7 +276,12 @@ function Sidebar({
     ));
   return (
     <aside className="sidebar" aria-hidden={!open} inert={!open}>
-      <Brand />
+      <div className="sidebar__header">
+        <Brand />
+        <button className="icon-button sidebar__close" type="button" onClick={onClose} aria-label="Закрыть боковое меню">
+          <PanelLeftClose aria-hidden="true" />
+        </button>
+      </div>
       <nav className="nav-group" aria-label="Обучение">
         <p>Обучение</p>
         {group(nav)}
@@ -1657,9 +1664,7 @@ function App() {
   const [user, setUser] = useState<User | null>(null);
   const [active, setActive] = useState<ViewId>("home");
   const [dark, setDark] = useState(() => localStorage.getItem("smartis-theme") === "dark");
-  const [sidebarOpen, setSidebarOpen] = useState(
-    () => localStorage.getItem("smartis-sidebar") !== "closed",
-  );
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
     document.documentElement.dataset.theme = dark ? "dark" : "light";
@@ -1667,7 +1672,12 @@ function App() {
   }, [dark]);
 
   useEffect(() => {
-    localStorage.setItem("smartis-sidebar", sidebarOpen ? "open" : "closed");
+    if (!sidebarOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setSidebarOpen(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
   }, [sidebarOpen]);
 
   useEffect(() => {
@@ -1695,7 +1705,7 @@ function App() {
 
   function navigate(view: ViewId) {
     setActive(view);
-    if (window.matchMedia("(max-width: 760px)").matches) setSidebarOpen(false);
+    setSidebarOpen(false);
   }
 
   if (!token || !user) return <LoginPage onLogin={login} />;
@@ -1708,6 +1718,7 @@ function App() {
         open={sidebarOpen}
         dark={dark}
         onNavigate={navigate}
+        onClose={() => setSidebarOpen(false)}
         onTheme={() => setDark((value) => !value)}
         onLogout={() => void logout()}
       />
