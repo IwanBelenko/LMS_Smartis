@@ -1063,7 +1063,7 @@ th { font-size: 0.72rem; text-transform: none; letter-spacing: 0.02em; }
 }
 
 /* Persistent drawer state and compact course cards */
-.sidebar-backdrop { pointer-events: none; cursor: default; }
+.sidebar-backdrop { pointer-events: auto; cursor: pointer; }
 .sidebar__header .brand__wordmark { max-width: 190px; }
 .icon-rail__user { cursor: default; }
 

@@ -2146,6 +2146,7 @@ function App() {
         <div
           className="sidebar-backdrop"
           aria-hidden="true"
+          onClick={() => setSidebarOpen(false)}
         />
       )}
       <main className="main-content">
