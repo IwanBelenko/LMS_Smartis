@@ -310,14 +310,13 @@ function Sidebar({
 }) {
   const availableAdminNav = visibleAdminNav(user);
   const group = (items: typeof nav | typeof adminNav) =>
-    items.map(({ id, label, icon: Icon }) => (
+    items.map(({ id, label }) => (
       <button
         type="button"
         key={id}
         className={"nav-item " + (active === id ? "nav-item--active" : "")}
         onClick={() => onNavigate(id)}
       >
-        <Icon aria-hidden="true" />
         <span className="nav-item__label">{label}</span>
       </button>
     ));
@@ -338,7 +337,6 @@ function Sidebar({
       )}
       <div className="sidebar__footer">
         <div className="user-chip">
-          <CircleUserRound aria-hidden="true" />
           <div>
             <strong>{user.first_name || user.email}</strong>
             <span>{user.role_label}</span>
@@ -375,7 +373,7 @@ function IconRail({
       type="button"
       key={id}
       aria-label={label}
-      title={label}
+      data-tooltip={label}
       onClick={() => onNavigate(id)}
     >
       <Icon aria-hidden="true" />
@@ -388,6 +386,7 @@ function IconRail({
         type="button"
         aria-label={open ? "Скрыть полное меню" : "Открыть полное меню"}
         aria-expanded={open}
+        data-tooltip={open ? "Скрыть меню" : "Открыть меню"}
         onClick={onOpen}
       >
         {open ? <PanelLeftClose aria-hidden="true" /> : <PanelLeftOpen aria-hidden="true" />}
@@ -399,7 +398,7 @@ function IconRail({
           <nav className="icon-rail__group" aria-label="Администрирование">{railGroup(availableAdminNav)}</nav>
         </>
       )}
-      <div className="icon-rail__user" title={`${user.first_name || user.email} · ${user.role_label}`}>
+      <div className="icon-rail__user" data-tooltip={`${user.first_name || user.email} · ${user.role_label}`}>
         <CircleUserRound aria-hidden="true" />
       </div>
     </aside>

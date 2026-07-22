@@ -860,9 +860,25 @@ th { font-size: 0.72rem; text-transform: none; letter-spacing: 0.02em; }
 }
 .icon-rail__toggle, .icon-rail__item, .icon-rail__user {
   width: 44px; height: 44px; padding: 0; border: 0; border-radius: 7px; display: grid; place-items: center;
-  background: transparent; color: var(--foreground); cursor: pointer;
+  position: relative; background: transparent; color: var(--foreground); cursor: pointer;
 }
 .icon-rail__toggle:hover, .icon-rail__item:hover, .icon-rail__user:hover { background: var(--surface-soft); }
+.icon-rail [data-tooltip]::after {
+  content: attr(data-tooltip); min-width: max-content; padding: 6px 9px; position: absolute;
+  left: calc(100% + 10px); top: 50%; z-index: 80; border: 1px solid var(--border); border-radius: 6px;
+  background: color-mix(in srgb, var(--surface) 96%, transparent); color: var(--foreground);
+  box-shadow: 0 8px 24px rgba(15, 15, 15, 0.16); backdrop-filter: blur(12px);
+  font-size: 0.78rem; font-weight: 500; line-height: 1.2; white-space: nowrap; pointer-events: none;
+  opacity: 0; visibility: hidden; transform: translate(4px, -50%);
+  transition: opacity 130ms ease, transform 130ms ease, visibility 130ms ease;
+}
+.icon-rail [data-tooltip]:hover::after,
+.icon-rail [data-tooltip]:focus-visible::after {
+  opacity: 1; visibility: visible; transform: translate(0, -50%);
+}
+:root[data-theme="dark"] .icon-rail [data-tooltip]::after {
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.38);
+}
 .icon-rail__toggle { margin-bottom: 4px; color: var(--muted); }
 .icon-rail__group { width: 100%; display: grid; justify-items: center; gap: 4px; }
 .icon-rail__item svg { width: 23px; height: 23px; stroke-width: 1.8; }
