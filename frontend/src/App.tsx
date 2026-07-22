@@ -22,6 +22,7 @@ import {
   LayoutGrid,
   List,
   LogOut,
+  MoreHorizontal,
   PanelLeftClose,
   PanelLeftOpen,
   Pencil,
@@ -296,7 +297,6 @@ function Sidebar({
   open,
   dark,
   onNavigate,
-  onClose,
   onTheme,
   onLogout,
 }: {
@@ -305,7 +305,6 @@ function Sidebar({
   open: boolean;
   dark: boolean;
   onNavigate: (view: ViewId) => void;
-  onClose: () => void;
   onTheme: () => void;
   onLogout: () => void;
 }) {
@@ -326,9 +325,6 @@ function Sidebar({
     <aside className="sidebar" aria-hidden={!open} inert={!open}>
       <div className="sidebar__header">
         <Brand />
-        <button className="icon-button sidebar__close" type="button" onClick={onClose} aria-label="Закрыть боковое меню">
-          <PanelLeftClose aria-hidden="true" />
-        </button>
       </div>
       <nav className="nav-group" aria-label="Обучение">
         <p>Обучение</p>
@@ -403,9 +399,9 @@ function IconRail({
           <nav className="icon-rail__group" aria-label="Администрирование">{railGroup(availableAdminNav)}</nav>
         </>
       )}
-      <button className="icon-rail__user" type="button" onClick={onOpen} aria-label={`Профиль: ${user.first_name || user.email}`}>
+      <div className="icon-rail__user" title={`${user.first_name || user.email} · ${user.role_label}`}>
         <CircleUserRound aria-hidden="true" />
-      </button>
+      </div>
     </aside>
   );
 }
@@ -1955,24 +1951,28 @@ function CoursesView({ token, user }: { token: string; user: User }) {
               </div>
               <button className="icon-button" type="button" onClick={() => editCourse(course)} aria-label={`Редактировать ${course.title}`}><Pencil /></button>
             </div>
-            <div><h2>{course.title}</h2><p>{course.description || "Описание пока не добавлено"}</p></div>
+            <div className="course-card__title"><h2>{course.title}</h2></div>
             <div className="course-meta"><span><FileText />{chapterCountLabel(course.lessons_count)}</span><span><Clock3 />{course.estimated_minutes} мин</span></div>
-            <div className="course-card__footer"><span>{course.author_name}</span><span>Версия {course.version}</span></div>
-            <label className="content-placement">Расположение<select aria-label={`Расположение курса ${course.title}`} value={placementValue(course.project, course.folder)} onChange={(event) => void moveCourse(course, event.target.value)}>
-              <option value="unassigned">Без проекта</option>
-              {projects.map((project) => <option key={`course-project-${project.id}`} value={`p:${project.id}`}>{project.name} · корень</option>)}
-              {folders.map((folder) => <option key={`course-folder-${folder.id}`} value={`f:${folder.id}`}>{folder.project_name} / {folder.name}</option>)}
-            </select></label>
             <div className="course-card__actions">
               <button className="primary-button course-card__open-scorm" type="button" onClick={() => void openCoursePreview(course)}>
                 <Eye /> Предпросмотр
               </button>
-              <button className="secondary-button" type="button" disabled={exportingScormId === course.id} onClick={() => void exportScorm(course)}>
-                <Download /> {exportingScormId === course.id ? "Экспорт…" : "SCORM 1.2"}
-              </button>
-              <button className="secondary-button" type="button" onClick={() => void changePublication(course)}>
-                {course.status === "published" ? <><CheckCircle2 /> Опубликован</> : <><PlayCircle /> Опубликовать</>}
-              </button>
+              <details className="course-card__more">
+                <summary className="secondary-button"><MoreHorizontal /> Ещё</summary>
+                <div className="course-card__menu">
+                  <label className="content-placement">Переместить<select aria-label={`Расположение курса ${course.title}`} value={placementValue(course.project, course.folder)} onChange={(event) => void moveCourse(course, event.target.value)}>
+                    <option value="unassigned">Без проекта</option>
+                    {projects.map((project) => <option key={`course-project-${project.id}`} value={`p:${project.id}`}>{project.name} · корень</option>)}
+                    {folders.map((folder) => <option key={`course-folder-${folder.id}`} value={`f:${folder.id}`}>{folder.project_name} / {folder.name}</option>)}
+                  </select></label>
+                  <button type="button" disabled={exportingScormId === course.id} onClick={() => void exportScorm(course)}>
+                    <Download /> {exportingScormId === course.id ? "Экспортируем…" : "Экспорт SCORM 1.2"}
+                  </button>
+                  <button type="button" onClick={() => void changePublication(course)}>
+                    {course.status === "published" ? <><CheckCircle2 /> Снять с публикации</> : <><PlayCircle /> Опубликовать</>}
+                  </button>
+                </div>
+              </details>
             </div>
           </article>
         ))}
@@ -2038,15 +2038,6 @@ function App() {
   }, [dark]);
 
   useEffect(() => {
-    if (!sidebarOpen) return;
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setSidebarOpen(false);
-    };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [sidebarOpen]);
-
-  useEffect(() => {
     if (!token) return;
     apiRequest<User>("/auth/me/", token)
       .then(setUser)
@@ -2071,12 +2062,6 @@ function App() {
 
   function navigate(view: ViewId) {
     setActive(view);
-    setSidebarOpen(false);
-  }
-
-  function navigateFromRail(view: ViewId) {
-    setActive(view);
-    setSidebarOpen(true);
   }
 
   if (!token || !user) return <LoginPage onLogin={login} />;
@@ -2087,7 +2072,7 @@ function App() {
         active={active}
         user={user}
         open={sidebarOpen}
-        onNavigate={navigateFromRail}
+        onNavigate={navigate}
         onOpen={() => setSidebarOpen((value) => !value)}
       />
       <Sidebar
@@ -2096,16 +2081,13 @@ function App() {
         open={sidebarOpen}
         dark={dark}
         onNavigate={navigate}
-        onClose={() => setSidebarOpen(false)}
         onTheme={() => setDark((value) => !value)}
         onLogout={() => void logout()}
       />
       {sidebarOpen && (
-        <button
+        <div
           className="sidebar-backdrop"
-          type="button"
-          aria-label="Закрыть боковое меню"
-          onClick={() => setSidebarOpen(false)}
+          aria-hidden="true"
         />
       )}
       <main className="main-content">
