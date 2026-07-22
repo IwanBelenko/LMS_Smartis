@@ -1,3 +1,4 @@
+import Highlight from "@tiptap/extension-highlight";
 import { TextAlign } from "@tiptap/extension-text-align";
 import { TextStyleKit } from "@tiptap/extension-text-style";
 import Image from "@tiptap/extension-image";
@@ -9,6 +10,7 @@ import {
   AlignRight,
   Bold,
   Eraser,
+  Highlighter,
   Italic,
   Link2,
   List,
@@ -18,7 +20,7 @@ import {
   Strikethrough,
   Undo2,
 } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 type RichTextEditorProps = {
   value: string;
@@ -28,10 +30,12 @@ type RichTextEditorProps = {
 };
 
 export default function RichTextEditor({ value, onChange, label = "Содержание урока", variant = "default" }: RichTextEditorProps) {
+  const [highlightColor, setHighlightColor] = useState("#fff1a8");
   const editor = useEditor({
     extensions: [
       StarterKit,
       Image.configure({ inline: false, allowBase64: false }),
+      Highlight.configure({ multicolor: true }),
       TextStyleKit,
       TextAlign.configure({ types: ["heading", "paragraph"] }),
     ],
@@ -151,6 +155,26 @@ export default function RichTextEditor({ value, onChange, label = "Содерж�
           <span>A</span>
           <input type="color" defaultValue="#182016" aria-label="Цвет текста" onChange={(event) => editor.chain().focus().setColor(event.target.value).run()} />
         </label>
+        <span className="editor-tools-group editor-highlight-tools">
+          {button(
+            "Выделить текст цветом",
+            () => editor.chain().focus().toggleHighlight({ color: highlightColor }).run(),
+            <Highlighter />,
+            editor.isActive("highlight"),
+          )}
+          <label className="editor-highlight-color" title="Цвет выделения">
+            <span style={{ backgroundColor: highlightColor }} />
+            <input
+              type="color"
+              value={highlightColor}
+              aria-label="Цвет выделения текста"
+              onChange={(event) => {
+                setHighlightColor(event.target.value);
+                editor.chain().focus().setHighlight({ color: event.target.value }).run();
+              }}
+            />
+          </label>
+        </span>
         <select
           className="editor-select editor-select--line"
           aria-label="Межстрочный интервал"

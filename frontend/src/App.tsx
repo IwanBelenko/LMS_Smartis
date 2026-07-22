@@ -644,63 +644,103 @@ function QuizPreview({ lesson }: { lesson: Lesson }) {
   const questions = lesson.quiz_data?.questions || [];
   const passingScore = lesson.quiz_data?.passing_score ?? 80;
   const [answers, setAnswers] = useState<Record<number, number>>({});
-  const [submitted, setSubmitted] = useState(false);
+  const [currentQuestion, setCurrentQuestion] = useState(0);
+  const [questionSubmitted, setQuestionSubmitted] = useState(false);
+  const [finished, setFinished] = useState(false);
   const correctCount = questions.reduce(
     (total, question, index) => total + (question.options[answers[index]]?.correct ? 1 : 0),
     0,
   );
   const score = questions.length ? Math.round((correctCount / questions.length) * 100) : 0;
+  const question = questions[currentQuestion];
+  const chosenAnswer = answers[currentQuestion];
+  const chosenOption = question?.options[chosenAnswer];
 
   useEffect(() => {
     setAnswers({});
-    setSubmitted(false);
+    setCurrentQuestion(0);
+    setQuestionSubmitted(false);
+    setFinished(false);
   }, [lesson.id, lesson.client_key]);
+
+  function restartQuiz() {
+    setAnswers({});
+    setCurrentQuestion(0);
+    setQuestionSubmitted(false);
+    setFinished(false);
+  }
+
+  function continueQuiz() {
+    if (currentQuestion >= questions.length - 1) {
+      setFinished(true);
+      return;
+    }
+    setCurrentQuestion((current) => current + 1);
+    setQuestionSubmitted(false);
+  }
 
   if (!questions.length) {
     return <div className="native-preview-placeholder"><CheckCircle2 /><p>Вопросы теста пока не добавлены.</p></div>;
   }
 
+  if (finished) {
+    return (
+      <div className={score >= passingScore ? "quiz-result quiz-result--passed" : "quiz-result quiz-result--failed"} role="status">
+        <CheckCircle2 />
+        <div><strong>{score >= passingScore ? "Тест пройден" : "Тест пока не пройден"}</strong><span>Результат: {score}% · правильных ответов {correctCount} из {questions.length}</span></div>
+        <button className="secondary-button" type="button" onClick={restartQuiz}>Пройти ещё раз</button>
+      </div>
+    );
+  }
+
   return (
     <div className="quiz-preview">
-      <p className="quiz-preview__intro">Для прохождения нужно набрать не менее {passingScore}%.</p>
-      {questions.map((question, questionIndex) => (
-        <fieldset className="quiz-question" key={`${question.prompt}-${questionIndex}`}>
-          <legend>{questionIndex + 1}. {question.prompt}</legend>
-          <div className="quiz-options">
-            {question.options.map((option, optionIndex) => {
-              const chosen = answers[questionIndex] === optionIndex;
-              const resultClass = submitted && option.correct ? " quiz-option--correct"
-                : submitted && chosen ? " quiz-option--incorrect" : "";
-              return (
-                <label className={`quiz-option${chosen ? " quiz-option--chosen" : ""}${resultClass}`} key={`${option.text}-${optionIndex}`}>
-                  <input
-                    type="radio"
-                    name={`preview-question-${questionIndex}`}
-                    checked={chosen}
-                    disabled={submitted}
-                    onChange={() => setAnswers((current) => ({ ...current, [questionIndex]: optionIndex }))}
-                  />
-                  <span>{option.text}</span>
-                </label>
-              );
-            })}
-          </div>
-        </fieldset>
-      ))}
-      {!submitted ? (
+      <div className="quiz-preview__progress">
+        <div><span>Вопрос {currentQuestion + 1} из {questions.length}</span><strong>{Math.round(((currentQuestion + 1) / questions.length) * 100)}%</strong></div>
+        <span><i style={{ width: `${((currentQuestion + 1) / questions.length) * 100}%` }} /></span>
+      </div>
+      <p className="quiz-preview__intro">Отвечайте последовательно. Для прохождения нужно набрать не менее {passingScore}%.</p>
+      <fieldset className="quiz-question" key={`${question.prompt}-${currentQuestion}`}>
+        <legend>{currentQuestion + 1}. {question.prompt}</legend>
+        <div className="quiz-options">
+          {question.options.map((option, optionIndex) => {
+            const chosen = chosenAnswer === optionIndex;
+            const resultClass = questionSubmitted && option.correct ? " quiz-option--correct"
+              : questionSubmitted && chosen ? " quiz-option--incorrect" : "";
+            return (
+              <label className={`quiz-option${chosen ? " quiz-option--chosen" : ""}${resultClass}`} key={`${option.text}-${optionIndex}`}>
+                <input
+                  type="radio"
+                  name={`preview-question-${currentQuestion}`}
+                  checked={chosen}
+                  disabled={questionSubmitted}
+                  onChange={() => setAnswers((current) => ({ ...current, [currentQuestion]: optionIndex }))}
+                />
+                <span>{option.text}</span>
+              </label>
+            );
+          })}
+        </div>
+      </fieldset>
+      {!questionSubmitted ? (
         <button
           className="primary-button quiz-preview__submit"
           type="button"
-          disabled={Object.keys(answers).length !== questions.length}
-          onClick={() => setSubmitted(true)}
+          disabled={chosenAnswer === undefined}
+          onClick={() => setQuestionSubmitted(true)}
         >
-          Проверить ответы
+          Ответить
         </button>
       ) : (
-        <div className={score >= passingScore ? "quiz-result quiz-result--passed" : "quiz-result quiz-result--failed"} role="status">
+        <div className={chosenOption?.correct ? "quiz-feedback quiz-feedback--correct" : "quiz-feedback quiz-feedback--incorrect"} role="status">
           <CheckCircle2 />
-          <div><strong>{score >= passingScore ? "Тест пройден" : "Тест пока не пройден"}</strong><span>Результат: {score}% · правильных ответов {correctCount} из {questions.length}</span></div>
-          <button className="secondary-button" type="button" onClick={() => { setAnswers({}); setSubmitted(false); }}>Пройти ещё раз</button>
+          <div>
+            <strong>{chosenOption?.correct ? "Верно" : "Ответ неверный"}</strong>
+            <span>{chosenOption?.correct ? "Ответ принят — можно продолжать." : `Правильный ответ: ${question.options.find((option) => option.correct)?.text || "не указан"}`}</span>
+          </div>
+          <button className="primary-button" type="button" onClick={continueQuiz}>
+            {currentQuestion >= questions.length - 1 ? "Показать результат" : "Следующий вопрос"}<ChevronRight />
+          </button>
         </div>
       )}
     </div>

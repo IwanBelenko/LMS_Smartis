@@ -387,13 +387,19 @@ class CourseApiTests(TestCase):
             self.assertEqual(response.data["lessons"][-1]["title"], "Ссылки из исходного курса")
             self.assertEqual(Course.objects.filter(id=imported["id"], source_format="scorm_12").count(), 1)
 
+            lessons_payload = [dict(lesson) for lesson in response.data["lessons"]]
+            lessons_payload[0]["content"] += (
+                '<p><mark data-color="#fff1a8" style="background-color:#fff1a8">Важный фрагмент</mark></p>'
+            )
             saved = self.client.patch(
                 f"/api/v1/courses/{native_course_id}/",
-                {"lessons": response.data["lessons"]},
+                {"lessons": lessons_payload},
                 format="json",
             )
             self.assertEqual(saved.status_code, 200)
             self.assertIn('<img src="/media/courses/', saved.data["lessons"][0]["content"])
+            self.assertIn("<mark", saved.data["lessons"][0]["content"])
+            self.assertIn("Важный фрагмент", saved.data["lessons"][0]["content"])
 
     def test_editing_published_course_returns_it_to_draft(self):
         self.client.force_authenticate(self.admin)

@@ -11,6 +11,9 @@ importers:
       '@fontsource/roboto':
         specifier: ^5.3.0
         version: 5.3.0
+      '@tiptap/extension-highlight':
+        specifier: ^3.28.0
+        version: 3.28.0(@tiptap/core@3.28.0(@tiptap/pm@3.28.0))
       '@tiptap/extension-image':
         specifier: ^3.28.0
         version: 3.28.0(@tiptap/core@3.28.0(@tiptap/pm@3.28.0))
@@ -532,6 +535,11 @@ packages:
 
   '@tiptap/extension-heading@3.28.0':
     resolution: {integrity: sha512-rKjGG/Ik2lNaXBNVmONEDm5DBfGDLM1NWgSf5RRfBISrH8Lm1xqFruOB9tIaB0YUoSV3SBOiwTF9svmzvKSoRA==}
+    peerDependencies:
+      '@tiptap/core': 3.28.0
+
+  '@tiptap/extension-highlight@3.28.0':
+    resolution: {integrity: sha512-T8uvQ1aZs+u496XxycMk5zAIwA0DxN+SCdSAFWCU7bqCAen3ulzOsk6RXJ+Jx40GqTV/ShPyIcEuaJVNurXxbg==}
     peerDependencies:
       '@tiptap/core': 3.28.0
 
@@ -1272,6 +1280,10 @@ snapshots:
       '@tiptap/core': 3.28.0(@tiptap/pm@3.28.0)
 
   '@tiptap/extension-heading@3.28.0(@tiptap/core@3.28.0(@tiptap/pm@3.28.0))':
+    dependencies:
+      '@tiptap/core': 3.28.0(@tiptap/pm@3.28.0)
+
+  '@tiptap/extension-highlight@3.28.0(@tiptap/core@3.28.0(@tiptap/pm@3.28.0))':
     dependencies:
       '@tiptap/core': 3.28.0(@tiptap/pm@3.28.0)
 
