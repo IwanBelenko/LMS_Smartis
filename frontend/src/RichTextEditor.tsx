@@ -91,6 +91,7 @@ export default function RichTextEditor({ value, onChange, label = "Содерж�
   return (
     <div className={variant === "longread" ? "rich-editor rich-editor--longread" : "rich-editor"}>
       <div className="rich-editor__toolbar" role="toolbar" aria-label="Форматирование текста">
+        {variant === "longread" && <span className="editor-toolbar-title">Форматирование</span>}
         <select
           className="editor-select editor-select--format"
           aria-label="Стиль абзаца"
@@ -113,10 +114,10 @@ export default function RichTextEditor({ value, onChange, label = "Содерж�
         <select
           className="editor-select"
           aria-label="Шрифт"
-          defaultValue="Inter"
+          defaultValue="Roboto"
           onChange={(event) => editor.chain().focus().setFontFamily(event.target.value).run()}
         >
-          <option value="Inter">Inter</option>
+          <option value="Roboto">Roboto</option>
           <option value="Arial">Arial</option>
           <option value="Georgia">Georgia</option>
           <option value="Verdana">Verdana</option>
