@@ -872,13 +872,15 @@ function CoursePreviewModal({
               <div className="native-preview-document">
                 <article
                   className={course.cover_style === "custom" && course.cover_url ? "native-preview-page native-preview-cover native-preview-cover--image" : "native-preview-page native-preview-cover"}
-                  style={course.cover_style === "custom" && course.cover_url ? { backgroundImage: `linear-gradient(90deg, rgba(8,12,7,.82), rgba(8,12,7,.35)), url(${course.cover_url})` } : undefined}
                   ref={(node) => { previewSectionRefs.current[0] = node; }}
                 >
-                  <span className="longread-eyebrow">SMARTIS · ОБУЧЕНИЕ</span>
-                  <h1>{course.title}</h1>
-                  <p>{course.description || "Описание курса пока не добавлено"}</p>
-                  <div className="longread-cover-meta"><span><BookOpen />{chapterCountLabel(course.lessons.length)}</span><span><Clock3 />{course.estimated_minutes} минут</span></div>
+                  {course.cover_style === "custom" && course.cover_url && <img className="native-preview-cover-image" src={course.cover_url} alt="" />}
+                  <div className="native-preview-cover-content">
+                    <span className="longread-eyebrow">SMARTIS · ОБУЧЕНИЕ</span>
+                    <h1>{course.title}</h1>
+                    <p>{course.description || "Описание курса пока не добавлено"}</p>
+                    <div className="longread-cover-meta"><span><BookOpen />{chapterCountLabel(course.lessons.length)}</span><span><Clock3 />{course.estimated_minutes} минут</span></div>
+                  </div>
                 </article>
                 {course.lessons.map((lesson, lessonIndex) => (
                   <article
