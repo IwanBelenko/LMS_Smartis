@@ -54,7 +54,7 @@ function Brand({ login = false }: { login?: boolean }) {
     <div className={login ? "brand brand--login" : "brand"}>
       <img className="brand__wordmark brand__wordmark--light" src={smartisWordmarkLight} alt="Smartis" />
       <img className="brand__wordmark brand__wordmark--dark" src={smartisWordmarkDark} alt="" aria-hidden="true" />
-      <span className="visually-hidden">Smartis LMS</span>
+      {login ? <span className="brand__product-label">LMS</span> : <span className="visually-hidden">Smartis LMS</span>}
     </div>
   );
 }
@@ -242,9 +242,9 @@ function LoginPage({ onLogin }: { onLogin: (token: string, user: User) => void }
     <main className="login-page">
       <section className="login-card">
         <Brand login />
-        <div>
-          <h1>Вход в систему</h1>
-          <p>Используйте корпоративную почту</p>
+        <div className="login-intro">
+          <h1>Корпоративная система обучения</h1>
+          <p>Отдельный LMS-сервис для обучения сотрудников Smartis</p>
         </div>
         <form onSubmit={submit}>
           <label>

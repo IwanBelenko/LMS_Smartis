@@ -80,7 +80,13 @@ svg { width: 20px; height: 20px; flex: 0 0 auto; }
 .brand__wordmark--dark { display: none; }
 :root[data-theme="dark"] .brand__wordmark--light { display: none; }
 :root[data-theme="dark"] .brand__wordmark--dark { display: block; }
+.brand--login { gap: 14px; }
 .brand--login .brand__wordmark { width: 230px; }
+.brand__product-label {
+  padding: 6px 9px; border: 1px solid color-mix(in srgb, var(--brand) 60%, var(--border)); border-radius: 7px;
+  background: color-mix(in srgb, var(--brand) 14%, var(--surface)); color: var(--brand-hover);
+  font-size: 0.78rem; font-weight: 800; letter-spacing: 0.12em;
+}
 .visually-hidden {
   width: 1px; height: 1px; padding: 0; margin: -1px; position: absolute; overflow: hidden;
   clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
@@ -666,8 +672,10 @@ td:first-child span { color: var(--muted); font-size: 0.8rem; }
   display: grid; gap: 26px;
 }
 .brand--login { justify-content: center; }
-.login-card > div:nth-child(2) { text-align: center; }
-.login-card > div:nth-child(2) p, .login-note { margin-top: 7px; color: var(--muted); }
+.login-intro { text-align: center; }
+.login-intro h1 { font-size: 1.45rem; }
+.login-intro p, .login-note { margin-top: 7px; color: var(--muted); }
+.login-intro p { line-height: 1.45; }
 .login-card form { display: grid; gap: 15px; }
 .login-note { text-align: center; font-size: 0.8rem; }
 
