@@ -1,5 +1,6 @@
 import { TextAlign } from "@tiptap/extension-text-align";
 import { TextStyleKit } from "@tiptap/extension-text-style";
+import Image from "@tiptap/extension-image";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import {
@@ -30,6 +31,7 @@ export default function RichTextEditor({ value, onChange, label = "Содерж�
   const editor = useEditor({
     extensions: [
       StarterKit,
+      Image.configure({ inline: false, allowBase64: false }),
       TextStyleKit,
       TextAlign.configure({ types: ["heading", "paragraph"] }),
     ],

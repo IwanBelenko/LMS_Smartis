@@ -20,7 +20,7 @@ from apps.identity.models import User
 from .models import ContentFolder, ContentProject, Course, LearningPath, Lesson
 from .permissions import IsCourseManagerOrReadOnly, IsLibraryManager
 from .scorm import build_scorm_12_package, ensure_scorm_runtime_bridge, extract_scorm_package, inspect_scorm_package
-from .scorm_convert import convert_ispring_scorm_to_native
+from .scorm_convert import convert_ispring_scorm_to_native, restore_ispring_images
 from .serializers import (
     ContentFolderSerializer,
     ContentProjectSerializer,
@@ -224,6 +224,15 @@ class CourseViewSet(viewsets.ModelViewSet):
         if course.source_format != Course.SourceFormat.SCORM_12:
             return Response({"detail": "Этот курс уже доступен в редакторе Smartis"}, status=status.HTTP_400_BAD_REQUEST)
         try:
+            existing_copy = Course.objects.filter(
+                author=request.user,
+                source_format=Course.SourceFormat.NATIVE,
+                title=f"{course.title} — редактируемая копия"[:220],
+                description__startswith=f"Создано из SCORM 1.2 «{course.title}».",
+            ).order_by("-updated_at").first()
+            if existing_copy:
+                restore_ispring_images(course, existing_copy)
+                return Response(self.get_serializer(existing_copy).data)
             converted = convert_ispring_scorm_to_native(course, request.user)
         except serializers.ValidationError as exc:
             return Response({"detail": exc.detail}, status=status.HTTP_400_BAD_REQUEST)

@@ -118,7 +118,7 @@ class LessonSerializer(serializers.ModelSerializer):
             value,
             tags={
                 "p", "br", "h1", "h2", "h3", "h4", "strong", "b", "em", "i", "s", "del",
-                "ul", "ol", "li", "blockquote", "pre", "code", "a", "span", "hr",
+                "ul", "ol", "li", "blockquote", "pre", "code", "a", "span", "hr", "img",
             },
             clean_content_tags={"script", "style", "iframe", "object", "embed"},
             attributes={
@@ -129,6 +129,7 @@ class LessonSerializer(serializers.ModelSerializer):
                 "h2": {"style"},
                 "h3": {"style"},
                 "h4": {"style"},
+                "img": {"src", "alt", "title", "width", "height", "loading"},
             },
             filter_style_properties={
                 "font-family", "font-size", "color", "background-color", "line-height", "text-align",

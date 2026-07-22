@@ -771,24 +771,21 @@ function QuizEditor({ value, onChange }: { value: QuizData; onChange: (value: Qu
 
 function CoursePreviewModal({
   course,
-  step,
-  onStep,
   onClose,
   scormLaunchUrl,
   scormRuntime,
   scormFrameRef,
 }: {
   course: Course;
-  step: number;
-  onStep: (step: number) => void;
   onClose: () => void;
   scormLaunchUrl: string;
   scormRuntime: { status: string; score: string };
   scormFrameRef: React.RefObject<HTMLIFrameElement | null>;
 }) {
-  const lesson = step >= 0 ? course.lessons[step] : undefined;
-  const isLastStep = step >= course.lessons.length - 1;
   const previewScrollRef = useRef<HTMLDivElement>(null);
+  const previewSectionRefs = useRef<(HTMLElement | null)[]>([]);
+  const [activeSection, setActiveSection] = useState(-1);
+  const isLastSection = activeSection >= course.lessons.length - 1;
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -796,7 +793,18 @@ function CoursePreviewModal({
   }, []);
   useEffect(() => {
     previewScrollRef.current?.scrollTo({ top: 0 });
-  }, [step]);
+    setActiveSection(-1);
+  }, [course.id]);
+
+  function continueLongread() {
+    if (isLastSection) {
+      onClose();
+      return;
+    }
+    const nextSection = activeSection + 1;
+    setActiveSection(nextSection);
+    previewSectionRefs.current[nextSection + 1]?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
   return (
     <div className="course-preview-overlay" role="dialog" aria-modal="true" aria-label={`Предпросмотр курса ${course.title}`}>
       <section className="course-preview-modal">
@@ -821,39 +829,44 @@ function CoursePreviewModal({
         ) : (
           <div className="native-course-preview">
             <div className="native-preview-scroll" ref={previewScrollRef}>
-              {!lesson ? (
+              <div className="native-preview-document">
                 <article
                   className={course.cover_style === "custom" && course.cover_url ? "native-preview-page native-preview-cover native-preview-cover--image" : "native-preview-page native-preview-cover"}
                   style={course.cover_style === "custom" && course.cover_url ? { backgroundImage: `linear-gradient(90deg, rgba(8,12,7,.82), rgba(8,12,7,.35)), url(${course.cover_url})` } : undefined}
+                  ref={(node) => { previewSectionRefs.current[0] = node; }}
                 >
                   <span className="longread-eyebrow">SMARTIS · ОБУЧЕНИЕ</span>
                   <h1>{course.title}</h1>
                   <p>{course.description || "Описание курса пока не добавлено"}</p>
                   <div className="longread-cover-meta"><span><BookOpen />{chapterCountLabel(course.lessons.length)}</span><span><Clock3 />{course.estimated_minutes} минут</span></div>
                 </article>
-              ) : (
-                <article className="native-preview-page native-preview-lesson">
-                  <div className="longread-chapter-kicker"><span>Глава {step + 1}</span><span>{lessonTypeLabels[lesson.lesson_type]}</span></div>
-                  <h1>{lesson.title}</h1>
-                  {lesson.lesson_type === "quiz" ? (
-                    <QuizPreview lesson={lesson} />
-                  ) : lesson.lesson_type === "text" ? (
-                    <div className="native-preview-content" dangerouslySetInnerHTML={{ __html: lesson.content || "<p>Содержание пока не добавлено.</p>" }} />
-                  ) : lesson.lesson_type === "video" ? (
-                    lesson.video_url ? <video className="native-preview-video" src={lesson.video_url} controls /> : <div className="native-preview-placeholder"><Video /><p>Видео появится после сохранения и загрузки файла.</p></div>
-                  ) : lesson.lesson_type === "scorm" ? (
-                    <div className="native-preview-placeholder"><FileArchive /><p>SCORM-пакет открывается в отдельном режиме просмотра.</p></div>
-                  ) : (
-                    <div className="native-preview-placeholder"><Link2 /><p>Материал откроется в новой вкладке.</p><a className="primary-button" href={lesson.media_url} target="_blank" rel="noreferrer">Открыть материал</a></div>
-                  )}
-                </article>
-              )}
+                {course.lessons.map((lesson, lessonIndex) => (
+                  <article
+                    className="native-preview-page native-preview-lesson"
+                    key={lesson.id ?? lesson.client_key ?? lessonIndex}
+                    ref={(node) => { previewSectionRefs.current[lessonIndex + 1] = node; }}
+                  >
+                    <div className="longread-chapter-kicker"><span>Глава {lessonIndex + 1}</span><span>{lessonTypeLabels[lesson.lesson_type]}</span></div>
+                    <h1>{lesson.title}</h1>
+                    {lesson.lesson_type === "quiz" ? (
+                      <QuizPreview lesson={lesson} />
+                    ) : lesson.lesson_type === "text" ? (
+                      <div className="native-preview-content" dangerouslySetInnerHTML={{ __html: lesson.content || "<p>Содержание пока не добавлено.</p>" }} />
+                    ) : lesson.lesson_type === "video" ? (
+                      lesson.video_url ? <video className="native-preview-video" src={lesson.video_url} controls /> : <div className="native-preview-placeholder"><Video /><p>Видео появится после сохранения и загрузки файла.</p></div>
+                    ) : lesson.lesson_type === "scorm" ? (
+                      <div className="native-preview-placeholder"><FileArchive /><p>SCORM-пакет открывается в отдельном режиме просмотра.</p></div>
+                    ) : (
+                      <div className="native-preview-placeholder"><Link2 /><p>Материал откроется в новой вкладке.</p><a className="primary-button" href={lesson.media_url} target="_blank" rel="noreferrer">Открыть материал</a></div>
+                    )}
+                  </article>
+                ))}
+              </div>
             </div>
-            <footer className="native-preview-navigation">
-              <button className="secondary-button" type="button" disabled={step < 0} onClick={() => onStep(step - 1)}><ChevronLeft /> Назад</button>
-              <span>{step < 0 ? "Обложка" : `${step + 1} / ${course.lessons.length}`}</span>
-              <button className="primary-button" type="button" onClick={() => isLastStep ? onClose() : onStep(step + 1)}>
-                {course.lessons.length === 0 || isLastStep ? "Завершить" : step < 0 ? "Начать" : "Далее"}<ChevronRight />
+            <footer className="native-preview-navigation native-preview-navigation--longread">
+              <span>{activeSection < 0 ? "Обложка" : `Глава ${activeSection + 1} из ${course.lessons.length}`}</span>
+              <button className="primary-button" type="button" onClick={continueLongread}>
+                {isLastSection ? "Завершить" : "Продолжить"}{isLastSection ? <CheckCircle2 /> : <ArrowDown />}
               </button>
             </footer>
           </div>
@@ -898,7 +911,6 @@ function CoursesView({ token, user }: { token: string; user: User }) {
   const [convertingScormId, setConvertingScormId] = useState<number | null>(null);
   const [exportingScormId, setExportingScormId] = useState<number | null>(null);
   const [previewCourse, setPreviewCourse] = useState<Course | null>(null);
-  const [previewStep, setPreviewStep] = useState(-1);
   const [scormLaunchUrl, setScormLaunchUrl] = useState("");
   const [scormRuntime, setScormRuntime] = useState({ status: "Не начат", score: "—" });
   const [courseView, setCourseView] = useState<"cards" | "compact" | "list">(
@@ -1332,7 +1344,7 @@ function CoursesView({ token, user }: { token: string; user: User }) {
       const converted = await apiRequest<Course>(`/courses/${course.id}/convert-to-native/`, token, { method: "POST" });
       await load();
       editCourse(converted);
-      setNotice(`Создана редактируемая копия «${converted.title}» · исходный SCORM сохранён`);
+      setNotice(`Редактируемая копия «${converted.title}» готова · изображения и исходный SCORM сохранены`);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Не удалось преобразовать SCORM в редактируемый курс");
     } finally {
@@ -1378,7 +1390,6 @@ function CoursesView({ token, user }: { token: string; user: User }) {
       }
       setScormRuntime({ status: "Не начат", score: "—" });
       setScormLaunchUrl(launchUrl);
-      setPreviewStep(-1);
       setPreviewCourse(course);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Не удалось открыть предпросмотр");
@@ -1422,7 +1433,6 @@ function CoursesView({ token, user }: { token: string; user: User }) {
       return;
     }
     setScormLaunchUrl("");
-    setPreviewStep(-1);
     setPreviewCourse(draftCourse);
   }
 
@@ -1445,8 +1455,6 @@ function CoursesView({ token, user }: { token: string; user: User }) {
   const previewModal = previewCourse ? (
     <CoursePreviewModal
       course={previewCourse}
-      step={previewStep}
-      onStep={setPreviewStep}
       onClose={() => { setPreviewCourse(null); setScormLaunchUrl(""); }}
       scormLaunchUrl={scormLaunchUrl}
       scormRuntime={scormRuntime}

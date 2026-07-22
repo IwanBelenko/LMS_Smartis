@@ -1,7 +1,10 @@
 import html
 import json
-from urllib.parse import urlsplit
+import mimetypes
+import re
+import shutil
 from pathlib import Path
+from urllib.parse import quote, unquote, urlsplit
 
 from django.conf import settings
 from django.db import transaction
@@ -130,7 +133,36 @@ def _find_quiz(value) -> dict:
     return {}
 
 
-def _render_store(store) -> str:
+def _render_image_block(block, image_urls: dict[str, str] | None) -> str:
+    rendered = []
+    for image in block.get("is", []):
+        if not isinstance(image, dict) or image.get("t") != "i":
+            continue
+        source = image.get("s", "")
+        url = image_urls.get(source, "") if image_urls else ""
+        if not url:
+            continue
+        dimensions = []
+        for attribute, value in (("width", image.get("w")), ("height", image.get("h"))):
+            if isinstance(value, int) and 0 < value <= 10000:
+                dimensions.append(f'{attribute}="{value}"')
+        image_markup = (
+            f'<img src="{html.escape(url, quote=True)}" alt="Изображение из курса" '
+            f'loading="lazy" {" ".join(dimensions)}>'
+        )
+        link = _safe_url(image.get("l", {}).get("v", "")) if isinstance(image.get("l"), dict) else ""
+        if link:
+            image_markup = (
+                f'<a href="{html.escape(link, quote=True)}" target="_blank" rel="noopener noreferrer">'
+                f"{image_markup}</a>"
+            )
+        rendered.append(image_markup)
+    if rendered:
+        return "".join(rendered)
+    return "<p><em>Изображение доступно только в исходной SCORM-версии курса.</em></p>"
+
+
+def _render_store(store, image_urls: dict[str, str] | None = None) -> str:
     parts = []
     list_open = False
 
@@ -158,7 +190,7 @@ def _render_store(store) -> str:
         elif block_type == "n" and text:
             parts.append(f"<blockquote>{_rich_text(block) or html.escape(text)}</blockquote>")
         elif block_type == "c":
-            parts.append("<p><em>Изображение сохранено в исходной SCORM-версии курса.</em></p>")
+            parts.append(_render_image_block(block, image_urls))
         elif block_type in {"ac", "tb"}:
             containers = block.get("cts", {})
             for index, container_id in enumerate(containers.get("ctsO", []), start=1):
@@ -170,7 +202,7 @@ def _render_store(store) -> str:
                     parts.append(f"<h3>Вкладка {index}</h3>")
                 body = container.get("b", {})
                 if isinstance(body, dict):
-                    parts.append(_render_store(body))
+                    parts.append(_render_store(body, image_urls))
         elif block_type == "Q":
             parts.append(_render_quiz(block))
         elif block_type == "ct":
@@ -181,7 +213,7 @@ def _render_store(store) -> str:
     return "".join(parts)
 
 
-def _ispring_sections(document) -> list[tuple[str, str]]:
+def _ispring_sections(document, image_urls: dict[str, str] | None = None) -> list[tuple[str, str]]:
     courses = document.get("content", {}).get("c", {}).get("B", {})
     if not courses:
         raise serializers.ValidationError("В пакете не найдены данные лонгрида iSpring")
@@ -196,7 +228,7 @@ def _ispring_sections(document) -> list[tuple[str, str]]:
 
     def flush():
         if current_store["o"]:
-            content = _render_store(current_store)
+            content = _render_store(current_store, image_urls)
             if content.strip():
                 sections.append((current_title[:220], content))
 
@@ -223,7 +255,7 @@ def _ispring_sections(document) -> list[tuple[str, str]]:
     return sections
 
 
-def _load_ispring_document(source_course: Course) -> dict:
+def _load_ispring_document(source_course: Course) -> tuple[dict, Path]:
     content_root = (Path(settings.MEDIA_ROOT) / source_course.scorm_content_dir).resolve()
     media_root = Path(settings.MEDIA_ROOT).resolve()
     if media_root not in content_root.parents or not content_root.is_dir():
@@ -234,7 +266,7 @@ def _load_ispring_document(source_course: Course) -> dict:
         try:
             document = json.loads(data_file.read_text(encoding="utf-8-sig"))
             _ispring_sections(document)
-            return document
+            return document, data_file.parent
         except (UnicodeError, json.JSONDecodeError, serializers.ValidationError):
             continue
     raise serializers.ValidationError(
@@ -242,18 +274,89 @@ def _load_ispring_document(source_course: Course) -> dict:
     )
 
 
+def _iter_ispring_images(value):
+    if isinstance(value, dict):
+        if value.get("t") == "i" and isinstance(value.get("s"), str):
+            yield value
+        for item in value.values():
+            yield from _iter_ispring_images(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _iter_ispring_images(item)
+
+
+def _copy_ispring_images(source_course: Course, native_course: Course, document: dict, source_base: Path) -> dict[str, str]:
+    media_root = Path(settings.MEDIA_ROOT).resolve()
+    content_root = (media_root / source_course.scorm_content_dir).resolve()
+    source_base = source_base.resolve()
+    if source_base != content_root and content_root not in source_base.parents:
+        raise serializers.ValidationError("Каталог ресурсов iSpring находится за пределами SCORM-пакета")
+
+    target_root = (media_root / "courses" / str(native_course.id) / "assets" / "scorm-import").resolve()
+    image_urls: dict[str, str] = {}
+    for image in _iter_ispring_images(document):
+        raw_source = image.get("s", "")
+        parsed = urlsplit(raw_source)
+        if parsed.scheme or parsed.netloc:
+            continue
+        relative_path = Path(unquote(parsed.path))
+        if relative_path.is_absolute() or ".." in relative_path.parts:
+            continue
+        source_file = (source_base / relative_path).resolve()
+        if content_root not in source_file.parents or not source_file.is_file():
+            continue
+        content_type, _ = mimetypes.guess_type(source_file.name)
+        if not content_type or not content_type.startswith("image/"):
+            continue
+        target_file = (target_root / relative_path).resolve()
+        if target_root not in target_file.parents:
+            continue
+        target_file.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source_file, target_file)
+        media_path = target_file.relative_to(media_root).as_posix()
+        image_urls[raw_source] = f"{settings.MEDIA_URL.rstrip('/')}/{quote(media_path, safe='/')}"
+    return image_urls
+
+
 def extract_ispring_sections(source_course: Course) -> list[tuple[str, str]]:
-    return _ispring_sections(_load_ispring_document(source_course))
+    document, _ = _load_ispring_document(source_course)
+    return _ispring_sections(document)
 
 
 def extract_ispring_quiz_data(source_course: Course) -> dict:
-    return _find_quiz(_load_ispring_document(source_course))
+    document, _ = _load_ispring_document(source_course)
+    return _find_quiz(document)
+
+
+@transaction.atomic
+def restore_ispring_images(source_course: Course, native_course: Course) -> int:
+    """Restore missing iSpring images without overwriting edited lesson text."""
+    document, source_base = _load_ispring_document(source_course)
+    image_urls = _copy_ispring_images(source_course, native_course, document, source_base)
+    rendered_sections = dict(_ispring_sections(document, image_urls))
+    placeholder = "<p><em>Изображение сохранено в исходной SCORM-версии курса.</em></p>"
+    updated_lessons = 0
+    for lesson in native_course.lessons.all():
+        if placeholder not in lesson.content:
+            continue
+        rendered_content = rendered_sections.get(lesson.title, "")
+        imported_images = iter(re.findall(r'(?:<a\b[^>]*>)?<img\b[^>]*>(?:</a>)?', rendered_content))
+        restored_content = lesson.content
+        while placeholder in restored_content:
+            image_markup = next(imported_images, "")
+            if not image_markup:
+                break
+            restored_content = restored_content.replace(placeholder, image_markup, 1)
+        if restored_content != lesson.content:
+            lesson.content = restored_content
+            lesson.save(update_fields=["content", "updated_at"])
+            updated_lessons += 1
+    return updated_lessons
 
 
 @transaction.atomic
 def convert_ispring_scorm_to_native(source_course: Course, author) -> Course:
-    document = _load_ispring_document(source_course)
-    sections = _ispring_sections(document)
+    document, source_base = _load_ispring_document(source_course)
     quiz_data = _find_quiz(document)
 
     converted = Course.objects.create(
@@ -268,6 +371,8 @@ def convert_ispring_scorm_to_native(source_course: Course, author) -> Course:
         source_format=Course.SourceFormat.NATIVE,
         estimated_minutes=source_course.estimated_minutes,
     )
+    image_urls = _copy_ispring_images(source_course, converted, document, source_base)
+    sections = _ispring_sections(document, image_urls)
     minutes_per_section = max(1, source_course.estimated_minutes // len(sections))
     Lesson.objects.bulk_create(
         [

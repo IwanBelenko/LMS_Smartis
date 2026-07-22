@@ -256,3 +256,7 @@ def delete_course_cover(sender, instance, **kwargs):
         media_root = Path(settings.MEDIA_ROOT).resolve()
         if content_dir != media_root and media_root in content_dir.parents:
             shutil.rmtree(content_dir, ignore_errors=True)
+    imported_assets = (Path(settings.MEDIA_ROOT) / "courses" / str(instance.id) / "assets" / "scorm-import").resolve()
+    media_root = Path(settings.MEDIA_ROOT).resolve()
+    if imported_assets != media_root and media_root in imported_assets.parents:
+        shutil.rmtree(imported_assets, ignore_errors=True)

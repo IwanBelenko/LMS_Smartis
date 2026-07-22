@@ -293,7 +293,7 @@ class CourseApiTests(TestCase):
                         "course": {
                             "cs": {
                                 "b": {
-                                    "o": ["heading", "paragraph", "test-heading", "quiz"],
+                                    "o": ["heading", "paragraph", "image", "test-heading", "quiz"],
                                     "B": {
                                         "heading": {"t": "p", "v": "h2", "c": [{"t": "1. Введение"}]},
                                         "paragraph": {
@@ -302,6 +302,17 @@ class CourseApiTests(TestCase):
                                             "c": [
                                                 {"t": "Редактируемый текст и "},
                                                 {"t": "документация", "m": {"#": ["https://example.com/docs"]}},
+                                            ],
+                                        },
+                                        "image": {
+                                            "t": "c",
+                                            "is": [
+                                                {
+                                                    "t": "i",
+                                                    "s": "images/product.png",
+                                                    "w": 640,
+                                                    "h": 360,
+                                                }
                                             ],
                                         },
                                         "test-heading": {"t": "p", "v": "h2", "c": [{"t": "2. Тест"}]},
@@ -345,7 +356,10 @@ class CourseApiTests(TestCase):
                 {
                     "package": make_scorm_12_package(
                         "iSpring",
-                        extra_files={"data-1.json": json.dumps(ispring_document, ensure_ascii=False)},
+                        extra_files={
+                            "data-1.json": json.dumps(ispring_document, ensure_ascii=False),
+                            "images/product.png": b"test-image",
+                        },
                     )
                 },
                 format="multipart",
@@ -357,6 +371,11 @@ class CourseApiTests(TestCase):
             self.assertEqual(response.data["source_format"], Course.SourceFormat.NATIVE)
             self.assertEqual(response.data["lessons"][0]["title"], "1. Введение")
             self.assertIn("Редактируемый текст", response.data["lessons"][0]["content"])
+            self.assertIn('<img src="/media/courses/', response.data["lessons"][0]["content"])
+            self.assertIn('/assets/scorm-import/images/product.png"', response.data["lessons"][0]["content"])
+            native_course_id = response.data["id"]
+            imported_image = Path(media_root) / "courses" / str(native_course_id) / "assets" / "scorm-import" / "images" / "product.png"
+            self.assertTrue(imported_image.exists())
             quiz_lesson = next(lesson for lesson in response.data["lessons"] if lesson["lesson_type"] == "quiz")
             self.assertEqual(quiz_lesson["title"], "2. Тест")
             self.assertEqual(quiz_lesson["quiz_data"]["questions"][0]["prompt"], "Вопрос?")
@@ -367,6 +386,14 @@ class CourseApiTests(TestCase):
             self.assertIn('href="https://example.com/additional-guide"', all_content)
             self.assertEqual(response.data["lessons"][-1]["title"], "Ссылки из исходного курса")
             self.assertEqual(Course.objects.filter(id=imported["id"], source_format="scorm_12").count(), 1)
+
+            saved = self.client.patch(
+                f"/api/v1/courses/{native_course_id}/",
+                {"lessons": response.data["lessons"]},
+                format="json",
+            )
+            self.assertEqual(saved.status_code, 200)
+            self.assertIn('<img src="/media/courses/', saved.data["lessons"][0]["content"])
 
     def test_editing_published_course_returns_it_to_draft(self):
         self.client.force_authenticate(self.admin)
