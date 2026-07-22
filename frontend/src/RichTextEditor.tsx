@@ -18,6 +18,7 @@ import {
   Quote,
   Redo2,
   Strikethrough,
+  Trash2,
   Undo2,
 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -176,6 +177,21 @@ export default function RichTextEditor({ value, onChange, label = "Содерж�
             />
           </label>
         </span>
+        {editor.isActive("image") && (
+          <span className="editor-tools-group editor-image-tools">
+            <button
+              className="editor-image-delete"
+              type="button"
+              title="Удалить выбранное изображение"
+              aria-label="Удалить выбранное изображение"
+              aria-keyshortcuts="Delete Backspace"
+              onClick={() => editor.chain().focus().deleteSelection().run()}
+            >
+              <Trash2 />
+              <span>Удалить</span>
+            </button>
+          </span>
+        )}
         <select
           className="editor-select editor-select--line"
           aria-label="Межстрочный интервал"

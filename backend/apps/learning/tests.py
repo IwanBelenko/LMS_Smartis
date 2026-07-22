@@ -401,6 +401,19 @@ class CourseApiTests(TestCase):
             self.assertIn("<mark", saved.data["lessons"][0]["content"])
             self.assertIn("Важный фрагмент", saved.data["lessons"][0]["content"])
 
+            removable_content = saved.data["lessons"][0]["content"]
+            image_start = removable_content.index("<img")
+            image_end = removable_content.index(">", image_start) + 1
+            removable_lessons = [dict(lesson) for lesson in saved.data["lessons"]]
+            removable_lessons[0]["content"] = removable_content[:image_start] + removable_content[image_end:]
+            removed = self.client.patch(
+                f"/api/v1/courses/{native_course_id}/",
+                {"lessons": removable_lessons},
+                format="json",
+            )
+            self.assertEqual(removed.status_code, 200)
+            self.assertNotIn("<img", removed.data["lessons"][0]["content"])
+
     def test_editing_published_course_returns_it_to_draft(self):
         self.client.force_authenticate(self.admin)
         created = self.client.post("/api/v1/courses/", self.course_payload(), format="json").data

@@ -297,6 +297,15 @@ td:first-child span { color: var(--muted); font-size: 0.8rem; }
 }
 .editor-highlight-color > span { width: 16px; height: 6px; border: 1px solid color-mix(in srgb, var(--foreground) 24%, transparent); border-radius: 999px; }
 .editor-highlight-color input { width: 1px; min-height: 1px; padding: 0; position: absolute; opacity: 0; }
+.editor-image-tools { align-items: center; }
+.editor-image-delete {
+  min-height: 32px; padding: 5px 8px; border: 1px solid color-mix(in srgb, var(--danger) 38%, var(--border));
+  border-radius: 7px; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  background: color-mix(in srgb, var(--danger) 8%, var(--surface)); color: var(--danger); cursor: pointer;
+}
+.editor-image-delete:hover { background: color-mix(in srgb, var(--danger) 15%, var(--surface)); }
+.editor-image-delete svg { width: 16px; height: 16px; }
+.editor-image-delete span { font-size: 0.75rem; font-weight: 700; }
 .rich-editor__content { min-height: 190px; padding: 16px; color: var(--foreground); line-height: 1.5; outline: none; }
 .rich-editor__content > :first-child { margin-top: 0; }
 .rich-editor__content > :last-child { margin-bottom: 0; }
@@ -310,7 +319,11 @@ td:first-child span { color: var(--muted); font-size: 0.8rem; }
 .rich-editor__content mark, .native-preview-content mark { padding: 0.08em 0.14em; border-radius: 0.2em; color: #24211a; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
 .rich-editor__content img {
   display: block; width: auto; max-width: 100%; height: auto; max-height: 560px; margin: 1.2em auto;
-  border-radius: 10px; object-fit: contain; background: var(--surface-soft);
+  border-radius: 10px; object-fit: contain; background: var(--surface-soft); cursor: pointer;
+}
+.rich-editor__content img.ProseMirror-selectednode {
+  outline: 3px solid var(--brand); outline-offset: 4px;
+  box-shadow: 0 0 0 7px color-mix(in srgb, var(--brand) 18%, transparent);
 }
 .rich-editor__content p.is-editor-empty:first-child::before { content: "Начните писать текст урока…"; color: var(--muted); float: left; height: 0; pointer-events: none; }
 .video-upload-field { padding: 12px; border: 1px dashed var(--border); border-radius: 11px; background: var(--surface); }
@@ -447,6 +460,8 @@ td:first-child span { color: var(--muted); font-size: 0.8rem; }
 }
 .rich-editor--longread .editor-tools-group--end { margin-left: 0; }
 .rich-editor--longread .editor-highlight-tools { grid-template-columns: 32px 32px; justify-content: start; }
+.rich-editor--longread .editor-image-tools { display: block; }
+.rich-editor--longread .editor-image-delete { width: 100%; }
 .rich-editor--longread .editor-color { margin-left: 1px; }
 .rich-editor--longread > div:last-child { min-width: 0; }
 .rich-editor--longread .rich-editor__content { min-height: 390px; padding: 20px 2px 60px; font-size: 1.04rem; line-height: 1.7; }
