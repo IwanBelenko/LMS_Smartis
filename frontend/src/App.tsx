@@ -13,6 +13,9 @@ import {
   Eye,
   FileArchive,
   FileText,
+  Folder,
+  FolderOpen,
+  FolderPlus,
   GripVertical,
   Home,
   Link2,
@@ -106,12 +109,53 @@ type Course = {
   scorm_imported_at?: string | null;
   author: number;
   author_name: string;
+  project: number | null;
+  project_name: string;
+  folder: number | null;
+  folder_name: string;
   status: "draft" | "published" | "archived";
   status_label: string;
   estimated_minutes: number;
   version: number;
   lessons_count: number;
   lessons: Lesson[];
+  updated_at: string;
+};
+type ContentProject = {
+  id: number;
+  name: string;
+  description: string;
+  owner: number;
+  owner_name: string;
+  course_count: number;
+  folder_count: number;
+  path_count: number;
+  updated_at: string;
+};
+type ContentFolder = {
+  id: number;
+  name: string;
+  project: number;
+  project_name: string;
+  parent: number | null;
+  course_count: number;
+  path_count: number;
+  updated_at: string;
+};
+type LearningPath = {
+  id: number;
+  title: string;
+  description: string;
+  author: number;
+  author_name: string;
+  project: number | null;
+  project_name: string;
+  folder: number | null;
+  folder_name: string;
+  status: "draft" | "published" | "archived";
+  status_label: string;
+  course_ids: number[];
+  course_count: number;
   updated_at: string;
 };
 
@@ -238,6 +282,14 @@ const adminNav = [
   { id: "settings" as const, label: "Настройки", icon: Settings },
 ];
 
+function visibleAdminNav(user: User) {
+  return user.role === "admin"
+    ? adminNav
+    : user.role === "author"
+      ? adminNav.filter((item) => item.id === "courses")
+      : [];
+}
+
 function Sidebar({
   active,
   user,
@@ -257,11 +309,7 @@ function Sidebar({
   onTheme: () => void;
   onLogout: () => void;
 }) {
-  const visibleAdminNav = user.role === "admin"
-    ? adminNav
-    : user.role === "author"
-      ? adminNav.filter((item) => item.id === "courses")
-      : [];
+  const availableAdminNav = visibleAdminNav(user);
   const group = (items: typeof nav | typeof adminNav) =>
     items.map(({ id, label, icon: Icon }) => (
       <button
@@ -286,10 +334,10 @@ function Sidebar({
         <p>Обучение</p>
         {group(nav)}
       </nav>
-      {visibleAdminNav.length > 0 && (
+      {availableAdminNav.length > 0 && (
         <nav className="nav-group" aria-label="Администрирование">
           <p>Администрирование</p>
-          {group(visibleAdminNav)}
+          {group(availableAdminNav)}
         </nav>
       )}
       <div className="sidebar__footer">
@@ -307,6 +355,57 @@ function Sidebar({
           </button>
         </div>
       </div>
+    </aside>
+  );
+}
+
+function IconRail({
+  active,
+  user,
+  open,
+  onNavigate,
+  onOpen,
+}: {
+  active: ViewId;
+  user: User;
+  open: boolean;
+  onNavigate: (view: ViewId) => void;
+  onOpen: () => void;
+}) {
+  const availableAdminNav = visibleAdminNav(user);
+  const railGroup = (items: typeof nav | typeof adminNav) => items.map(({ id, label, icon: Icon }) => (
+    <button
+      className={active === id ? "icon-rail__item icon-rail__item--active" : "icon-rail__item"}
+      type="button"
+      key={id}
+      aria-label={label}
+      title={label}
+      onClick={() => onNavigate(id)}
+    >
+      <Icon aria-hidden="true" />
+    </button>
+  ));
+  return (
+    <aside className="icon-rail" aria-label="Быстрая навигация">
+      <button
+        className="icon-rail__toggle"
+        type="button"
+        aria-label={open ? "Скрыть полное меню" : "Открыть полное меню"}
+        aria-expanded={open}
+        onClick={onOpen}
+      >
+        {open ? <PanelLeftClose aria-hidden="true" /> : <PanelLeftOpen aria-hidden="true" />}
+      </button>
+      <nav className="icon-rail__group" aria-label="Обучение">{railGroup(nav)}</nav>
+      {availableAdminNav.length > 0 && (
+        <>
+          <span className="icon-rail__divider" aria-hidden="true" />
+          <nav className="icon-rail__group" aria-label="Администрирование">{railGroup(availableAdminNav)}</nav>
+        </>
+      )}
+      <button className="icon-rail__user" type="button" onClick={onOpen} aria-label={`Профиль: ${user.first_name || user.email}`}>
+        <CircleUserRound aria-hidden="true" />
+      </button>
     </aside>
   );
 }
@@ -769,13 +868,25 @@ function CoursePreviewModal({
   );
 }
 
-function CoursesView({ token }: { token: string }) {
+function CoursesView({ token, user }: { token: string; user: User }) {
   const [courses, setCourses] = useState<Course[]>([]);
+  const [projects, setProjects] = useState<ContentProject[]>([]);
+  const [folders, setFolders] = useState<ContentFolder[]>([]);
+  const [learningPaths, setLearningPaths] = useState<LearningPath[]>([]);
+  const [selectedProject, setSelectedProject] = useState<number | "all" | "unassigned">("all");
+  const [selectedFolder, setSelectedFolder] = useState<number | null>(null);
+  const [contentFilter, setContentFilter] = useState<"all" | "courses" | "paths">("all");
+  const [createDialog, setCreateDialog] = useState<"project" | "folder" | "path" | null>(null);
+  const [createName, setCreateName] = useState("");
+  const [createDescription, setCreateDescription] = useState("");
+  const [creatingContent, setCreatingContent] = useState(false);
   const [editingId, setEditingId] = useState<number | null | "new">(null);
   const [form, setForm] = useState({
     title: "",
     description: "",
     estimated_minutes: 30,
+    project: null as number | null,
+    folder: null as number | null,
     lessons: [newLesson(0)],
   });
   const [loading, setLoading] = useState(true);
@@ -803,7 +914,16 @@ function CoursesView({ token }: { token: string }) {
   async function load() {
     setLoading(true);
     try {
-      setCourses(await apiRequest<Course[]>("/courses/", token));
+      const [nextCourses, nextProjects, nextFolders, nextPaths] = await Promise.all([
+        apiRequest<Course[]>("/courses/", token),
+        apiRequest<ContentProject[]>("/projects/", token),
+        apiRequest<ContentFolder[]>("/folders/", token),
+        apiRequest<LearningPath[]>("/learning-paths/", token),
+      ]);
+      setCourses(nextCourses);
+      setProjects(nextProjects);
+      setFolders(nextFolders);
+      setLearningPaths(nextPaths);
       setError("");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Не удалось загрузить курсы");
@@ -817,6 +937,124 @@ function CoursesView({ token }: { token: string }) {
   useEffect(() => {
     localStorage.setItem("smartis-course-view", courseView);
   }, [courseView]);
+
+  const selectedProjectRecord = typeof selectedProject === "number"
+    ? projects.find((project) => project.id === selectedProject) || null
+    : null;
+  const selectedFolderRecord = selectedFolder === null
+    ? null
+    : folders.find((folder) => folder.id === selectedFolder) || null;
+  const visibleFolders = selectedProjectRecord
+    ? folders.filter((folder) => folder.project === selectedProjectRecord.id && folder.parent === selectedFolder)
+    : [];
+  const visibleCourses = courses.filter((course) => {
+    if (selectedProject === "all") return true;
+    if (selectedProject === "unassigned") return course.project === null;
+    return course.project === selectedProject && course.folder === selectedFolder;
+  });
+  const visiblePaths = learningPaths.filter((path) => {
+    if (selectedProject === "all") return true;
+    if (selectedProject === "unassigned") return path.project === null;
+    return path.project === selectedProject && path.folder === selectedFolder;
+  });
+
+  function openProject(project: number | "all" | "unassigned") {
+    setSelectedProject(project);
+    setSelectedFolder(null);
+    setEditingId(null);
+  }
+
+  function openCreateDialog(type: "project" | "folder" | "path") {
+    setCreateDialog(type);
+    setCreateName("");
+    setCreateDescription("");
+    setError("");
+  }
+
+  async function createLibraryContent(event: FormEvent) {
+    event.preventDefault();
+    if (!createDialog || !createName.trim()) return;
+    setCreatingContent(true);
+    setError("");
+    try {
+      if (createDialog === "project") {
+        const project = await apiRequest<ContentProject>("/projects/", token, {
+          method: "POST",
+          body: JSON.stringify({ name: createName.trim(), description: createDescription.trim() }),
+        });
+        setSelectedProject(project.id);
+        setSelectedFolder(null);
+        setNotice(`Проект «${project.name}» создан`);
+      } else if (createDialog === "folder" && selectedProjectRecord) {
+        const folder = await apiRequest<ContentFolder>("/folders/", token, {
+          method: "POST",
+          body: JSON.stringify({
+            name: createName.trim(),
+            project: selectedProjectRecord.id,
+            parent: selectedFolder,
+          }),
+        });
+        setNotice(`Папка «${folder.name}» создана`);
+      } else if (createDialog === "path") {
+        const path = await apiRequest<LearningPath>("/learning-paths/", token, {
+          method: "POST",
+          body: JSON.stringify({
+            title: createName.trim(),
+            description: createDescription.trim(),
+            project: typeof selectedProject === "number" ? selectedProject : null,
+            folder: typeof selectedProject === "number" ? selectedFolder : null,
+            course_ids: [],
+          }),
+        });
+        setNotice(`Траектория «${path.title}» создана`);
+      }
+      setCreateDialog(null);
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось создать материал");
+    } finally {
+      setCreatingContent(false);
+    }
+  }
+
+  function placementValue(project: number | null, folder: number | null) {
+    return folder !== null ? `f:${folder}` : project !== null ? `p:${project}` : "unassigned";
+  }
+
+  function placementPayload(value: string) {
+    if (value === "unassigned") return { project: null, folder: null };
+    const [kind, rawId] = value.split(":");
+    const id = Number(rawId);
+    if (kind === "p") return { project: id, folder: null };
+    const folder = folders.find((item) => item.id === id);
+    return { project: folder?.project ?? null, folder: folder?.id ?? null };
+  }
+
+  async function moveCourse(course: Course, value: string) {
+    try {
+      await apiRequest<Course>(`/courses/${course.id}/`, token, {
+        method: "PATCH",
+        body: JSON.stringify(placementPayload(value)),
+      });
+      setNotice(`Курс «${course.title}» перемещён`);
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось переместить курс");
+    }
+  }
+
+  async function moveLearningPath(path: LearningPath, value: string) {
+    try {
+      await apiRequest<LearningPath>(`/learning-paths/${path.id}/`, token, {
+        method: "PATCH",
+        body: JSON.stringify(placementPayload(value)),
+      });
+      setNotice(`Траектория «${path.title}» перемещена`);
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось переместить траекторию");
+    }
+  }
 
   useEffect(() => {
     if (!previewCourse || previewCourse.source_format !== "scorm_12") return undefined;
@@ -839,7 +1077,14 @@ function CoursesView({ token }: { token: string }) {
 
   function createCourse() {
     setEditingId("new");
-    setForm({ title: "", description: "", estimated_minutes: 30, lessons: [newLesson(0)] });
+    setForm({
+      title: "",
+      description: "",
+      estimated_minutes: 30,
+      project: typeof selectedProject === "number" ? selectedProject : null,
+      folder: typeof selectedProject === "number" ? selectedFolder : null,
+      lessons: [newLesson(0)],
+    });
     setError("");
     setNotice("");
     setVideoFiles({});
@@ -855,6 +1100,8 @@ function CoursesView({ token }: { token: string }) {
       title: course.title,
       description: course.description,
       estimated_minutes: course.estimated_minutes,
+      project: course.project,
+      folder: course.folder,
       lessons: course.lessons.map((lesson, position) => ({
         ...lesson,
         quiz_data: lesson.quiz_data || emptyQuiz(),
@@ -984,6 +1231,8 @@ function CoursesView({ token }: { token: string }) {
         title: saved.title,
         description: saved.description,
         estimated_minutes: saved.estimated_minutes,
+        project: saved.project,
+        folder: saved.folder,
         lessons: savedLessons,
       });
       for (const upload of pendingUploads) {
@@ -1004,6 +1253,8 @@ function CoursesView({ token }: { token: string }) {
         title: saved.title,
         description: saved.description,
         estimated_minutes: saved.estimated_minutes,
+        project: saved.project,
+        folder: saved.folder,
         lessons: savedLessons,
       });
       setVideoFiles({});
@@ -1049,6 +1300,8 @@ function CoursesView({ token }: { token: string }) {
     try {
       const body = new FormData();
       body.append("package", file);
+      if (typeof selectedProject === "number") body.append("project", String(selectedProject));
+      if (selectedFolder !== null) body.append("folder", String(selectedFolder));
       const imported = await apiUpload<Course>("/courses/import-scorm/", token, body);
       setNotice(`Курс «${imported.title}» импортирован из SCORM 1.2`);
       await load();
@@ -1143,6 +1396,10 @@ function CoursesView({ token }: { token: string }) {
         id: 0,
         author: 0,
         author_name: "",
+        project: form.project,
+        project_name: projects.find((project) => project.id === form.project)?.name || "",
+        folder: form.folder,
+        folder_name: folders.find((folder) => folder.id === form.folder)?.name || "",
         status: "draft",
         status_label: "Черновик",
         version: 1,
@@ -1446,6 +1703,14 @@ function CoursesView({ token }: { token: string }) {
                   )}
                 </div>
                 <label>Ожидаемая длительность, минут<input type="number" min="1" value={form.estimated_minutes} onChange={(event) => setForm({ ...form, estimated_minutes: Number(event.target.value) })} required /></label>
+                <label>Проект<select value={form.project ?? ""} onChange={(event) => setForm({ ...form, project: event.target.value ? Number(event.target.value) : null, folder: null })}>
+                  <option value="">Без проекта</option>
+                  {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+                </select></label>
+                <label>Папка<select value={form.folder ?? ""} disabled={form.project === null} onChange={(event) => setForm({ ...form, folder: event.target.value ? Number(event.target.value) : null })}>
+                  <option value="">Корень проекта</option>
+                  {folders.filter((folder) => folder.project === form.project).map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
+                </select></label>
                 <div className="longread-info-card">
                   <span>Статус</span><strong>{editingCourse?.status_label || "Черновик"}</strong>
                   <span>Версия</span><strong>{editingCourse?.version || 1}</strong>
@@ -1484,9 +1749,12 @@ function CoursesView({ token }: { token: string }) {
     <>
       <PageHeader
         title="Курсы"
-        subtitle="Создание, редактирование и публикация учебных материалов"
+        subtitle="Проекты, папки, курсы и траектории в одном рабочем пространстве"
         action={
           <div className="page-actions">
+            <button className="secondary-button" type="button" onClick={() => openCreateDialog("project")}>
+              <FolderPlus /> Новый проект
+            </button>
             <label className={importingScorm ? "secondary-button scorm-import scorm-import--busy" : "secondary-button scorm-import"}>
               <FileArchive /> {importingScorm ? "Импортируем…" : "Импорт SCORM 1.2"}
               <input
@@ -1508,6 +1776,27 @@ function CoursesView({ token }: { token: string }) {
       />
       {error && <p className="form-error">{error}</p>}
       {notice && <p className="form-notice"><CheckCircle2 />{notice}</p>}
+      {createDialog && (
+        <div className="library-dialog-backdrop" role="presentation" onMouseDown={() => setCreateDialog(null)}>
+          <form className="library-dialog" onSubmit={createLibraryContent} onMouseDown={(event) => event.stopPropagation()}>
+            <div className="section-heading">
+              <div>
+                <h2>{createDialog === "project" ? "Новый проект" : createDialog === "folder" ? "Новая папка" : "Новая траектория"}</h2>
+                <p>{createDialog === "project" ? "Личное рабочее пространство автора" : selectedProjectRecord?.name || "Без проекта"}</p>
+              </div>
+              <button className="icon-button" type="button" onClick={() => setCreateDialog(null)} aria-label="Закрыть окно"><X /></button>
+            </div>
+            <label>{createDialog === "path" ? "Название траектории" : "Название"}<input autoFocus value={createName} onChange={(event) => setCreateName(event.target.value)} required /></label>
+            {createDialog !== "folder" && (
+              <label>Описание<textarea value={createDescription} onChange={(event) => setCreateDescription(event.target.value)} placeholder="Коротко опишите назначение" /></label>
+            )}
+            <div className="library-dialog__actions">
+              <button className="secondary-button" type="button" onClick={() => setCreateDialog(null)}>Отмена</button>
+              <button className="primary-button" type="submit" disabled={creatingContent}>{creatingContent ? "Создаём…" : "Создать"}</button>
+            </div>
+          </form>
+        </div>
+      )}
       {editingId !== null && (
         <form className="panel course-editor" onSubmit={saveCourse}>
           <div className="section-heading">
@@ -1603,16 +1892,61 @@ function CoursesView({ token }: { token: string }) {
           </div>
         </form>
       )}
-      <div className="course-view-toolbar" role="group" aria-label="Вид списка курсов">
-        <span>Вид курсов</span>
-        <div>
-          <button className={courseView === "cards" ? "course-view-button course-view-button--active" : "course-view-button"} type="button" onClick={() => setCourseView("cards")} aria-pressed={courseView === "cards"} title="Прямоугольные карточки"><Rows3 /><span>Карточки</span></button>
-          <button className={courseView === "compact" ? "course-view-button course-view-button--active" : "course-view-button"} type="button" onClick={() => setCourseView("compact")} aria-pressed={courseView === "compact"} title="Компактные значки"><LayoutGrid /><span>Значки</span></button>
-          <button className={courseView === "list" ? "course-view-button course-view-button--active" : "course-view-button"} type="button" onClick={() => setCourseView("list")} aria-pressed={courseView === "list"} title="Список"><List /><span>Список</span></button>
-        </div>
-      </div>
-      <section className={`course-grid course-grid--${courseView}`} aria-busy={loading}>
-        {courses.map((course) => (
+      <div className="library-layout">
+        <aside className="library-projects">
+          <div className="library-projects__heading"><span>Проекты</span><button className="mini-button" type="button" onClick={() => openCreateDialog("project")} aria-label="Создать проект"><Plus /></button></div>
+          <button className={selectedProject === "all" ? "library-project library-project--active" : "library-project"} type="button" onClick={() => openProject("all")}>
+            <LayoutGrid /><span><strong>Все материалы</strong><small>{courses.length + learningPaths.length}</small></span>
+          </button>
+          {projects.map((project) => (
+            <button className={selectedProject === project.id ? "library-project library-project--active" : "library-project"} type="button" key={project.id} onClick={() => openProject(project.id)}>
+              <FolderOpen /><span><strong>{project.name}</strong><small>{project.course_count + project.path_count} материалов</small></span>
+            </button>
+          ))}
+          <button className={selectedProject === "unassigned" ? "library-project library-project--active" : "library-project"} type="button" onClick={() => openProject("unassigned")}>
+            <Folder /><span><strong>Без проекта</strong><small>{courses.filter((course) => course.project === null).length}</small></span>
+          </button>
+          <p className="library-projects__hint">{user.role === "admin" ? "Администратор видит проекты всех авторов" : "Здесь отображаются только ваши проекты"}</p>
+        </aside>
+
+        <section className="library-content">
+          <header className="library-content__header">
+            <div className="library-breadcrumbs">
+              {selectedFolderRecord && <button type="button" onClick={() => setSelectedFolder(selectedFolderRecord.parent)}><ChevronLeft />Назад</button>}
+              <div><span>{selectedProjectRecord ? "Проект" : selectedProject === "unassigned" ? "Материалы" : "Библиотека"}</span><h2>{selectedFolderRecord?.name || selectedProjectRecord?.name || (selectedProject === "unassigned" ? "Без проекта" : "Все материалы")}</h2></div>
+            </div>
+            <div className="library-content__actions">
+              {selectedProjectRecord && <button className="secondary-button" type="button" onClick={() => openCreateDialog("folder")}><FolderPlus /> Папка</button>}
+              <button className="secondary-button" type="button" onClick={() => openCreateDialog("path")}><Route /> Траектория</button>
+              <button className="primary-button" type="button" onClick={createCourse}><Plus /> Курс</button>
+            </div>
+          </header>
+
+          {visibleFolders.length > 0 && (
+            <section className="library-folders" aria-label="Папки">
+              {visibleFolders.map((folder) => (
+                <button className="library-folder" type="button" key={folder.id} onClick={() => setSelectedFolder(folder.id)}>
+                  <FolderOpen /><span><strong>{folder.name}</strong><small>{folder.course_count + folder.path_count} материалов</small></span><ChevronRight />
+                </button>
+              ))}
+            </section>
+          )}
+
+          <div className="course-view-toolbar library-toolbar" role="group" aria-label="Фильтр и вид материалов">
+            <div className="library-filters">
+              <button className={contentFilter === "all" ? "course-view-button course-view-button--active" : "course-view-button"} type="button" onClick={() => setContentFilter("all")} aria-pressed={contentFilter === "all"}>Все</button>
+              <button className={contentFilter === "courses" ? "course-view-button course-view-button--active" : "course-view-button"} type="button" onClick={() => setContentFilter("courses")} aria-pressed={contentFilter === "courses"}>Курсы</button>
+              <button className={contentFilter === "paths" ? "course-view-button course-view-button--active" : "course-view-button"} type="button" onClick={() => setContentFilter("paths")} aria-pressed={contentFilter === "paths"}>Траектории</button>
+            </div>
+            <div className="library-view-controls">
+              <button className={courseView === "cards" ? "course-view-button course-view-button--active" : "course-view-button"} type="button" onClick={() => setCourseView("cards")} aria-pressed={courseView === "cards"} title="Прямоугольные карточки"><Rows3 /><span>Карточки</span></button>
+              <button className={courseView === "compact" ? "course-view-button course-view-button--active" : "course-view-button"} type="button" onClick={() => setCourseView("compact")} aria-pressed={courseView === "compact"} title="Компактные значки"><LayoutGrid /><span>Значки</span></button>
+              <button className={courseView === "list" ? "course-view-button course-view-button--active" : "course-view-button"} type="button" onClick={() => setCourseView("list")} aria-pressed={courseView === "list"} title="Список"><List /><span>Список</span></button>
+            </div>
+          </div>
+          {(contentFilter === "all" || contentFilter === "courses") && (
+          <section className={`course-grid course-grid--${courseView}`} aria-busy={loading}>
+        {visibleCourses.map((course) => (
           <article className="panel course-card" key={course.id}>
             <div className="course-card__top">
               <div className="course-card__badges">
@@ -1624,6 +1958,11 @@ function CoursesView({ token }: { token: string }) {
             <div><h2>{course.title}</h2><p>{course.description || "Описание пока не добавлено"}</p></div>
             <div className="course-meta"><span><FileText />{chapterCountLabel(course.lessons_count)}</span><span><Clock3 />{course.estimated_minutes} мин</span></div>
             <div className="course-card__footer"><span>{course.author_name}</span><span>Версия {course.version}</span></div>
+            <label className="content-placement">Расположение<select aria-label={`Расположение курса ${course.title}`} value={placementValue(course.project, course.folder)} onChange={(event) => void moveCourse(course, event.target.value)}>
+              <option value="unassigned">Без проекта</option>
+              {projects.map((project) => <option key={`course-project-${project.id}`} value={`p:${project.id}`}>{project.name} · корень</option>)}
+              {folders.map((folder) => <option key={`course-folder-${folder.id}`} value={`f:${folder.id}`}>{folder.project_name} / {folder.name}</option>)}
+            </select></label>
             <div className="course-card__actions">
               <button className="primary-button course-card__open-scorm" type="button" onClick={() => void openCoursePreview(course)}>
                 <Eye /> Предпросмотр
@@ -1637,10 +1976,37 @@ function CoursesView({ token }: { token: string }) {
             </div>
           </article>
         ))}
-        {!loading && !courses.length && (
+        {!loading && !visibleCourses.length && contentFilter === "courses" && (
           <section className="panel empty course-empty"><BookOpen /><h2>Создайте первый курс</h2><p>Добавьте уроки и опубликуйте курс для сотрудников.</p><button className="primary-button" type="button" onClick={createCourse}><Plus /> Создать курс</button></section>
         )}
-      </section>
+          </section>
+          )}
+
+          {(contentFilter === "all" || contentFilter === "paths") && (
+            <section className="learning-path-grid" aria-label="Траектории">
+              {visiblePaths.map((path) => (
+                <article className="learning-path-card" key={path.id}>
+                  <div className="learning-path-card__icon"><Route /></div>
+                  <div className="learning-path-card__body">
+                    <div className="course-card__badges"><span className={`status status--${path.status}`}>{path.status_label}</span><span className="status">Траектория</span></div>
+                    <h2>{path.title}</h2>
+                    <p>{path.description || "Описание пока не добавлено"}</p>
+                    <span>{path.course_count} курсов · {path.author_name}</span>
+                  </div>
+                  <label className="content-placement">Расположение<select aria-label={`Расположение траектории ${path.title}`} value={placementValue(path.project, path.folder)} onChange={(event) => void moveLearningPath(path, event.target.value)}>
+                    <option value="unassigned">Без проекта</option>
+                    {projects.map((project) => <option key={`path-project-${project.id}`} value={`p:${project.id}`}>{project.name} · корень</option>)}
+                    {folders.map((folder) => <option key={`path-folder-${folder.id}`} value={`f:${folder.id}`}>{folder.project_name} / {folder.name}</option>)}
+                  </select></label>
+                </article>
+              ))}
+            </section>
+          )}
+          {!loading && !visibleCourses.length && !visiblePaths.length && visibleFolders.length === 0 && (
+            <section className="library-empty"><FolderOpen /><h2>Здесь пока пусто</h2><p>Создайте папку, курс или траекторию.</p></section>
+          )}
+        </section>
+      </div>
       {previewModal}
     </>
   );
@@ -1708,10 +2074,22 @@ function App() {
     setSidebarOpen(false);
   }
 
+  function navigateFromRail(view: ViewId) {
+    setActive(view);
+    setSidebarOpen(true);
+  }
+
   if (!token || !user) return <LoginPage onLogin={login} />;
 
   return (
     <div className={"app-shell " + (sidebarOpen ? "app-shell--sidebar-open" : "app-shell--sidebar-closed")}>
+      <IconRail
+        active={active}
+        user={user}
+        open={sidebarOpen}
+        onNavigate={navigateFromRail}
+        onOpen={() => setSidebarOpen((value) => !value)}
+      />
       <Sidebar
         active={active}
         user={user}
@@ -1731,23 +2109,12 @@ function App() {
         />
       )}
       <main className="main-content">
-        <div className="app-toolbar">
-          <button
-            className="icon-button menu-button"
-            type="button"
-            aria-expanded={sidebarOpen}
-            aria-label={sidebarOpen ? "Скрыть боковое меню" : "Открыть боковое меню"}
-            onClick={() => setSidebarOpen((value) => !value)}
-          >
-            {sidebarOpen ? <PanelLeftClose aria-hidden="true" /> : <PanelLeftOpen aria-hidden="true" />}
-          </button>
-        </div>
         {active === "home" ? (
           <HomeView user={user} />
         ) : active === "users" ? (
           <UsersView token={token} />
         ) : active === "courses" ? (
-          <CoursesView token={token} />
+          <CoursesView token={token} user={user} />
         ) : (
           <Placeholder active={active} />
         )}

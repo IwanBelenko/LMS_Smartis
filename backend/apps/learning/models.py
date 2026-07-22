@@ -22,6 +22,58 @@ def scorm_package_path(instance, filename):
     return f"courses/{instance.id}/scorm/{uuid.uuid4().hex}.zip"
 
 
+class ContentProject(models.Model):
+    name = models.CharField("Название", max_length=180)
+    description = models.TextField("Описание", blank=True)
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        verbose_name="Владелец",
+        related_name="learning_projects",
+        on_delete=models.CASCADE,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name", "id"]
+        verbose_name = "Проект обучения"
+        verbose_name_plural = "Проекты обучения"
+        constraints = [
+            models.UniqueConstraint(fields=["owner", "name"], name="unique_learning_project_name_per_owner"),
+        ]
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class ContentFolder(models.Model):
+    name = models.CharField("Название", max_length=180)
+    project = models.ForeignKey(
+        ContentProject,
+        verbose_name="Проект",
+        related_name="folders",
+        on_delete=models.CASCADE,
+    )
+    parent = models.ForeignKey(
+        "self",
+        verbose_name="Родительская папка",
+        related_name="children",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name", "id"]
+        verbose_name = "Папка материалов"
+        verbose_name_plural = "Папки материалов"
+
+    def __str__(self) -> str:
+        return self.name
+
+
 class Course(models.Model):
     class Status(models.TextChoices):
         DRAFT = "draft", "Черновик"
@@ -61,6 +113,22 @@ class Course(models.Model):
         related_name="authored_courses",
         on_delete=models.PROTECT,
     )
+    project = models.ForeignKey(
+        ContentProject,
+        verbose_name="Проект",
+        related_name="courses",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    folder = models.ForeignKey(
+        ContentFolder,
+        verbose_name="Папка",
+        related_name="courses",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
     status = models.CharField("Статус", max_length=20, choices=Status.choices, default=Status.DRAFT)
     estimated_minutes = models.PositiveIntegerField("Длительность, минут", default=30)
     version = models.PositiveIntegerField("Версия", default=1)
@@ -75,6 +143,63 @@ class Course(models.Model):
 
     def __str__(self) -> str:
         return self.title
+
+
+class LearningPath(models.Model):
+    class Status(models.TextChoices):
+        DRAFT = "draft", "Черновик"
+        PUBLISHED = "published", "Опубликована"
+        ARCHIVED = "archived", "В архиве"
+
+    title = models.CharField("Название", max_length=220)
+    description = models.TextField("Описание", blank=True)
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        verbose_name="Автор",
+        related_name="authored_learning_paths",
+        on_delete=models.PROTECT,
+    )
+    project = models.ForeignKey(
+        ContentProject,
+        verbose_name="Проект",
+        related_name="learning_paths",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    folder = models.ForeignKey(
+        ContentFolder,
+        verbose_name="Папка",
+        related_name="learning_paths",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    courses = models.ManyToManyField(Course, through="LearningPathCourse", related_name="learning_paths", blank=True)
+    status = models.CharField("Статус", max_length=20, choices=Status.choices, default=Status.DRAFT)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-updated_at"]
+        verbose_name = "Траектория"
+        verbose_name_plural = "Траектории"
+
+    def __str__(self) -> str:
+        return self.title
+
+
+class LearningPathCourse(models.Model):
+    learning_path = models.ForeignKey(LearningPath, related_name="path_courses", on_delete=models.CASCADE)
+    course = models.ForeignKey(Course, related_name="path_entries", on_delete=models.CASCADE)
+    position = models.PositiveIntegerField("Позиция", default=0)
+
+    class Meta:
+        ordering = ["position", "id"]
+        constraints = [
+            models.UniqueConstraint(fields=["learning_path", "course"], name="unique_course_in_learning_path"),
+            models.UniqueConstraint(fields=["learning_path", "position"], name="unique_learning_path_position"),
+        ]
 
 
 class Lesson(models.Model):

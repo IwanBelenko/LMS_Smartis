@@ -2,7 +2,84 @@ from django.db import models, transaction
 import nh3
 from rest_framework import serializers
 
-from .models import Course, Lesson
+from apps.identity.models import User
+
+from .models import ContentFolder, ContentProject, Course, LearningPath, LearningPathCourse, Lesson
+
+
+def validate_library_placement(request, project, folder):
+    if folder:
+        if project and folder.project_id != project.id:
+            raise serializers.ValidationError({"folder": "Папка относится к другому проекту"})
+        project = folder.project
+    if project and request:
+        user = request.user
+        if not (user.is_superuser or user.role == User.Role.ADMIN) and project.owner_id != user.id:
+            raise serializers.ValidationError({"project": "Этот проект принадлежит другому автору"})
+    return project, folder
+
+
+class ContentProjectSerializer(serializers.ModelSerializer):
+    owner_name = serializers.SerializerMethodField()
+    course_count = serializers.SerializerMethodField()
+    folder_count = serializers.SerializerMethodField()
+    path_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ContentProject
+        fields = [
+            "id", "name", "description", "owner", "owner_name", "course_count", "folder_count",
+            "path_count", "created_at", "updated_at",
+        ]
+        read_only_fields = ["id", "owner", "owner_name", "course_count", "folder_count", "path_count", "created_at", "updated_at"]
+
+    def get_owner_name(self, obj):
+        return obj.owner.get_full_name() or obj.owner.email
+
+    def get_course_count(self, obj):
+        return obj.courses.count()
+
+    def get_folder_count(self, obj):
+        return obj.folders.count()
+
+    def get_path_count(self, obj):
+        return obj.learning_paths.count()
+
+
+class ContentFolderSerializer(serializers.ModelSerializer):
+    project_name = serializers.CharField(source="project.name", read_only=True)
+    course_count = serializers.SerializerMethodField()
+    path_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ContentFolder
+        fields = [
+            "id", "name", "project", "project_name", "parent", "course_count", "path_count",
+            "created_at", "updated_at",
+        ]
+        read_only_fields = ["id", "project_name", "course_count", "path_count", "created_at", "updated_at"]
+
+    def get_course_count(self, obj):
+        return obj.courses.count()
+
+    def get_path_count(self, obj):
+        return obj.learning_paths.count()
+
+    def validate(self, attrs):
+        project = attrs.get("project", getattr(self.instance, "project", None))
+        parent = attrs.get("parent", getattr(self.instance, "parent", None))
+        request = self.context.get("request")
+        validate_library_placement(request, project, None)
+        if parent and parent.project_id != project.id:
+            raise serializers.ValidationError({"parent": "Родительская папка относится к другому проекту"})
+        if self.instance and parent and parent.id == self.instance.id:
+            raise serializers.ValidationError({"parent": "Папка не может находиться внутри самой себя"})
+        duplicate = ContentFolder.objects.filter(project=project, parent=parent, name__iexact=attrs.get("name", getattr(self.instance, "name", "")))
+        if self.instance:
+            duplicate = duplicate.exclude(pk=self.instance.pk)
+        if duplicate.exists():
+            raise serializers.ValidationError({"name": "Папка с таким названием уже существует здесь"})
+        return attrs
 
 
 class LessonSerializer(serializers.ModelSerializer):
@@ -90,6 +167,8 @@ class CourseSerializer(serializers.ModelSerializer):
     status_label = serializers.CharField(source="get_status_display", read_only=True)
     lessons_count = serializers.IntegerField(source="lessons.count", read_only=True)
     cover_url = serializers.SerializerMethodField()
+    project_name = serializers.CharField(source="project.name", read_only=True, default="")
+    folder_name = serializers.CharField(source="folder.name", read_only=True, default="")
 
     class Meta:
         model = Course
@@ -110,6 +189,10 @@ class CourseSerializer(serializers.ModelSerializer):
             "scorm_imported_at",
             "author",
             "author_name",
+            "project",
+            "project_name",
+            "folder",
+            "folder_name",
             "status",
             "status_label",
             "estimated_minutes",
@@ -154,6 +237,15 @@ class CourseSerializer(serializers.ModelSerializer):
         if len(positions) != len(set(positions)):
             raise serializers.ValidationError("Позиции уроков не должны повторяться")
         return lessons
+
+    def validate(self, attrs):
+        project = attrs.get("project", getattr(self.instance, "project", None))
+        folder = attrs.get("folder", getattr(self.instance, "folder", None))
+        project, folder = validate_library_placement(self.context.get("request"), project, folder)
+        if folder or "project" in attrs or "folder" in attrs:
+            attrs["project"] = project
+            attrs["folder"] = folder
+        return attrs
 
     @transaction.atomic
     def create(self, validated_data):
@@ -221,3 +313,63 @@ class CourseSerializer(serializers.ModelSerializer):
                 lesson = Lesson.objects.create(course=course, **lesson_data)
                 retained.add(lesson.id)
         course.lessons.exclude(id__in=retained).delete()
+
+
+class LearningPathSerializer(serializers.ModelSerializer):
+    author_name = serializers.SerializerMethodField()
+    project_name = serializers.CharField(source="project.name", read_only=True, default="")
+    folder_name = serializers.CharField(source="folder.name", read_only=True, default="")
+    status_label = serializers.CharField(source="get_status_display", read_only=True)
+    course_ids = serializers.PrimaryKeyRelatedField(source="courses", queryset=Course.objects.all(), many=True, required=False)
+    course_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = LearningPath
+        fields = [
+            "id", "title", "description", "author", "author_name", "project", "project_name", "folder",
+            "folder_name", "status", "status_label", "course_ids", "course_count", "created_at", "updated_at",
+        ]
+        read_only_fields = ["id", "author", "author_name", "status", "status_label", "course_count", "created_at", "updated_at"]
+
+    def get_author_name(self, obj):
+        return obj.author.get_full_name() or obj.author.email
+
+    def get_course_count(self, obj):
+        return obj.courses.count()
+
+    def validate(self, attrs):
+        project = attrs.get("project", getattr(self.instance, "project", None))
+        folder = attrs.get("folder", getattr(self.instance, "folder", None))
+        project, folder = validate_library_placement(self.context.get("request"), project, folder)
+        if folder or "project" in attrs or "folder" in attrs:
+            attrs["project"] = project
+            attrs["folder"] = folder
+        request = self.context.get("request")
+        for course in attrs.get("courses", []):
+            if not (request.user.is_superuser or request.user.role == User.Role.ADMIN) and course.author_id != request.user.id:
+                raise serializers.ValidationError({"course_ids": "В траекторию можно добавить только свои курсы"})
+        return attrs
+
+    @transaction.atomic
+    def create(self, validated_data):
+        courses = validated_data.pop("courses", [])
+        learning_path = LearningPath.objects.create(**validated_data)
+        LearningPathCourse.objects.bulk_create([
+            LearningPathCourse(learning_path=learning_path, course=course, position=position)
+            for position, course in enumerate(courses)
+        ])
+        return learning_path
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        courses = validated_data.pop("courses", None)
+        for field, value in validated_data.items():
+            setattr(instance, field, value)
+        instance.save()
+        if courses is not None:
+            instance.path_courses.all().delete()
+            LearningPathCourse.objects.bulk_create([
+                LearningPathCourse(learning_path=instance, course=course, position=position)
+                for position, course in enumerate(courses)
+            ])
+        return instance

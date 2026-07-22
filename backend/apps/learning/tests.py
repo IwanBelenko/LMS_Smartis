@@ -10,7 +10,7 @@ from rest_framework.test import APIClient
 
 from apps.identity.models import User
 
-from .models import Course
+from .models import ContentProject, Course
 
 
 def make_scorm_12_package(title="Курс из SCORM", filename="course-scorm.zip", extra_files=None):
@@ -381,3 +381,68 @@ class CourseApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["status"], Course.Status.DRAFT)
         self.assertEqual(response.data["version"], 2)
+
+    def test_author_organizes_courses_and_learning_paths_in_own_project(self):
+        self.client.force_authenticate(self.author)
+        project = self.client.post(
+            "/api/v1/projects/",
+            {"name": "Академия продукта", "description": "Рабочие материалы"},
+            format="json",
+        )
+        self.assertEqual(project.status_code, 201)
+
+        folder = self.client.post(
+            "/api/v1/folders/",
+            {"name": "Онбординг", "project": project.data["id"], "parent": None},
+            format="json",
+        )
+        self.assertEqual(folder.status_code, 201)
+
+        payload = self.course_payload("Курс автора в папке")
+        payload.update({"project": project.data["id"], "folder": folder.data["id"]})
+        course = self.client.post("/api/v1/courses/", payload, format="json")
+        self.assertEqual(course.status_code, 201)
+        self.assertEqual(course.data["project"], project.data["id"])
+        self.assertEqual(course.data["folder"], folder.data["id"])
+
+        learning_path = self.client.post(
+            "/api/v1/learning-paths/",
+            {
+                "title": "Траектория новичка",
+                "description": "Первый месяц",
+                "project": project.data["id"],
+                "folder": folder.data["id"],
+                "course_ids": [course.data["id"]],
+            },
+            format="json",
+        )
+        self.assertEqual(learning_path.status_code, 201)
+        self.assertEqual(learning_path.data["course_ids"], [course.data["id"]])
+        self.assertEqual(learning_path.data["course_count"], 1)
+
+        projects = self.client.get("/api/v1/projects/")
+        self.assertEqual(projects.data[0]["course_count"], 1)
+        self.assertEqual(projects.data[0]["folder_count"], 1)
+        self.assertEqual(projects.data[0]["path_count"], 1)
+
+    def test_author_cannot_move_content_to_another_owners_project(self):
+        foreign_project = ContentProject.objects.create(name="Проект администратора", owner=self.admin)
+        own_course = Course.objects.create(title="Курс автора", author=self.author)
+        self.client.force_authenticate(self.author)
+
+        response = self.client.patch(
+            f"/api/v1/courses/{own_course.id}/",
+            {"project": foreign_project.id, "folder": None},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400)
+        own_course.refresh_from_db()
+        self.assertIsNone(own_course.project)
+
+    def test_employee_cannot_manage_author_projects(self):
+        self.client.force_authenticate(self.employee)
+        self.assertEqual(self.client.get("/api/v1/projects/").status_code, 403)
+        self.assertEqual(
+            self.client.post("/api/v1/projects/", {"name": "Личный проект"}, format="json").status_code,
+            403,
+        )

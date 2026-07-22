@@ -17,11 +17,67 @@ from rest_framework.response import Response
 
 from apps.identity.models import User
 
-from .models import Course, Lesson
-from .permissions import IsCourseManagerOrReadOnly
+from .models import ContentFolder, ContentProject, Course, LearningPath, Lesson
+from .permissions import IsCourseManagerOrReadOnly, IsLibraryManager
 from .scorm import build_scorm_12_package, ensure_scorm_runtime_bridge, extract_scorm_package, inspect_scorm_package
 from .scorm_convert import convert_ispring_scorm_to_native
-from .serializers import CourseSerializer, LessonSerializer
+from .serializers import (
+    ContentFolderSerializer,
+    ContentProjectSerializer,
+    CourseSerializer,
+    LearningPathSerializer,
+    LessonSerializer,
+    validate_library_placement,
+)
+
+
+class ContentProjectViewSet(viewsets.ModelViewSet):
+    serializer_class = ContentProjectSerializer
+    permission_classes = [IsLibraryManager]
+
+    def get_queryset(self):
+        queryset = ContentProject.objects.select_related("owner").prefetch_related("folders", "courses", "learning_paths")
+        user = self.request.user
+        if user.is_superuser or user.role == User.Role.ADMIN:
+            return queryset
+        return queryset.filter(owner=user)
+
+    def perform_create(self, serializer):
+        serializer.save(owner=self.request.user)
+
+
+class ContentFolderViewSet(viewsets.ModelViewSet):
+    serializer_class = ContentFolderSerializer
+    permission_classes = [IsLibraryManager]
+
+    def get_queryset(self):
+        queryset = ContentFolder.objects.select_related("project", "project__owner", "parent").prefetch_related(
+            "courses", "learning_paths"
+        )
+        user = self.request.user
+        if not (user.is_superuser or user.role == User.Role.ADMIN):
+            queryset = queryset.filter(project__owner=user)
+        project_id = self.request.query_params.get("project")
+        if project_id:
+            queryset = queryset.filter(project_id=project_id)
+        return queryset
+
+
+class LearningPathViewSet(viewsets.ModelViewSet):
+    serializer_class = LearningPathSerializer
+    permission_classes = [IsLibraryManager]
+
+    def get_queryset(self):
+        queryset = LearningPath.objects.select_related(
+            "author", "project", "folder"
+        ).prefetch_related("courses")
+        user = self.request.user
+        if user.is_superuser or user.role == User.Role.ADMIN:
+            return queryset
+        return queryset.filter(author=user)
+
+    def perform_create(self, serializer):
+        serializer.save(author=self.request.user)
 
 
 class CourseViewSet(viewsets.ModelViewSet):
@@ -29,7 +85,7 @@ class CourseViewSet(viewsets.ModelViewSet):
     permission_classes = [IsCourseManagerOrReadOnly]
 
     def get_queryset(self):
-        queryset = Course.objects.select_related("author").prefetch_related("lessons")
+        queryset = Course.objects.select_related("author", "project", "folder").prefetch_related("lessons")
         user = self.request.user
         if user.is_superuser or user.role == User.Role.ADMIN:
             return queryset
@@ -57,10 +113,25 @@ class CourseViewSet(viewsets.ModelViewSet):
                 return Response({"detail": exc.detail}, status=status.HTTP_400_BAD_REQUEST)
             raise
 
+        project = None
+        folder = None
+        project_id = request.data.get("project")
+        folder_id = request.data.get("folder")
+        if project_id:
+            project = get_object_or_404(ContentProject, pk=project_id)
+        if folder_id:
+            folder = get_object_or_404(ContentFolder.objects.select_related("project"), pk=folder_id)
+        try:
+            project, folder = validate_library_placement(request, project, folder)
+        except serializers.ValidationError as exc:
+            return Response(exc.detail, status=status.HTTP_400_BAD_REQUEST)
+
         course = Course.objects.create(
             title=manifest.title,
             description=f"Импортировано из SCORM 1.2 · {Path(package.name).name}",
             author=request.user,
+            project=project,
+            folder=folder,
             source_format=Course.SourceFormat.SCORM_12,
             scorm_identifier=manifest.identifier,
             scorm_original_name=Path(package.name).name[:255],

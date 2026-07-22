@@ -263,6 +263,8 @@ def convert_ispring_scorm_to_native(source_course: Course, author) -> Course:
             "Исходный пакет сохранён отдельным курсом для сверки интерактивов и изображений."
         ),
         author=author,
+        project=source_course.project,
+        folder=source_course.folder,
         source_format=Course.SourceFormat.NATIVE,
         estimated_minutes=source_course.estimated_minutes,
     )
