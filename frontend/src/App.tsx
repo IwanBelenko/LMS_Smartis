@@ -23,8 +23,6 @@ import {
   List,
   LogOut,
   MoreHorizontal,
-  PanelLeftClose,
-  PanelLeftOpen,
   Pencil,
   PlayCircle,
   Plus,
@@ -215,6 +213,17 @@ function ThemeSwitch({ dark, onChange }: { dark: boolean; onChange: () => void }
   );
 }
 
+function CurtainToggleIcon({ open }: { open: boolean }) {
+  return (
+    <svg className="curtain-toggle-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M5.5 4.5v15" />
+      <circle cx="5.5" cy="12" r="1.35" />
+      <path d="M9 5.5h1.5c4.7 0 8 2.7 8 6.5s-3.3 6.5-8 6.5H9" />
+      <path className="curtain-toggle-icon__arrow" d={open ? "m15 9-3 3 3 3" : "m12 9 3 3-3 3"} />
+    </svg>
+  );
+}
+
 function LoginPage({ onLogin }: { onLogin: (token: string, user: User) => void }) {
   const [email, setEmail] = useState("admin@smartis.local");
   const [password, setPassword] = useState("SmartisDemo123!");
@@ -389,7 +398,7 @@ function IconRail({
         data-tooltip={open ? "Скрыть меню" : "Открыть меню"}
         onClick={onOpen}
       >
-        {open ? <PanelLeftClose aria-hidden="true" /> : <PanelLeftOpen aria-hidden="true" />}
+        <CurtainToggleIcon open={open} />
       </button>
       <nav className="icon-rail__group" aria-label="Обучение">{railGroup(nav)}</nav>
       {availableAdminNav.length > 0 && (

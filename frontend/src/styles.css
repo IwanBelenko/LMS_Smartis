@@ -934,6 +934,10 @@ th { font-size: 0.72rem; text-transform: none; letter-spacing: 0.02em; }
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.38);
 }
 .icon-rail__toggle { margin-bottom: 4px; color: var(--muted); }
+.icon-rail__toggle[aria-expanded="true"] { background: color-mix(in srgb, var(--brand) 11%, var(--surface)); color: var(--brand-hover); }
+.curtain-toggle-icon { width: 26px; height: 26px; overflow: visible; stroke: currentColor; stroke-width: 1.65; stroke-linecap: round; stroke-linejoin: round; }
+.curtain-toggle-icon circle { fill: currentColor; stroke: none; }
+.curtain-toggle-icon__arrow { stroke-width: 1.9; }
 .icon-rail__group { width: 100%; display: grid; justify-items: center; gap: 4px; }
 .icon-rail__item svg { width: 23px; height: 23px; stroke-width: 1.8; }
 .icon-rail__item--active {
