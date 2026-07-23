@@ -1,5 +1,7 @@
 # Smartis LMS
 
+Бэклог будущего HR-модуля: [docs/HR_BACKLOG.md](docs/HR_BACKLOG.md).
+
 Корпоративная LMS для обучения сотрудников Smartis.
 
 ## Что уже работает
