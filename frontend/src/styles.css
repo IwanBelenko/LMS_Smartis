@@ -96,6 +96,10 @@ svg { width: 20px; height: 20px; flex: 0 0 auto; }
   margin: 0 10px 6px; color: var(--muted); font-size: 0.75rem;
   font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
 }
+.sidebar__divider {
+  width: 100%; height: 1px; margin: -12px 0; display: block; flex: 0 0 1px;
+  background: color-mix(in srgb, var(--foreground) 22%, var(--border));
+}
 .nav-item {
   width: 100%; min-height: 42px; padding: 9px 11px; border: 0; border-radius: 10px;
   display: flex; align-items: center; gap: 10px; background: transparent;
@@ -994,7 +998,10 @@ th { font-size: 0.72rem; text-transform: none; letter-spacing: 0.02em; }
 .icon-rail__item--active {
   background: color-mix(in srgb, var(--brand) 16%, var(--surface)); color: var(--brand-hover);
 }
-.icon-rail__divider { width: 32px; height: 1px; margin: 4px 0; background: var(--border); }
+.icon-rail__divider {
+  width: 34px; height: 1px; margin: 7px 0; display: block; flex: 0 0 1px;
+  background: color-mix(in srgb, var(--foreground) 24%, var(--border));
+}
 .icon-rail__user { margin-top: auto; color: var(--muted); }
 .icon-rail__user svg { width: 29px; height: 29px; stroke-width: 1.7; }
 

@@ -555,16 +555,22 @@ function Sidebar({
         {group(nav)}
       </nav>
       {availableHcmNav.length > 0 && (
-        <nav className="nav-group" aria-label="Персонал">
-          <p>Персонал</p>
-          {group(availableHcmNav)}
-        </nav>
+        <>
+          <span className="sidebar__divider" aria-hidden="true" />
+          <nav className="nav-group" aria-label="Персонал">
+            <p>Персонал</p>
+            {group(availableHcmNav)}
+          </nav>
+        </>
       )}
       {availableAdminNav.length > 0 && (
-        <nav className="nav-group" aria-label="Администрирование">
-          <p>Администрирование</p>
-          {group(availableAdminNav)}
-        </nav>
+        <>
+          <span className="sidebar__divider" aria-hidden="true" />
+          <nav className="nav-group" aria-label="Администрирование">
+            <p>Администрирование</p>
+            {group(availableAdminNav)}
+          </nav>
+        </>
       )}
       <div className="sidebar__footer">
         <div className="user-chip">
