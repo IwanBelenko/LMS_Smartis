@@ -204,15 +204,42 @@ svg { width: 20px; height: 20px; flex: 0 0 auto; }
   color: var(--muted); font-size: .61rem; pointer-events: none; backdrop-filter: blur(5px);
 }
 .development-map__hint > span { width: 5px; height: 5px; border-radius: 50%; background: var(--brand); box-shadow: 0 0 0 4px color-mix(in srgb, var(--brand) 12%, transparent); }
+.development-map__viewport {
+  position: absolute; inset: 0; transform-origin: 50% 50%;
+  transition: transform .2s cubic-bezier(.2, .7, .2, 1);
+}
+.development-map__zoom {
+  position: absolute; z-index: 10; right: 14px; bottom: 14px; padding: 3px;
+  border: 1px solid color-mix(in srgb, var(--border) 86%, transparent); border-radius: 8px;
+  display: flex; align-items: stretch; overflow: hidden;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  box-shadow: 0 7px 22px rgba(20, 20, 18, .12); backdrop-filter: blur(8px);
+}
+.development-map__zoom button {
+  min-width: 34px; height: 32px; padding: 0; border: 0; border-radius: 5px;
+  display: grid; place-items: center; background: transparent; color: var(--foreground); cursor: pointer;
+}
+.development-map__zoom button:hover { background: var(--surface-soft); }
+.development-map__zoom button:disabled { color: var(--muted); opacity: .45; cursor: default; }
+.development-map__zoom button svg { width: 15px; height: 15px; }
+.development-map__zoom .development-map__zoom-value {
+  min-width: 62px; padding: 0 7px; border-right: 1px solid var(--border); border-left: 1px solid var(--border);
+  grid-template-columns: 14px auto; gap: 5px; color: var(--muted); font-size: .61rem; font-weight: 700;
+}
 .development-map__links { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 1; overflow: visible; }
 .development-web__thread, .development-web__ring {
   fill: none; stroke: color-mix(in srgb, var(--muted) 45%, transparent); stroke-width: .62;
   stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke;
-  filter: drop-shadow(0 1px 0 color-mix(in srgb, var(--surface) 65%, transparent));
+  filter:
+    drop-shadow(0 -.45px .18px color-mix(in srgb, var(--surface) 82%, transparent))
+    drop-shadow(0 1.5px .8px rgba(28, 31, 24, .2));
 }
 .development-web__thread--glint { stroke: color-mix(in srgb, var(--muted) 58%, var(--border)); stroke-width: .72; }
 .development-web__thread--open, .development-web__ring--open {
-  stroke: var(--brand); stroke-width: 1.18; filter: none;
+  stroke: var(--brand); stroke-width: 1.18;
+  filter:
+    drop-shadow(0 -.5px .2px rgba(255, 255, 255, .6))
+    drop-shadow(0 1.8px 1.15px rgba(73, 101, 26, .34));
 }
 .development-web__segment { stroke: none; }
 .development-web__segment--1, .development-web__segment--2, .development-web__segment--3, .development-web__segment--4 { fill: transparent; }
@@ -232,25 +259,30 @@ svg { width: 20px; height: 20px; flex: 0 0 auto; }
 .development-map__anchor {
   width: 7px; height: 7px; position: absolute; z-index: 2; transform: translate(-50%, -50%);
   border: 1px solid color-mix(in srgb, var(--muted) 45%, transparent); border-radius: 50%;
-  background: color-mix(in srgb, var(--surface) 85%, transparent);
+  background: radial-gradient(circle at 34% 28%, var(--surface) 0 22%, color-mix(in srgb, var(--muted) 34%, var(--surface)) 68%);
+  box-shadow: 0 1.5px 3px rgba(25, 28, 22, .22), inset 0 0 0 .5px color-mix(in srgb, var(--surface) 78%, transparent);
 }
 .development-segment-label {
   position: absolute; z-index: 2; transform: translate(-50%, -50%); display: grid; gap: 1px;
   color: color-mix(in srgb, var(--foreground) 72%, transparent); font-size: .62rem; font-weight: 700;
-  text-align: center; pointer-events: none;
+  text-align: center; text-shadow: 0 1px 0 var(--surface); pointer-events: none;
 }
 .development-segment-label small { color: var(--muted); font-size: .52rem; font-weight: 500; }
 .development-map__spider {
   width: 50px; height: 44px; position: absolute; z-index: 5; transform-origin: center;
   display: grid; place-items: center; pointer-events: none;
   transition: left 75ms linear, top 75ms linear, transform 110ms ease-out;
-  filter: drop-shadow(0 5px 5px rgba(35, 48, 26, .22));
+  filter: drop-shadow(0 2px 1px rgba(255, 255, 255, .28)) drop-shadow(0 7px 5px rgba(35, 48, 26, .3));
 }
 .development-map__center {
   width: clamp(118px, 14vw, 148px); height: clamp(118px, 14vw, 148px); position: absolute; z-index: 3; left: 50%; top: 50%;
   transform: translate(-50%, -50%); border: 1px solid color-mix(in srgb, var(--brand) 45%, var(--border));
   border-radius: 50%; display: grid; place-content: center; justify-items: center; gap: 1px;
-  background: var(--surface); box-shadow: 0 10px 26px rgba(20, 20, 18, .1);
+  background: radial-gradient(circle at 38% 29%, var(--surface) 0 38%, color-mix(in srgb, var(--surface-soft) 72%, var(--surface)) 100%);
+  box-shadow:
+    inset 0 1.5px 0 color-mix(in srgb, white 72%, transparent),
+    inset 0 -5px 12px color-mix(in srgb, var(--muted) 9%, transparent),
+    0 13px 26px rgba(20, 20, 18, .16);
 }
 .development-map__center::before {
   content: ""; position: absolute; inset: -9px; border: 1px solid color-mix(in srgb, var(--muted) 28%, transparent);
@@ -261,22 +293,38 @@ svg { width: 20px; height: 20px; flex: 0 0 auto; }
 .development-spider {
   width: 50px; height: 44px; color: var(--brand);
   animation: development-spider-float 1.5s ease-in-out infinite alternate;
+  transition: color .18s ease, filter .18s ease;
 }
 .development-spider path { fill: none; stroke: currentColor; stroke-width: 5.8; stroke-linecap: round; stroke-linejoin: round; }
 .development-spider ellipse, .development-spider circle:not(.development-spider__eye) { fill: currentColor; }
 .development-spider__eye { fill: var(--surface); }
 .development-map__spider--moving .development-spider { animation: development-spider-walk .22s ease-in-out infinite alternate; }
+.development-map__spider--locked .development-spider {
+  color: color-mix(in srgb, var(--muted) 78%, var(--border));
+  filter: grayscale(1);
+}
 .development-course-dot {
   width: 14px; height: 14px; padding: 0; position: absolute; z-index: 4; transform: translate(-50%, -50%);
   border: 2px solid var(--surface); border-radius: 50%; display: grid; place-items: center;
-  background: var(--brand); color: var(--surface); cursor: pointer;
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--brand) 52%, var(--border));
+  background: radial-gradient(circle at 35% 28%, color-mix(in srgb, white 26%, var(--brand)) 0 18%, var(--brand) 70%);
+  color: var(--surface); cursor: pointer;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--brand) 52%, var(--border)), 0 3px 5px rgba(49, 68, 19, .25);
   transition: transform .16s ease, box-shadow .16s ease, opacity .16s ease;
 }
 .development-course-dot svg { width: 9px; height: 9px; stroke-width: 3; }
-.development-course-dot--in_progress { background: var(--surface); box-shadow: inset 0 0 0 3px var(--brand), 0 0 0 1px var(--brand); }
-.development-course-dot--available { background: var(--surface); box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--brand) 55%, transparent), 0 0 0 1px var(--brand); }
-.development-course-dot--locked { width: 10px; height: 10px; border-width: 2px; background: var(--border); box-shadow: none; opacity: .72; }
+.development-course-dot--in_progress {
+  background: radial-gradient(circle at 35% 28%, var(--surface) 0 42%, var(--surface-soft) 100%);
+  box-shadow: inset 0 0 0 3px var(--brand), 0 0 0 1px var(--brand), 0 3px 5px rgba(49, 68, 19, .2);
+}
+.development-course-dot--available {
+  background: radial-gradient(circle at 35% 28%, var(--surface) 0 40%, var(--surface-soft) 100%);
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--brand) 55%, transparent), 0 0 0 1px var(--brand), 0 3px 5px rgba(49, 68, 19, .18);
+}
+.development-course-dot--locked {
+  width: 10px; height: 10px; border-width: 2px;
+  background: radial-gradient(circle at 34% 28%, color-mix(in srgb, var(--surface) 42%, var(--border)) 0 20%, var(--border) 72%);
+  box-shadow: 0 2px 4px rgba(20, 20, 18, .16); opacity: .78;
+}
 .development-course-dot--active, .development-course-dot:hover, .development-course-dot:focus-visible {
   z-index: 6; transform: translate(-50%, -50%) scale(1.48);
   box-shadow: 0 0 0 6px color-mix(in srgb, var(--brand) 13%, transparent), 0 4px 14px color-mix(in srgb, var(--brand) 28%, transparent);

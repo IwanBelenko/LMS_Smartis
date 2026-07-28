@@ -28,6 +28,7 @@ import {
   LayoutGrid,
   List,
   LogOut,
+  Minus,
   MoreHorizontal,
   Pencil,
   PlayCircle,
@@ -35,6 +36,7 @@ import {
   Route,
   Rows3,
   RefreshCw,
+  RotateCcw,
   Save,
   Search,
   Settings,
@@ -1077,14 +1079,17 @@ function DevelopmentNetwork({
   const level = Math.max(1, Math.floor(completedCourses / 5) + 1);
   const [spiderPose, setSpiderPose] = useState({ x: 50, y: 36.4, angle: 0, moving: false });
   const [activeNode, setActiveNode] = useState<string | null>(null);
+  const [webZoom, setWebZoom] = useState(1);
   const activeCourse = networkCourses.find((course) => course.id === activeNode);
 
   function moveSpider(event: ReactPointerEvent<HTMLDivElement>) {
     if (event.pointerType === "touch" && event.buttons === 0) return;
     const rect = event.currentTarget.getBoundingClientRect();
+    const rawX = ((event.clientX - rect.left) / rect.width) * 100;
+    const rawY = ((event.clientY - rect.top) / rect.height) * 100;
     const pointer = {
-      x: Math.max(0, Math.min(100, ((event.clientX - rect.left) / rect.width) * 100)),
-      y: Math.max(0, Math.min(100, ((event.clientY - rect.top) / rect.height) * 100)),
+      x: Math.max(0, Math.min(100, 50 + (rawX - 50) / webZoom)),
+      y: Math.max(0, Math.min(100, 50 + (rawY - 50) / webZoom)),
     };
     const next = closestPointOnDevelopmentWeb(pointer);
     setSpiderPose((previous) => {
@@ -1101,6 +1106,10 @@ function DevelopmentNetwork({
       }))
       .sort((a, b) => a.distance - b.distance)[0];
     setActiveNode(nearestNode && nearestNode.distance < 6 ? nearestNode.id : null);
+  }
+
+  function changeWebZoom(nextZoom: number) {
+    setWebZoom(Math.max(.65, Math.min(1.8, Math.round(nextZoom * 10) / 10)));
   }
 
   return (
@@ -1125,9 +1134,15 @@ function DevelopmentNetwork({
             setSpiderPose({ x: 50, y: 36.4, angle: 0, moving: false });
             setActiveNode(null);
           }}
+          onWheel={(event) => {
+            if (!event.ctrlKey && !event.metaKey) return;
+            event.preventDefault();
+            changeWebZoom(webZoom + (event.deltaY < 0 ? .1 : -.1));
+          }}
         >
-          <div className="development-map__hint"><span />Проведите курсором по нитям</div>
-          <svg className="development-map__links" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+          <div className="development-map__hint"><span />Курсор по нитям · Ctrl/⌘ + колесо меняет масштаб</div>
+          <div className="development-map__viewport" style={{ transform: `scale(${webZoom})` }}>
+            <svg className="development-map__links" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
             <path className="development-web__segment development-web__segment--1" d="M50 50 50 7 92 50Z" />
             <path className="development-web__segment development-web__segment--2" d="M50 50 92 50 50 93Z" />
             <path className="development-web__segment development-web__segment--3" d="M50 50 50 93 8 50Z" />
@@ -1176,49 +1191,57 @@ function DevelopmentNetwork({
                 <circle className="development-web__dew-shine" cx={point.x - .22} cy={point.y - .22} r=".2" />
               </g>
             ))}
-          </svg>
-          {developmentSegmentNames.map((name, index) => {
-            const positions = [[69, 22], [78, 72], [31, 78], [22, 28]] as const;
-            return <span className={`development-segment-label development-segment-label--${index + 1}`} style={{ left: `${positions[index][0]}%`, top: `${positions[index][1]}%` }} key={name}>{name}<small>10 курсов</small></span>;
-          })}
-          {developmentNodePositions.map(([left, top], index) => (
-            <span className="development-map__anchor" style={{ left: `${left}%`, top: `${top}%` }} key={`anchor-${index}`} />
-          ))}
-          <div
-            className={`development-map__spider ${spiderPose.moving ? "development-map__spider--moving" : ""}`}
-            style={{
-              left: `${spiderPose.x}%`,
-              top: `${spiderPose.y}%`,
-              transform: `translate(-50%, -50%) rotate(${spiderPose.angle}deg)`,
-            }}
-            aria-hidden="true"
-          >
-            <SmartisSpiderMark />
-          </div>
-          <div className="development-map__center">
-            <strong>{averageProgress}%</strong>
-            <span>общий прогресс</span>
-          </div>
-          {networkCourses.map((course) => (
-            <button
-              className={`development-course-dot development-course-dot--${course.status} ${activeNode === course.id ? "development-course-dot--active" : ""}`}
-              style={{ left: `${course.left}%`, top: `${course.top}%` }}
-              type="button"
-              key={course.id}
-              aria-label={`${course.title}: ${course.status === "locked" ? "закрыт" : `${course.progress}%`}`}
-              onClick={() => { if (!demoMode) onNavigate("trajectory"); }}
-              onFocus={() => setActiveNode(course.id)}
-              onBlur={() => setActiveNode(null)}
+            </svg>
+            {developmentSegmentNames.map((name, index) => {
+              const positions = [[69, 22], [78, 72], [31, 78], [22, 28]] as const;
+              return <span className={`development-segment-label development-segment-label--${index + 1}`} style={{ left: `${positions[index][0]}%`, top: `${positions[index][1]}%` }} key={name}>{name}<small>10 курсов</small></span>;
+            })}
+            {developmentNodePositions.map(([left, top], index) => (
+              <span className="development-map__anchor" style={{ left: `${left}%`, top: `${top}%` }} key={`anchor-${index}`} />
+            ))}
+            <div
+              className={`development-map__spider ${spiderPose.moving ? "development-map__spider--moving" : ""} ${activeCourse?.status === "locked" ? "development-map__spider--locked" : ""}`}
+              style={{
+                left: `${spiderPose.x}%`,
+                top: `${spiderPose.y}%`,
+                transform: `translate(-50%, -50%) rotate(${spiderPose.angle}deg)`,
+              }}
+              aria-hidden="true"
             >
-              {course.status === "completed" && <CheckCircle2 />}
-            </button>
-          ))}
-          {activeCourse && (
-            <div className={`development-course-tooltip ${activeCourse.top < 18 ? "development-course-tooltip--below" : ""}`} style={{ left: `${activeCourse.left}%`, top: `${activeCourse.top}%` }}>
-              <strong>{activeCourse.title}</strong>
-              <span>{activeCourse.status === "locked" ? "Закрыт · завершите предыдущие курсы" : `${activeCourse.progress}% пройдено`}</span>
+              <SmartisSpiderMark />
             </div>
-          )}
+            <div className="development-map__center">
+              <strong>{averageProgress}%</strong>
+              <span>общий прогресс</span>
+            </div>
+            {networkCourses.map((course) => (
+              <button
+                className={`development-course-dot development-course-dot--${course.status} ${activeNode === course.id ? "development-course-dot--active" : ""}`}
+                style={{ left: `${course.left}%`, top: `${course.top}%` }}
+                type="button"
+                key={course.id}
+                aria-label={`${course.title}: ${course.status === "locked" ? "закрыт" : `${course.progress}%`}`}
+                onClick={() => { if (!demoMode) onNavigate("trajectory"); }}
+                onFocus={() => setActiveNode(course.id)}
+                onBlur={() => setActiveNode(null)}
+              >
+                {course.status === "completed" && <CheckCircle2 />}
+              </button>
+            ))}
+            {activeCourse && (
+              <div className={`development-course-tooltip ${activeCourse.top < 18 ? "development-course-tooltip--below" : ""}`} style={{ left: `${activeCourse.left}%`, top: `${activeCourse.top}%` }}>
+                <strong>{activeCourse.title}</strong>
+                <span>{activeCourse.status === "locked" ? "Закрыт · завершите предыдущие курсы" : `${activeCourse.progress}% пройдено`}</span>
+              </div>
+            )}
+          </div>
+          <div className="development-map__zoom" aria-label="Масштаб паутины" onPointerMove={(event) => event.stopPropagation()}>
+            <button type="button" aria-label="Уменьшить масштаб" disabled={webZoom <= .65} onClick={() => changeWebZoom(webZoom - .1)}><Minus /></button>
+            <button className="development-map__zoom-value" type="button" aria-label="Сбросить масштаб до 100%" onClick={() => changeWebZoom(1)}>
+              <RotateCcw /><span>{Math.round(webZoom * 100)}%</span>
+            </button>
+            <button type="button" aria-label="Увеличить масштаб" disabled={webZoom >= 1.8} onClick={() => changeWebZoom(webZoom + .1)}><Plus /></button>
+          </div>
         </div>
         <aside className="development-summary">
           <div>
