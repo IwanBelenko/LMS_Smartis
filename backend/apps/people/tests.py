@@ -6,6 +6,7 @@ from rest_framework.test import APIClient
 from apps.identity.models import Department, User
 from apps.learning.models import Course, LearningPath, LearningPathCourse
 from .models import (
+    AbsenceRequest,
     Candidate,
     CandidateStage,
     EmployeeDocument,
@@ -425,3 +426,100 @@ class PeopleApiTests(TestCase):
             format="json",
         )
         self.assertEqual(response.status_code, 400)
+
+    def test_employee_creates_and_sees_only_own_absence_requests(self):
+        other_profile = self.other_employee.employee_profile
+        AbsenceRequest.objects.create(
+            employee=other_profile,
+            absence_type=AbsenceRequest.Type.VACATION,
+            start_date=date.today() + timedelta(days=20),
+            end_date=date.today() + timedelta(days=24),
+        )
+        self.client.force_authenticate(self.employee)
+        created = self.client.post(
+            "/api/v1/absences/",
+            {
+                "absence_type": AbsenceRequest.Type.REMOTE,
+                "start_date": date.today() + timedelta(days=5),
+                "end_date": date.today() + timedelta(days=6),
+                "comment": "Работа из дома",
+            },
+            format="json",
+        )
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(created.json()["employee"], self.profile.pk)
+        self.assertTrue(created.json()["can_cancel"])
+        listing = self.client.get("/api/v1/absences/")
+        self.assertEqual(listing.status_code, 200)
+        self.assertEqual(len(listing.json()), 1)
+        self.assertEqual(listing.json()[0]["employee"], self.profile.pk)
+
+    def test_leader_reviews_only_department_absences(self):
+        own_department_request = AbsenceRequest.objects.create(
+            employee=self.profile,
+            absence_type=AbsenceRequest.Type.VACATION,
+            start_date=date.today() + timedelta(days=10),
+            end_date=date.today() + timedelta(days=14),
+        )
+        other_request = AbsenceRequest.objects.create(
+            employee=self.other_employee.employee_profile,
+            absence_type=AbsenceRequest.Type.SICK,
+            start_date=date.today() + timedelta(days=2),
+            end_date=date.today() + timedelta(days=3),
+        )
+        self.client.force_authenticate(self.leader)
+        listing = self.client.get("/api/v1/absences/")
+        self.assertEqual([item["id"] for item in listing.json()], [own_department_request.pk])
+        approved = self.client.post(
+            f"/api/v1/absences/{own_department_request.pk}/decision/",
+            {"action": "approve", "note": "Согласовано"},
+            format="json",
+        )
+        forbidden = self.client.post(
+            f"/api/v1/absences/{other_request.pk}/decision/",
+            {"action": "approve"},
+            format="json",
+        )
+        self.assertEqual(approved.status_code, 200)
+        self.assertEqual(approved.json()["status"], AbsenceRequest.Status.APPROVED)
+        self.assertEqual(forbidden.status_code, 403)
+
+    def test_hr_sees_all_absences_and_overlap_is_rejected(self):
+        AbsenceRequest.objects.create(
+            employee=self.profile,
+            absence_type=AbsenceRequest.Type.VACATION,
+            start_date=date.today() + timedelta(days=5),
+            end_date=date.today() + timedelta(days=9),
+        )
+        AbsenceRequest.objects.create(
+            employee=self.other_employee.employee_profile,
+            absence_type=AbsenceRequest.Type.OTHER,
+            start_date=date.today() + timedelta(days=11),
+            end_date=date.today() + timedelta(days=11),
+        )
+        self.client.force_authenticate(self.hr)
+        listing = self.client.get("/api/v1/absences/")
+        self.assertEqual(len(listing.json()), 2)
+        overlap = self.client.post(
+            "/api/v1/absences/",
+            {
+                "employee": self.profile.pk,
+                "absence_type": AbsenceRequest.Type.REMOTE,
+                "start_date": date.today() + timedelta(days=7),
+                "end_date": date.today() + timedelta(days=8),
+            },
+            format="json",
+        )
+        self.assertEqual(overlap.status_code, 400)
+
+    def test_employee_can_cancel_pending_absence(self):
+        absence = AbsenceRequest.objects.create(
+            employee=self.profile,
+            absence_type=AbsenceRequest.Type.UNPAID,
+            start_date=date.today() + timedelta(days=30),
+            end_date=date.today() + timedelta(days=30),
+        )
+        self.client.force_authenticate(self.employee)
+        response = self.client.post(f"/api/v1/absences/{absence.pk}/cancel/", {}, format="json")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], AbsenceRequest.Status.CANCELLED)

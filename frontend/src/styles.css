@@ -1645,6 +1645,87 @@ button.vacancy-card { padding: 13px; display: grid; align-content: center; gap: 
 .onboarding-template-checklist { min-height: 132px !important; line-height: 1.55; }
 .organization-dialog { width: min(620px, 100%); }
 
+.absence-error { margin-top: -10px; }
+.absence-metrics {
+  border: 1px solid var(--border); border-radius: 8px; display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)); overflow: hidden; background: var(--surface);
+}
+.absence-metrics article { min-height: 88px; padding: 16px 20px; display: grid; align-content: center; gap: 5px; }
+.absence-metrics article + article { border-left: 1px solid var(--border); }
+.absence-metrics span { color: var(--muted); font-size: .74rem; }
+.absence-metrics strong { font-size: 1.55rem; letter-spacing: -.02em; }
+.absence-layout { display: grid; grid-template-columns: minmax(480px, 1.35fr) minmax(360px, .9fr); gap: 14px; align-items: start; }
+.absence-calendar, .absence-register { padding: 0; overflow: hidden; }
+.absence-calendar > header, .absence-register > header {
+  min-height: 76px; padding: 15px 18px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+}
+.absence-calendar h2 { text-transform: capitalize; }
+.absence-calendar__controls { display: flex; align-items: center; gap: 6px; }
+.absence-calendar__controls .icon-button { width: 34px; height: 34px; border-radius: 6px; background: transparent; }
+.absence-calendar__controls .secondary-button { min-height: 34px; padding: 6px 10px; border-radius: 6px; font-size: .72rem; }
+.absence-calendar__grid { display: grid; grid-template-columns: repeat(7, minmax(64px, 1fr)); }
+.absence-calendar__weekdays { border-bottom: 1px solid var(--border); background: var(--surface-soft); }
+.absence-calendar__weekdays span { padding: 8px 7px; color: var(--muted); font-size: .65rem; font-weight: 700; text-align: right; text-transform: uppercase; }
+.absence-day {
+  min-height: 82px; padding: 7px; border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 4px;
+}
+.absence-day:nth-child(7n) { border-right: 0; }
+.absence-day:nth-last-child(-n + 7) { border-bottom: 0; }
+.absence-day time { width: 23px; height: 23px; margin-left: auto; border-radius: 50%; display: grid; place-items: center; font-size: .69rem; }
+.absence-day--outside { background: color-mix(in srgb, var(--surface-soft) 42%, var(--surface)); color: var(--muted); opacity: .65; }
+.absence-day--today time { background: var(--brand); color: var(--brand-foreground); font-weight: 800; }
+.absence-event {
+  min-width: 0; padding: 3px 5px; border-radius: 4px; overflow: hidden;
+  background: color-mix(in srgb, var(--brand) 16%, var(--surface)); color: var(--foreground);
+  font-size: .61rem; font-weight: 650; text-overflow: ellipsis; white-space: nowrap;
+}
+.absence-event--sick { background: color-mix(in srgb, var(--danger) 12%, var(--surface)); }
+.absence-event--remote { background: color-mix(in srgb, #6e8fbd 16%, var(--surface)); }
+.absence-event--unpaid { background: color-mix(in srgb, var(--warning) 15%, var(--surface)); }
+.absence-day small { color: var(--muted); font-size: .6rem; }
+.absence-register > header > span {
+  min-width: 28px; padding: 5px 8px; border-radius: 999px; background: var(--surface-soft);
+  color: var(--muted); font-size: .7rem; font-weight: 700; text-align: center;
+}
+.absence-list { display: grid; }
+.absence-list > article {
+  min-height: 82px; padding: 12px 14px; border-bottom: 1px solid var(--border);
+  display: grid; grid-template-columns: 32px minmax(120px, 1fr) auto; gap: 8px 10px; align-items: center;
+}
+.absence-list > article:last-child { border-bottom: 0; }
+.absence-list__marker { width: 32px; height: 32px; border-radius: 7px; display: grid; place-items: center; background: color-mix(in srgb, var(--brand) 15%, var(--surface)); color: var(--brand-hover); }
+.absence-list__marker svg { width: 16px; height: 16px; }
+.absence-list__marker--sick { background: color-mix(in srgb, var(--danger) 10%, var(--surface)); color: var(--danger); }
+.absence-list__marker--remote { background: color-mix(in srgb, #6e8fbd 14%, var(--surface)); color: #6e8fbd; }
+.absence-list__marker--unpaid { background: color-mix(in srgb, var(--warning) 13%, var(--surface)); color: var(--warning); }
+.absence-list__person, .absence-list__period { min-width: 0; display: grid; gap: 3px; }
+.absence-list__person strong, .absence-list__period strong { overflow: hidden; font-size: .76rem; text-overflow: ellipsis; white-space: nowrap; }
+.absence-list__person span, .absence-list__period span { color: var(--muted); font-size: .66rem; }
+.absence-list__period { grid-column: 2 / -1; }
+.absence-status {
+  justify-self: end; padding: 4px 7px; border-radius: 999px; background: var(--surface-soft);
+  color: var(--muted); font-size: .62rem; font-weight: 700; white-space: nowrap;
+}
+.absence-status--approved { background: color-mix(in srgb, var(--brand) 18%, var(--surface)); color: var(--brand-hover); }
+.absence-status--rejected { background: color-mix(in srgb, var(--danger) 10%, var(--surface)); color: var(--danger); }
+.absence-list__actions { grid-column: 2 / -1; display: flex; align-items: center; gap: 10px; }
+.text-button { padding: 0; border: 0; background: transparent; color: var(--brand-hover); font-size: .67rem; font-weight: 700; cursor: pointer; }
+.text-button:hover { text-decoration: underline; }
+.text-button--danger { color: var(--danger); }
+.absence-empty { min-height: 240px; padding: 24px; display: grid; place-content: center; justify-items: center; gap: 7px; color: var(--muted); text-align: center; }
+.absence-empty svg { width: 30px; height: 30px; color: var(--brand); }
+.absence-empty strong { color: var(--foreground); font-size: .85rem; }
+.absence-empty span { font-size: .72rem; }
+.absence-dialog { width: min(580px, 100%); }
+.absence-decision-dialog { width: min(500px, 100%); }
+.danger-button {
+  min-height: 42px; padding: 9px 15px; border: 1px solid var(--danger); border-radius: 10px;
+  background: var(--danger); color: var(--surface); font-weight: 700; cursor: pointer;
+}
+.danger-button:disabled { opacity: .6; cursor: wait; }
+
 @media (max-width: 980px) {
   .role-access-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .role-access-card:nth-child(odd) { border-left: 0; }
@@ -1662,9 +1743,14 @@ button.vacancy-card { padding: 13px; display: grid; align-content: center; gap: 
   .onboarding-layout { grid-template-columns: 1fr; }
   .organization-layout { grid-template-columns: 1fr; }
   .organization-tree, .organization-details { min-height: auto; }
+  .absence-layout { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 620px) {
+  .absence-metrics { grid-template-columns: 1fr; }
+  .absence-metrics article + article { border-top: 1px solid var(--border); border-left: 0; }
+  .absence-calendar { overflow-x: auto; }
+  .absence-calendar > header, .absence-calendar__grid { min-width: 620px; }
   .role-access-grid { grid-template-columns: 1fr; }
   .role-access-card, .role-access-card:nth-child(n + 3) { border-left: 0; border-top: 1px solid var(--border); }
   .role-access-card:first-child { border-top: 0; }

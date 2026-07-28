@@ -3,13 +3,15 @@ from datetime import date, timedelta
 from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from rest_framework import generics
+from rest_framework import generics, status
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.identity.models import Department
+from apps.identity.models import Department, User
 from apps.learning.models import LearningPath
 from .models import (
+    AbsenceRequest,
     AuditEvent,
     Candidate,
     CandidateStage,
@@ -26,6 +28,7 @@ from .models import (
 )
 from .permissions import IsHcmUser, IsRecruiter
 from .serializers import (
+    AbsenceRequestSerializer,
     CandidateSerializer,
     CandidateHireSerializer,
     CandidateStageSerializer,
@@ -43,6 +46,122 @@ from .serializers import (
     OnboardingTemplateSerializer,
 )
 from .services import assign_onboarding
+
+
+def absence_queryset_for(user):
+    queryset = AbsenceRequest.objects.select_related(
+        "employee__user__department", "reviewer"
+    )
+    if user.is_superuser or user.role in {User.Role.ADMIN, User.Role.HR}:
+        return queryset
+    if user.role == User.Role.LEADER and user.department_id:
+        return queryset.filter(employee__user__department_id=user.department_id)
+    return queryset.filter(employee__user=user)
+
+
+def can_review_absence(user, absence):
+    return (
+        user.is_superuser
+        or user.role in {User.Role.ADMIN, User.Role.HR}
+        or (
+            user.role == User.Role.LEADER
+            and user.department_id
+            and user.department_id == absence.employee.user.department_id
+        )
+    )
+
+
+class AbsenceListCreateView(generics.ListCreateAPIView):
+    serializer_class = AbsenceRequestSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        queryset = absence_queryset_for(self.request.user)
+        start = self.request.query_params.get("start")
+        end = self.request.query_params.get("end")
+        if start:
+            queryset = queryset.filter(end_date__gte=start)
+        if end:
+            queryset = queryset.filter(start_date__lte=end)
+        return queryset
+
+    def perform_create(self, serializer):
+        user = self.request.user
+        if user.is_superuser or user.role in {User.Role.ADMIN, User.Role.HR}:
+            absence = serializer.save()
+        else:
+            profile = get_object_or_404(EmployeeProfile, user=user)
+            absence = serializer.save(employee=profile)
+        AuditEvent.objects.create(
+            actor=user, entity_type="absence_request", entity_id=str(absence.pk), action="created"
+        )
+
+
+class AbsenceDetailView(generics.RetrieveUpdateAPIView):
+    serializer_class = AbsenceRequestSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return absence_queryset_for(self.request.user)
+
+    def perform_update(self, serializer):
+        absence = self.get_object()
+        if absence.status != AbsenceRequest.Status.PENDING:
+            from rest_framework.exceptions import ValidationError
+            raise ValidationError("Изменять можно только заявку на согласовании")
+        if not (
+            self.request.user.is_superuser
+            or self.request.user.role in {User.Role.ADMIN, User.Role.HR}
+            or absence.employee.user_id == self.request.user.id
+        ):
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("Недостаточно прав")
+        serializer.save()
+
+
+class AbsenceDecisionView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        absence = get_object_or_404(
+            AbsenceRequest.objects.select_related("employee__user__department"), pk=pk
+        )
+        if not can_review_absence(request.user, absence):
+            return Response({"detail": "Недостаточно прав"}, status=status.HTTP_403_FORBIDDEN)
+        if absence.status != AbsenceRequest.Status.PENDING:
+            return Response({"detail": "Заявка уже рассмотрена"}, status=status.HTTP_400_BAD_REQUEST)
+        action = request.data.get("action")
+        if action not in {"approve", "reject"}:
+            return Response({"detail": "Укажите действие approve или reject"}, status=status.HTTP_400_BAD_REQUEST)
+        absence.status = (
+            AbsenceRequest.Status.APPROVED if action == "approve" else AbsenceRequest.Status.REJECTED
+        )
+        absence.reviewer = request.user
+        absence.decision_note = request.data.get("note", "")
+        absence.reviewed_at = timezone.now()
+        absence.save(update_fields=["status", "reviewer", "decision_note", "reviewed_at", "updated_at"])
+        AuditEvent.objects.create(
+            actor=request.user,
+            entity_type="absence_request",
+            entity_id=str(absence.pk),
+            action=action,
+        )
+        return Response(AbsenceRequestSerializer(absence, context={"request": request}).data)
+
+
+class AbsenceCancelView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        absence = get_object_or_404(absence_queryset_for(request.user), pk=pk)
+        if absence.employee.user_id != request.user.id or absence.status != AbsenceRequest.Status.PENDING:
+            return Response({"detail": "Эту заявку нельзя отменить"}, status=status.HTTP_403_FORBIDDEN)
+        absence.status = AbsenceRequest.Status.CANCELLED
+        absence.save(update_fields=["status", "updated_at"])
+        AuditEvent.objects.create(
+            actor=request.user, entity_type="absence_request", entity_id=str(absence.pk), action="cancelled"
+        )
+        return Response(AbsenceRequestSerializer(absence, context={"request": request}).data)
 
 
 class EmployeeListCreateView(generics.ListCreateAPIView):

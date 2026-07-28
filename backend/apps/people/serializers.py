@@ -7,6 +7,7 @@ from rest_framework import serializers
 
 from apps.identity.models import Department, Invitation, User
 from .models import (
+    AbsenceRequest,
     Candidate,
     CandidateStage,
     EmployeeDocument,
@@ -289,6 +290,97 @@ class EmployeeDocumentSerializer(serializers.ModelSerializer):
         model = EmployeeDocument
         fields = ["id", "employee", "title", "document_type", "number", "issue_date", "expires_at", "created_at"]
         read_only_fields = ["id", "employee", "created_at"]
+
+
+class AbsenceRequestSerializer(serializers.ModelSerializer):
+    employee = serializers.PrimaryKeyRelatedField(
+        queryset=EmployeeProfile.objects.select_related("user"),
+        required=False,
+    )
+    employee_name = serializers.CharField(source="employee.user.get_full_name", read_only=True)
+    employee_email = serializers.CharField(source="employee.user.email", read_only=True)
+    department_name = serializers.CharField(source="employee.user.department.name", read_only=True)
+    absence_type_label = serializers.CharField(source="get_absence_type_display", read_only=True)
+    status_label = serializers.CharField(source="get_status_display", read_only=True)
+    reviewer_name = serializers.CharField(source="reviewer.get_full_name", read_only=True)
+    days = serializers.SerializerMethodField()
+    can_review = serializers.SerializerMethodField()
+    can_cancel = serializers.SerializerMethodField()
+
+    class Meta:
+        model = AbsenceRequest
+        fields = [
+            "id", "employee", "employee_name", "employee_email", "department_name",
+            "absence_type", "absence_type_label", "start_date", "end_date", "days",
+            "comment", "status", "status_label", "reviewer", "reviewer_name",
+            "decision_note", "reviewed_at", "can_review", "can_cancel", "created_at", "updated_at",
+        ]
+        read_only_fields = [
+            "id", "status", "reviewer", "decision_note", "reviewed_at",
+            "created_at", "updated_at",
+        ]
+
+    def get_days(self, obj):
+        return (obj.end_date - obj.start_date).days + 1
+
+    def _request_user(self):
+        request = self.context.get("request")
+        return request.user if request else None
+
+    def get_can_review(self, obj):
+        user = self._request_user()
+        if not user or obj.status != AbsenceRequest.Status.PENDING:
+            return False
+        if user.is_superuser or user.role in {User.Role.ADMIN, User.Role.HR}:
+            return True
+        return (
+            user.role == User.Role.LEADER
+            and user.department_id
+            and user.department_id == obj.employee.user.department_id
+        )
+
+    def get_can_cancel(self, obj):
+        user = self._request_user()
+        return bool(
+            user
+            and obj.status == AbsenceRequest.Status.PENDING
+            and obj.employee.user_id == user.id
+        )
+
+    def validate_employee(self, value):
+        user = self._request_user()
+        if user and (user.is_superuser or user.role in {User.Role.ADMIN, User.Role.HR}):
+            return value
+        if not user or value.user_id != user.id:
+            raise serializers.ValidationError("Можно создать заявку только для себя")
+        return value
+
+    def validate(self, attrs):
+        user = self._request_user()
+        start_date = attrs.get("start_date", getattr(self.instance, "start_date", None))
+        end_date = attrs.get("end_date", getattr(self.instance, "end_date", None))
+        employee = attrs.get("employee", getattr(self.instance, "employee", None))
+        if (
+            not self.instance
+            and user
+            and (user.is_superuser or user.role in {User.Role.ADMIN, User.Role.HR})
+            and not employee
+        ):
+            raise serializers.ValidationError({"employee": "Выберите сотрудника"})
+        if start_date and end_date and start_date > end_date:
+            raise serializers.ValidationError("Дата окончания должна быть не раньше даты начала")
+        if employee and start_date and end_date:
+            overlaps = AbsenceRequest.objects.filter(
+                employee=employee,
+                status__in=[AbsenceRequest.Status.PENDING, AbsenceRequest.Status.APPROVED],
+                start_date__lte=end_date,
+                end_date__gte=start_date,
+            )
+            if self.instance:
+                overlaps = overlaps.exclude(pk=self.instance.pk)
+            if overlaps.exists():
+                raise serializers.ValidationError("На эти даты уже есть активная заявка")
+        return attrs
 
 
 class OnboardingTemplateSerializer(serializers.ModelSerializer):

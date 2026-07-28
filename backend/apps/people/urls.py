@@ -1,6 +1,10 @@
 from django.urls import path
 
 from .views import (
+    AbsenceCancelView,
+    AbsenceDecisionView,
+    AbsenceDetailView,
+    AbsenceListCreateView,
     CandidateDetailView,
     CandidateListCreateView,
     CandidateHireView,
@@ -29,6 +33,10 @@ from .views import (
 )
 
 urlpatterns = [
+    path("absences/", AbsenceListCreateView.as_view(), name="absences"),
+    path("absences/<int:pk>/", AbsenceDetailView.as_view(), name="absence-detail"),
+    path("absences/<int:pk>/decision/", AbsenceDecisionView.as_view(), name="absence-decision"),
+    path("absences/<int:pk>/cancel/", AbsenceCancelView.as_view(), name="absence-cancel"),
     path("employees/", EmployeeListCreateView.as_view(), name="employees"),
     path("employees/<int:pk>/", EmployeeDetailView.as_view(), name="employee-detail"),
     path("employees/<int:employee_id>/goals/", EmployeeGoalListCreateView.as_view(), name="employee-goals"),

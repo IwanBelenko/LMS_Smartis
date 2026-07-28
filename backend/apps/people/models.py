@@ -155,6 +155,47 @@ class EmployeeDocument(models.Model):
         verbose_name_plural = "Документы сотрудников"
 
 
+class AbsenceRequest(models.Model):
+    class Type(models.TextChoices):
+        VACATION = "vacation", "Отпуск"
+        SICK = "sick", "Больничный"
+        REMOTE = "remote", "Удалённая работа"
+        UNPAID = "unpaid", "За свой счёт"
+        OTHER = "other", "Другое"
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "На согласовании"
+        APPROVED = "approved", "Согласовано"
+        REJECTED = "rejected", "Отклонено"
+        CANCELLED = "cancelled", "Отменено"
+
+    employee = models.ForeignKey(EmployeeProfile, related_name="absence_requests", on_delete=models.CASCADE)
+    absence_type = models.CharField("Тип отсутствия", max_length=20, choices=Type.choices)
+    start_date = models.DateField("Начало")
+    end_date = models.DateField("Окончание")
+    comment = models.TextField("Комментарий", blank=True)
+    status = models.CharField("Статус", max_length=20, choices=Status.choices, default=Status.PENDING)
+    reviewer = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="reviewed_absence_requests",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    decision_note = models.TextField("Комментарий согласующего", blank=True)
+    reviewed_at = models.DateTimeField("Рассмотрено", null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-start_date", "-created_at"]
+        verbose_name = "Заявка на отсутствие"
+        verbose_name_plural = "Заявки на отсутствие"
+
+    def __str__(self):
+        return f"{self.employee}: {self.get_absence_type_display()}"
+
+
 class OnboardingTemplate(models.Model):
     name = models.CharField("Название", max_length=180)
     department = models.ForeignKey(

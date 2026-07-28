@@ -5,6 +5,7 @@ import {
   BookOpen,
   BriefcaseBusiness,
   Building2,
+  CalendarDays,
   ChartNoAxesCombined,
   CheckCircle2,
   ChevronLeft,
@@ -63,7 +64,7 @@ function Brand({ login = false }: { login?: boolean }) {
 }
 
 type ViewId =
-  | "home" | "trajectory" | "ranking" | "analytics"
+  | "home" | "trajectory" | "ranking" | "analytics" | "absences"
   | "organization" | "employees" | "recruitment" | "hrAnalytics"
   | "users" | "courses" | "settings";
 type User = {
@@ -217,6 +218,25 @@ type EmployeeLearning = {
 type EmployeeDocument = {
   id: number; title: string; document_type: string; number: string;
   issue_date: string | null; expires_at: string | null;
+};
+type AbsenceRequest = {
+  id: number;
+  employee: number;
+  employee_name: string;
+  employee_email: string;
+  department_name: string | null;
+  absence_type: "vacation" | "sick" | "remote" | "unpaid" | "other";
+  absence_type_label: string;
+  start_date: string;
+  end_date: string;
+  days: number;
+  comment: string;
+  status: "pending" | "approved" | "rejected" | "cancelled";
+  status_label: string;
+  reviewer_name: string;
+  decision_note: string;
+  can_review: boolean;
+  can_cancel: boolean;
 };
 type OnboardingPlan = {
   id: number;
@@ -457,6 +477,7 @@ const nav = [
   { id: "trajectory" as const, label: "Траектория", icon: Route },
   { id: "ranking" as const, label: "Рейтинг", icon: Trophy },
   { id: "analytics" as const, label: "Аналитика", icon: BarChart3 },
+  { id: "absences" as const, label: "Отсутствия", icon: CalendarDays },
 ];
 const hcmNav = [
   { id: "organization" as const, label: "Оргструктура", icon: Building2 },
@@ -3530,9 +3551,237 @@ function CoursesView({ token, user }: { token: string; user: User }) {
   );
 }
 
+const absenceTypes = [
+  ["vacation", "Отпуск"],
+  ["sick", "Больничный"],
+  ["remote", "Удалённая работа"],
+  ["unpaid", "За свой счёт"],
+  ["other", "Другое"],
+] as const;
+
+function localDateKey(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function formatShortDate(value: string) {
+  return new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "short" })
+    .format(new Date(`${value}T00:00:00`));
+}
+
+function AbsencesView({ token, user }: { token: string; user: User }) {
+  const today = localDateKey(new Date());
+  const canSelectEmployee = user.role === "admin" || user.role === "hr";
+  const [items, setItems] = useState<AbsenceRequest[]>([]);
+  const [employees, setEmployees] = useState<EmployeeProfile[]>([]);
+  const [month, setMonth] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1));
+  const [showCreate, setShowCreate] = useState(false);
+  const [decision, setDecision] = useState<{ item: AbsenceRequest; action: "approve" | "reject" } | null>(null);
+  const [decisionNote, setDecisionNote] = useState("");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({
+    employee: "",
+    absence_type: "vacation",
+    start_date: today,
+    end_date: today,
+    comment: "",
+  });
+
+  async function load() {
+    try {
+      const requests = await apiRequest<AbsenceRequest[]>("/absences/", token);
+      setItems(requests);
+      if (canSelectEmployee) {
+        setEmployees(await apiRequest<EmployeeProfile[]>("/employees/", token));
+      }
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось загрузить отсутствия");
+    }
+  }
+
+  useEffect(() => { void load(); }, [token, canSelectEmployee]);
+
+  async function createRequest(event: FormEvent) {
+    event.preventDefault();
+    setSaving(true);
+    setError("");
+    try {
+      await apiRequest<AbsenceRequest>("/absences/", token, {
+        method: "POST",
+        body: JSON.stringify({
+          ...form,
+          ...(canSelectEmployee ? { employee: Number(form.employee) } : {}),
+        }),
+      });
+      setShowCreate(false);
+      setForm({ employee: "", absence_type: "vacation", start_date: today, end_date: today, comment: "" });
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось создать заявку");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function submitDecision(event: FormEvent) {
+    event.preventDefault();
+    if (!decision) return;
+    setSaving(true);
+    try {
+      await apiRequest(`/absences/${decision.item.id}/decision/`, token, {
+        method: "POST",
+        body: JSON.stringify({ action: decision.action, note: decisionNote }),
+      });
+      setDecision(null);
+      setDecisionNote("");
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось обработать заявку");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function cancelRequest(item: AbsenceRequest) {
+    try {
+      await apiRequest(`/absences/${item.id}/cancel/`, token, { method: "POST", body: "{}" });
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось отменить заявку");
+    }
+  }
+
+  const monthName = new Intl.DateTimeFormat("ru-RU", { month: "long", year: "numeric" }).format(month);
+  const monthStartOffset = (month.getDay() + 6) % 7;
+  const calendarStart = new Date(month.getFullYear(), month.getMonth(), 1 - monthStartOffset);
+  const calendarDays = Array.from({ length: 42 }, (_, index) => {
+    const day = new Date(calendarStart);
+    day.setDate(calendarStart.getDate() + index);
+    return day;
+  });
+  const approved = items.filter((item) => item.status === "approved");
+  const absentToday = approved.filter((item) => item.start_date <= today && item.end_date >= today);
+  const upcomingDays = approved
+    .filter((item) => item.end_date >= today)
+    .reduce((total, item) => total + item.days, 0);
+
+  return (
+    <>
+      <PageHeader
+        title="Отпуска и отсутствия"
+        subtitle={canSelectEmployee || user.role === "leader" ? "Заявки и календарь вашей зоны ответственности" : "Ваши заявки и согласованные даты"}
+        action={<button className="primary-button" type="button" onClick={() => setShowCreate(true)}><Plus />Новая заявка</button>}
+      />
+      {error && <div className="form-error absence-error">{error}</div>}
+      <section className="absence-metrics">
+        <article><span>На согласовании</span><strong>{items.filter((item) => item.status === "pending").length}</strong></article>
+        <article><span>Сегодня отсутствуют</span><strong>{absentToday.length}</strong></article>
+        <article><span>Согласовано дней</span><strong>{upcomingDays}</strong></article>
+      </section>
+
+      <div className="absence-layout">
+        <section className="panel absence-calendar">
+          <header>
+            <div><span className="eyebrow">Календарь команды</span><h2>{monthName}</h2></div>
+            <div className="absence-calendar__controls">
+              <button className="icon-button" type="button" aria-label="Предыдущий месяц" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))}><ChevronLeft /></button>
+              <button className="secondary-button" type="button" onClick={() => setMonth(new Date(new Date().getFullYear(), new Date().getMonth(), 1))}>Сегодня</button>
+              <button className="icon-button" type="button" aria-label="Следующий месяц" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))}><ChevronRight /></button>
+            </div>
+          </header>
+          <div className="absence-calendar__grid absence-calendar__weekdays">
+            {["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"].map((day) => <span key={day}>{day}</span>)}
+          </div>
+          <div className="absence-calendar__grid">
+            {calendarDays.map((day) => {
+              const key = localDateKey(day);
+              const dayItems = approved.filter((item) => item.start_date <= key && item.end_date >= key);
+              return (
+                <div className={`absence-day ${day.getMonth() !== month.getMonth() ? "absence-day--outside" : ""} ${key === today ? "absence-day--today" : ""}`} key={key}>
+                  <time dateTime={key}>{day.getDate()}</time>
+                  {dayItems.slice(0, 2).map((item) => (
+                    <span className={`absence-event absence-event--${item.absence_type}`} title={`${item.employee_name}: ${item.absence_type_label}`} key={item.id}>
+                      {item.employee_name || item.employee_email}
+                    </span>
+                  ))}
+                  {dayItems.length > 2 && <small>+{dayItems.length - 2}</small>}
+                </div>
+              );
+            })}
+          </div>
+        </section>
+
+        <section className="panel absence-register">
+          <header><div><span className="eyebrow">Реестр</span><h2>Заявки</h2></div><span>{items.length}</span></header>
+          <div className="absence-list">
+            {items.map((item) => (
+              <article key={item.id}>
+                <div className={`absence-list__marker absence-list__marker--${item.absence_type}`}><CalendarDays /></div>
+                <div className="absence-list__person">
+                  <strong>{item.employee_name || item.employee_email}</strong>
+                  <span>{item.department_name || item.absence_type_label}</span>
+                </div>
+                <div className="absence-list__period">
+                  <strong>{formatShortDate(item.start_date)} — {formatShortDate(item.end_date)}</strong>
+                  <span>{item.absence_type_label} · {item.days} дн.</span>
+                </div>
+                <span className={`absence-status absence-status--${item.status}`}>{item.status_label}</span>
+                <div className="absence-list__actions">
+                  {item.can_review && <>
+                    <button type="button" className="text-button" onClick={() => { setDecision({ item, action: "approve" }); setDecisionNote(""); }}>Согласовать</button>
+                    <button type="button" className="text-button text-button--danger" onClick={() => { setDecision({ item, action: "reject" }); setDecisionNote(""); }}>Отклонить</button>
+                  </>}
+                  {item.can_cancel && <button type="button" className="text-button" onClick={() => void cancelRequest(item)}>Отменить</button>}
+                </div>
+              </article>
+            ))}
+            {!items.length && <div className="absence-empty"><CalendarDays /><strong>Заявок пока нет</strong><span>Создайте первую заявку на отсутствие.</span></div>}
+          </div>
+        </section>
+      </div>
+
+      {showCreate && (
+        <div className="hcm-dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setShowCreate(false); }}>
+          <section className="hcm-dialog absence-dialog" role="dialog" aria-modal="true" aria-labelledby="absence-create-title">
+            <header><div><span className="eyebrow">Новая заявка</span><h2 id="absence-create-title">Запланировать отсутствие</h2></div><button className="icon-button" type="button" aria-label="Закрыть" onClick={() => setShowCreate(false)}><X /></button></header>
+            <form className="hcm-form" onSubmit={createRequest}>
+              <div className="hcm-form__grid">
+                {canSelectEmployee && <label className="hcm-form__wide">Сотрудник<select value={form.employee} onChange={(event) => setForm({ ...form, employee: event.target.value })} required><option value="">Выберите сотрудника</option>{employees.map((employee) => <option value={employee.id} key={employee.id}>{employee.full_name || employee.email}</option>)}</select></label>}
+                <label>Тип<select value={form.absence_type} onChange={(event) => setForm({ ...form, absence_type: event.target.value })}>{absenceTypes.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
+                <span />
+                <label>Начало<input type="date" value={form.start_date} onChange={(event) => setForm({ ...form, start_date: event.target.value, end_date: event.target.value > form.end_date ? event.target.value : form.end_date })} required /></label>
+                <label>Окончание<input type="date" min={form.start_date} value={form.end_date} onChange={(event) => setForm({ ...form, end_date: event.target.value })} required /></label>
+                <label className="hcm-form__wide">Комментарий<textarea value={form.comment} onChange={(event) => setForm({ ...form, comment: event.target.value })} placeholder="При необходимости добавьте детали" /></label>
+              </div>
+              <footer><button className="secondary-button" type="button" onClick={() => setShowCreate(false)}>Отмена</button><button className="primary-button" type="submit" disabled={saving}>{saving ? "Отправляем…" : "Отправить"}</button></footer>
+            </form>
+          </section>
+        </div>
+      )}
+
+      {decision && (
+        <div className="hcm-dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setDecision(null); }}>
+          <section className="hcm-dialog absence-decision-dialog" role="dialog" aria-modal="true">
+            <header><div><span className="eyebrow">Решение по заявке</span><h2>{decision.action === "approve" ? "Согласовать отсутствие" : "Отклонить заявку"}</h2></div><button className="icon-button" type="button" aria-label="Закрыть" onClick={() => setDecision(null)}><X /></button></header>
+            <p>{decision.item.employee_name} · {formatShortDate(decision.item.start_date)} — {formatShortDate(decision.item.end_date)}</p>
+            <form className="hcm-form" onSubmit={submitDecision}>
+              <label>Комментарий<textarea value={decisionNote} onChange={(event) => setDecisionNote(event.target.value)} placeholder="Необязательно" /></label>
+              <footer><button className="secondary-button" type="button" onClick={() => setDecision(null)}>Отмена</button><button className={decision.action === "approve" ? "primary-button" : "danger-button"} type="submit" disabled={saving}>{saving ? "Сохраняем…" : decision.action === "approve" ? "Согласовать" : "Отклонить"}</button></footer>
+            </form>
+          </section>
+        </div>
+      )}
+    </>
+  );
+}
+
 function Placeholder({ active }: { active: ViewId }) {
   const labels: Record<string, string> = {
     trajectory: "Траектория обучения", ranking: "Рейтинг", analytics: "Аналитика дэйликов",
+    absences: "Отпуска и отсутствия",
     courses: "Курсы", settings: "Настройки", employees: "Сотрудники",
     organization: "Оргструктура", recruitment: "Подбор", hrAnalytics: "HR-аналитика",
   };
@@ -3617,6 +3866,8 @@ function App() {
       <main className="main-content">
         {active === "home" ? (
           <HomeView user={user} />
+        ) : active === "absences" ? (
+          <AbsencesView token={token} user={user} />
         ) : active === "users" ? (
           <UsersView token={token} />
         ) : active === "employees" ? (
