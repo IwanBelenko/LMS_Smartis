@@ -156,6 +156,42 @@ type Candidate = {
   next_action_at: string | null;
   comment: string;
 };
+type InterviewFeedback = {
+  id: number;
+  participant: number;
+  participant_name: string;
+  answers: Array<{ question: string; score: number; note: string }>;
+  overall_score: number;
+  recommendation: "advance" | "hold" | "reject";
+  recommendation_label: string;
+  comment: string;
+  submitted_at: string;
+};
+type Interview = {
+  id: number;
+  candidate: number;
+  candidate_name: string;
+  vacancy_title: string | null;
+  title: string;
+  scheduled_at: string;
+  duration_minutes: number;
+  format: "online" | "office" | "phone";
+  format_label: string;
+  location: string;
+  meeting_url: string;
+  participants: number[];
+  participant_names: string[];
+  questions: string[];
+  status: "scheduled" | "in_progress" | "completed" | "cancelled";
+  status_label: string;
+  decision: "pending" | "advance" | "hold" | "reject";
+  decision_label: string;
+  summary: string;
+  feedback: InterviewFeedback[];
+  average_score: number | null;
+  can_submit_feedback: boolean;
+  my_feedback_id: number | null;
+};
 type Vacancy = {
   id: number;
   title: string;
@@ -1821,33 +1857,58 @@ const emptyHireForm = {
   hire_date: new Date().toISOString().slice(0, 10), grade: "",
 };
 
-function RecruitmentView({ token }: { token: string }) {
+function RecruitmentView({ token, user }: { token: string; user: User }) {
   const [stages, setStages] = useState<CandidateStage[]>([]);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [departments, setDepartments] = useState<OrgDepartment[]>([]);
   const [positions, setPositions] = useState<Position[]>([]);
   const [staff, setStaff] = useState<StaffPosition[]>([]);
   const [vacancies, setVacancies] = useState<Vacancy[]>([]);
+  const [interviews, setInterviews] = useState<Interview[]>([]);
+  const [interviewOptions, setInterviewOptions] = useState<{
+    participants: Array<{ id: number; name: string; role: string }>;
+    default_questions: string[];
+  }>({ participants: [], default_questions: [] });
   const [selectedVacancy, setSelectedVacancy] = useState<number | "all">("all");
   const [error, setError] = useState("");
   const [editing, setEditing] = useState<Candidate | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [vacancyDialog, setVacancyDialog] = useState<Vacancy | "new" | null>(null);
   const [hiring, setHiring] = useState<Candidate | null>(null);
+  const [scheduling, setScheduling] = useState<Candidate | null>(null);
+  const [activeInterview, setActiveInterview] = useState<Interview | null>(null);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(emptyCandidateForm);
   const [vacancyForm, setVacancyForm] = useState(emptyVacancyForm);
   const [hireForm, setHireForm] = useState(emptyHireForm);
+  const [interviewForm, setInterviewForm] = useState({
+    title: "Интервью с руководителем",
+    scheduled_at: "",
+    duration_minutes: "60",
+    format: "online",
+    location: "",
+    meeting_url: "",
+    participants: [] as number[],
+    questions: [] as string[],
+  });
+  const [feedbackForm, setFeedbackForm] = useState({
+    answers: [] as Array<{ score: number; note: string }>,
+    overall_score: 4,
+    recommendation: "advance",
+    comment: "",
+  });
+  const [decisionForm, setDecisionForm] = useState({ decision: "advance", summary: "" });
 
   async function load() {
     try {
-      const [nextStages, nextCandidates, nextDepartments, nextPositions, nextStaff, nextVacancies] = await Promise.all([
+      const [nextStages, nextCandidates, nextDepartments, nextPositions, nextStaff, nextVacancies, nextInterviews] = await Promise.all([
         apiRequest<CandidateStage[]>("/candidate-stages/", token),
         apiRequest<Candidate[]>("/candidates/", token),
         apiRequest<OrgDepartment[]>("/org/departments/", token),
         apiRequest<Position[]>("/positions/", token),
         apiRequest<StaffPosition[]>("/org/staff-positions/", token),
         apiRequest<Vacancy[]>("/vacancies/", token),
+        apiRequest<Interview[]>("/interviews/", token),
       ]);
       setStages(nextStages);
       setCandidates(nextCandidates);
@@ -1855,6 +1916,7 @@ function RecruitmentView({ token }: { token: string }) {
       setPositions(nextPositions);
       setStaff(nextStaff);
       setVacancies(nextVacancies);
+      setInterviews(nextInterviews);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Не удалось загрузить подбор");
     }
@@ -2027,10 +2089,121 @@ function RecruitmentView({ token }: { token: string }) {
     }
   }
 
+  function localDateTimeInput(date: Date) {
+    return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  }
+
+  async function openSchedule(candidate: Candidate) {
+    setError("");
+    try {
+      const options = interviewOptions.participants.length
+        ? interviewOptions
+        : await apiRequest<typeof interviewOptions>("/interviews/options/", token);
+      setInterviewOptions(options);
+      const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
+      tomorrow.setHours(10, 0, 0, 0);
+      setInterviewForm({
+        title: `Интервью: ${candidate.desired_position}`,
+        scheduled_at: localDateTimeInput(tomorrow),
+        duration_minutes: "60",
+        format: "online",
+        location: "",
+        meeting_url: "",
+        participants: options.participants[0] ? [options.participants[0].id] : [],
+        questions: options.default_questions,
+      });
+      setScheduling(candidate);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось подготовить встречу");
+    }
+  }
+
+  async function scheduleInterview(event: FormEvent) {
+    event.preventDefault();
+    if (!scheduling) return;
+    setSaving(true);
+    setError("");
+    try {
+      await apiRequest<Interview>("/interviews/", token, {
+        method: "POST",
+        body: JSON.stringify({
+          ...interviewForm,
+          candidate: scheduling.id,
+          duration_minutes: Number(interviewForm.duration_minutes),
+        }),
+      });
+      setScheduling(null);
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось запланировать собеседование");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function openInterview(interview: Interview) {
+    const ownFeedback = interview.feedback.find((item) => item.participant === user.id);
+    setActiveInterview(interview);
+    setFeedbackForm({
+      answers: interview.questions.map((_, index) => ({
+        score: ownFeedback?.answers[index]?.score || 4,
+        note: ownFeedback?.answers[index]?.note || "",
+      })),
+      overall_score: ownFeedback?.overall_score || 4,
+      recommendation: ownFeedback?.recommendation || "advance",
+      comment: ownFeedback?.comment || "",
+    });
+    setDecisionForm({
+      decision: interview.decision === "pending" ? "advance" : interview.decision,
+      summary: interview.summary || "",
+    });
+  }
+
+  async function submitInterviewFeedback(event: FormEvent) {
+    event.preventDefault();
+    if (!activeInterview) return;
+    setSaving(true);
+    setError("");
+    try {
+      const updated = await apiRequest<Interview>(`/interviews/${activeInterview.id}/feedback/`, token, {
+        method: "POST",
+        body: JSON.stringify(feedbackForm),
+      });
+      openInterview(updated);
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось сохранить оценку");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function completeInterview(event: FormEvent) {
+    event.preventDefault();
+    if (!activeInterview) return;
+    setSaving(true);
+    setError("");
+    try {
+      const updated = await apiRequest<Interview>(`/interviews/${activeInterview.id}/complete/`, token, {
+        method: "POST",
+        body: JSON.stringify(decisionForm),
+      });
+      setActiveInterview(updated);
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось завершить интервью");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   const visibleCandidates = selectedVacancy === "all"
     ? candidates
     : candidates.filter((item) => item.vacancy === selectedVacancy);
   const openVacancies = vacancies.filter((item) => item.status === "open");
+  const upcomingInterviews = interviews
+    .filter((item) => item.status === "scheduled" || item.status === "in_progress")
+    .sort((left, right) => left.scheduled_at.localeCompare(right.scheduled_at));
 
   return (
     <>
@@ -2040,6 +2213,20 @@ function RecruitmentView({ token }: { token: string }) {
         action={<div className="page-actions"><button className="secondary-button" type="button" onClick={() => openVacancy()}><BriefcaseBusiness /> Новая вакансия</button><button className="primary-button" type="button" onClick={() => openCandidate()}><Plus /> Кандидат</button></div>}
       />
       {error && <p className="form-error">{error}</p>}
+      <section className="panel interview-agenda">
+        <header><div><span className="eyebrow">Ближайшие встречи</span><h2>Собеседования</h2></div><strong>{upcomingInterviews.length}</strong></header>
+        <div>
+          {upcomingInterviews.slice(0, 4).map((interview) => (
+            <button type="button" onClick={() => openInterview(interview)} key={interview.id}>
+              <CalendarDays />
+              <span><strong>{interview.candidate_name}</strong><small>{interview.title} · {new Date(interview.scheduled_at).toLocaleString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</small></span>
+              <b className={`interview-status interview-status--${interview.status}`}>{interview.status_label}</b>
+              <ChevronRight />
+            </button>
+          ))}
+          {!upcomingInterviews.length && <p>Запланированных собеседований пока нет. Назначьте встречу из карточки кандидата.</p>}
+        </div>
+      </section>
       <section className="vacancy-strip">
         <button type="button" className={selectedVacancy === "all" ? "vacancy-card vacancy-card--active" : "vacancy-card"} onClick={() => setSelectedVacancy("all")}>
           <span>Все вакансии</span><strong>{candidates.length}</strong><small>кандидатов в работе</small>
@@ -2069,6 +2256,14 @@ function RecruitmentView({ token }: { token: string }) {
                   <p>{candidate.vacancy_title || candidate.desired_position}</p>
                   <label>Этап<select value={candidate.stage} onChange={(event) => void changeCandidateStage(candidate, event.target.value)}>{stages.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
                   <footer><span>{candidate.department_name || "Без отдела"}</span><small>{candidate.source || "Источник не указан"}</small></footer>
+                  {!candidate.hired_employee && (() => {
+                    const candidateInterviews = interviews.filter((item) => item.candidate === candidate.id && item.status !== "cancelled");
+                    const activeMeeting = candidateInterviews.find((item) => item.status === "scheduled" || item.status === "in_progress");
+                    const lastCompleted = [...candidateInterviews].reverse().find((item) => item.status === "completed");
+                    if (activeMeeting) return <button className="candidate-card__interview" type="button" onClick={() => openInterview(activeMeeting)}><CalendarDays />Открыть интервью</button>;
+                    if (lastCompleted) return <div className="candidate-card__interview-actions"><button type="button" onClick={() => openInterview(lastCompleted)}>Итоги</button><button type="button" onClick={() => void openSchedule(candidate)}><Plus />Следующее</button></div>;
+                    return <button className="candidate-card__interview" type="button" onClick={() => void openSchedule(candidate)}><CalendarDays />Запланировать интервью</button>;
+                  })()}
                   {candidate.hired_employee ? (
                     <div className="candidate-card__hired"><CheckCircle2 /> Оформлен как сотрудник</div>
                   ) : stages.find((item) => item.id === candidate.stage)?.is_terminal && candidate.vacancy ? (
@@ -2081,6 +2276,58 @@ function RecruitmentView({ token }: { token: string }) {
           </div>
         ))}
       </section>
+      {scheduling && (
+        <div className="hcm-dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setScheduling(null); }}>
+          <section className="hcm-dialog interview-schedule-dialog" role="dialog" aria-modal="true" aria-labelledby="interview-schedule-title">
+            <header><div><span className="eyebrow">Кандидат · {scheduling.full_name}</span><h2 id="interview-schedule-title">Запланировать собеседование</h2></div><button className="icon-button" type="button" aria-label="Закрыть" onClick={() => setScheduling(null)}><X /></button></header>
+            <form className="hcm-form" onSubmit={scheduleInterview}>
+              <div className="hcm-form__grid">
+                <label className="hcm-form__wide">Название<input value={interviewForm.title} onChange={(event) => setInterviewForm({ ...interviewForm, title: event.target.value })} required /></label>
+                <label>Дата и время<input type="datetime-local" value={interviewForm.scheduled_at} onChange={(event) => setInterviewForm({ ...interviewForm, scheduled_at: event.target.value })} required /></label>
+                <label>Продолжительность<input type="number" min="15" max="240" step="15" value={interviewForm.duration_minutes} onChange={(event) => setInterviewForm({ ...interviewForm, duration_minutes: event.target.value })} required /></label>
+                <label>Формат<select value={interviewForm.format} onChange={(event) => setInterviewForm({ ...interviewForm, format: event.target.value })}><option value="online">Онлайн</option><option value="office">В офисе</option><option value="phone">Телефон</option></select></label>
+                <label>{interviewForm.format === "online" ? "Ссылка на встречу" : "Место или номер"}<input type={interviewForm.format === "online" ? "url" : "text"} value={interviewForm.format === "online" ? interviewForm.meeting_url : interviewForm.location} onChange={(event) => setInterviewForm(interviewForm.format === "online" ? { ...interviewForm, meeting_url: event.target.value } : { ...interviewForm, location: event.target.value })} placeholder={interviewForm.format === "online" ? "https://telemost.yandex.ru/…" : ""} /></label>
+                <fieldset className="hcm-form__wide interview-participants"><legend>Участники</legend><div>{interviewOptions.participants.map((participant) => <label key={participant.id}><input type="checkbox" checked={interviewForm.participants.includes(participant.id)} onChange={(event) => setInterviewForm({ ...interviewForm, participants: event.target.checked ? [...interviewForm.participants, participant.id] : interviewForm.participants.filter((id) => id !== participant.id) })} /><span><strong>{participant.name}</strong><small>{participant.role}</small></span></label>)}</div></fieldset>
+                <fieldset className="hcm-form__wide interview-questions-editor"><legend>Сценарий вопросов</legend>{interviewForm.questions.map((question, index) => <div key={index}><span>{index + 1}</span><input value={question} onChange={(event) => setInterviewForm({ ...interviewForm, questions: interviewForm.questions.map((item, itemIndex) => itemIndex === index ? event.target.value : item) })} required /><button className="icon-button" type="button" aria-label={`Удалить вопрос ${index + 1}`} disabled={interviewForm.questions.length === 1} onClick={() => setInterviewForm({ ...interviewForm, questions: interviewForm.questions.filter((_, itemIndex) => itemIndex !== index) })}><X /></button></div>)}<button className="secondary-button" type="button" onClick={() => setInterviewForm({ ...interviewForm, questions: [...interviewForm.questions, ""] })}><Plus />Добавить вопрос</button></fieldset>
+              </div>
+              {error && <p className="form-error">{error}</p>}
+              <footer><button className="secondary-button" type="button" onClick={() => setScheduling(null)}>Отмена</button><button className="primary-button" type="submit" disabled={saving || !interviewForm.participants.length}>{saving ? "Планируем…" : "Запланировать"}</button></footer>
+            </form>
+          </section>
+        </div>
+      )}
+      {activeInterview && (
+        <div className="hcm-dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setActiveInterview(null); }}>
+          <section className="hcm-dialog interview-workspace" role="dialog" aria-modal="true" aria-labelledby="interview-workspace-title">
+            <header><div><span className="eyebrow">{activeInterview.candidate_name} · {activeInterview.vacancy_title || "Без вакансии"}</span><h2 id="interview-workspace-title">{activeInterview.title}</h2></div><button className="icon-button" type="button" aria-label="Закрыть" onClick={() => setActiveInterview(null)}><X /></button></header>
+            <div className="interview-workspace__summary">
+              <div><CalendarDays /><span><strong>{new Date(activeInterview.scheduled_at).toLocaleString("ru-RU", { dateStyle: "long", timeStyle: "short" })}</strong><small>{activeInterview.duration_minutes} мин · {activeInterview.format_label}</small></span></div>
+              <div><Users /><span><strong>{activeInterview.participant_names.join(", ")}</strong><small>Участники</small></span></div>
+              <span className={`interview-status interview-status--${activeInterview.status}`}>{activeInterview.status_label}</span>
+              {activeInterview.meeting_url && <a className="primary-button" href={activeInterview.meeting_url} target="_blank" rel="noreferrer"><PlayCircle />Открыть встречу</a>}
+            </div>
+            <div className="interview-workspace__body">
+              <section className="interview-script"><span className="eyebrow">Сценарий</span><h3>Вопросы интервью</h3>{activeInterview.questions.map((question, index) => <article key={question}><span>{index + 1}</span><p>{question}</p></article>)}</section>
+              <section className="interview-assessment">
+                {activeInterview.can_submit_feedback && activeInterview.status !== "completed" ? (
+                  <form onSubmit={submitInterviewFeedback}>
+                    <div><span className="eyebrow">Моя оценка</span><h3>{activeInterview.my_feedback_id ? "Обновить обратную связь" : "Заполнить обратную связь"}</h3></div>
+                    {activeInterview.questions.map((question, index) => <fieldset key={question}><legend>{index + 1}. {question}</legend><label>Оценка<select value={feedbackForm.answers[index]?.score || 4} onChange={(event) => setFeedbackForm({ ...feedbackForm, answers: feedbackForm.answers.map((item, itemIndex) => itemIndex === index ? { ...item, score: Number(event.target.value) } : item) })}>{[1, 2, 3, 4, 5].map((score) => <option value={score} key={score}>{score} — {score === 1 ? "слабо" : score === 5 ? "отлично" : "оценка"}</option>)}</select></label><label>Комментарий<input value={feedbackForm.answers[index]?.note || ""} onChange={(event) => setFeedbackForm({ ...feedbackForm, answers: feedbackForm.answers.map((item, itemIndex) => itemIndex === index ? { ...item, note: event.target.value } : item) })} /></label></fieldset>)}
+                    <div className="interview-assessment__final"><label>Общая оценка<select value={feedbackForm.overall_score} onChange={(event) => setFeedbackForm({ ...feedbackForm, overall_score: Number(event.target.value) })}>{[1, 2, 3, 4, 5].map((score) => <option value={score} key={score}>{score} из 5</option>)}</select></label><label>Рекомендация<select value={feedbackForm.recommendation} onChange={(event) => setFeedbackForm({ ...feedbackForm, recommendation: event.target.value })}><option value="advance">Рекомендую дальше</option><option value="hold">Дополнительная оценка</option><option value="reject">Не рекомендую</option></select></label><label className="interview-assessment__wide">Общий комментарий<textarea value={feedbackForm.comment} onChange={(event) => setFeedbackForm({ ...feedbackForm, comment: event.target.value })} /></label></div>
+                    <button className="primary-button" type="submit" disabled={saving}>{saving ? "Сохраняем…" : "Сохранить оценку"}</button>
+                  </form>
+                ) : (
+                  <div className="interview-feedback-list"><span className="eyebrow">Обратная связь</span><h3>Оценки участников</h3>{activeInterview.feedback.map((feedback) => <article key={feedback.id}><header><strong>{feedback.participant_name}</strong><b>{feedback.overall_score}/5</b></header><span>{feedback.recommendation_label}</span>{feedback.comment && <p>{feedback.comment}</p>}</article>)}{!activeInterview.feedback.length && <p>Оценки пока не добавлены.</p>}</div>
+                )}
+                {activeInterview.feedback.length > 0 && activeInterview.status !== "completed" && <div className="interview-feedback-compact"><span>Получено оценок: {activeInterview.feedback.length}</span><strong>Средняя: {activeInterview.average_score}/5</strong></div>}
+                {activeInterview.status !== "completed" ? (
+                  <form className="interview-decision" onSubmit={completeInterview}><span className="eyebrow">Решение HR</span><h3>Завершить собеседование</h3><label>Решение<select value={decisionForm.decision} onChange={(event) => setDecisionForm({ ...decisionForm, decision: event.target.value })}><option value="advance">Перевести дальше</option><option value="hold">Оставить в резерве</option><option value="reject">Отказать</option></select></label><label>Итоговый комментарий<textarea value={decisionForm.summary} onChange={(event) => setDecisionForm({ ...decisionForm, summary: event.target.value })} /></label><button className="secondary-button" type="submit" disabled={saving}>{saving ? "Завершаем…" : "Зафиксировать решение"}</button></form>
+                ) : <div className={`interview-result interview-result--${activeInterview.decision}`}><CheckCircle2 /><span><small>Итоговое решение</small><strong>{activeInterview.decision_label}</strong>{activeInterview.summary && <p>{activeInterview.summary}</p>}</span></div>}
+              </section>
+            </div>
+          </section>
+        </div>
+      )}
       {showForm && (
         <div className="hcm-dialog-backdrop" onMouseDown={(event) => {
           if (event.target === event.currentTarget) setShowForm(false);
@@ -5097,7 +5344,7 @@ function App() {
         ) : active === "organization" ? (
           <OrganizationView token={token} />
         ) : active === "recruitment" ? (
-          <RecruitmentView token={token} />
+          <RecruitmentView token={token} user={user} />
         ) : active === "hrAnalytics" ? (
           <HrAnalyticsView token={token} />
         ) : active === "courses" ? (

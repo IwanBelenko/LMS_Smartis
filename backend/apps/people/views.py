@@ -28,6 +28,8 @@ from .models import (
     EmployeeLearning,
     EmployeeProfile,
     EmploymentEvent,
+    Interview,
+    InterviewFeedback,
     Position,
     StaffPosition,
     Vacancy,
@@ -52,6 +54,8 @@ from .serializers import (
     EmployeeProfileSerializer,
     EmployeeProfileWriteSerializer,
     EmploymentEventSerializer,
+    InterviewFeedbackSerializer,
+    InterviewSerializer,
     PositionSerializer,
     OrganizationDepartmentSerializer,
     StaffPositionSerializer,
@@ -975,6 +979,178 @@ class CandidateHireView(APIView):
             },
             status=201,
         )
+
+
+class InterviewListCreateView(generics.ListCreateAPIView):
+    serializer_class = InterviewSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        queryset = (
+            Interview.objects.select_related("candidate", "candidate__vacancy", "created_by")
+            .prefetch_related("participants", "feedback__participant")
+        )
+        user = self.request.user
+        if not (user.is_superuser or user.role in {User.Role.ADMIN, User.Role.HR}):
+            queryset = queryset.filter(participants=user)
+        candidate_id = self.request.query_params.get("candidate")
+        status_value = self.request.query_params.get("status")
+        if candidate_id:
+            queryset = queryset.filter(candidate_id=candidate_id)
+        if status_value:
+            queryset = queryset.filter(status=status_value)
+        return queryset.distinct()
+
+    def perform_create(self, serializer):
+        user = self.request.user
+        if not (user.is_superuser or user.role in {User.Role.ADMIN, User.Role.HR}):
+            raise PermissionDenied("Планировать собеседования могут только HR и администраторы")
+        interview = serializer.save(created_by=user)
+        interview.candidate.next_action_at = interview.scheduled_at
+        interview.candidate.save(update_fields=["next_action_at", "updated_at"])
+        AuditEvent.objects.create(
+            actor=user,
+            entity_type="interview",
+            entity_id=str(interview.pk),
+            action="scheduled",
+            changes={"candidate_id": interview.candidate_id},
+        )
+
+
+class InterviewDetailView(generics.RetrieveUpdateAPIView):
+    serializer_class = InterviewSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        queryset = (
+            Interview.objects.select_related("candidate", "candidate__vacancy", "created_by")
+            .prefetch_related("participants", "feedback__participant")
+        )
+        user = self.request.user
+        if user.is_superuser or user.role in {User.Role.ADMIN, User.Role.HR}:
+            return queryset
+        return queryset.filter(participants=user)
+
+    def update(self, request, *args, **kwargs):
+        if not (request.user.is_superuser or request.user.role in {User.Role.ADMIN, User.Role.HR}):
+            raise PermissionDenied("Изменять встречу могут только HR и администраторы")
+        return super().update(request, *args, **kwargs)
+
+
+class InterviewOptionsView(APIView):
+    permission_classes = [IsRecruiter]
+
+    def get(self, request):
+        users = User.objects.filter(
+            status=User.Status.ACTIVE,
+            role__in={User.Role.ADMIN, User.Role.HR, User.Role.LEADER},
+        ).order_by("last_name", "first_name", "email")
+        return Response({
+            "participants": [
+                {
+                    "id": user.pk,
+                    "name": user.get_full_name() or user.email,
+                    "role": user.get_role_display(),
+                }
+                for user in users
+            ],
+            "default_questions": [
+                "Расскажите о наиболее релевантном опыте для этой позиции.",
+                "Как вы подходите к решению сложной рабочей задачи?",
+                "Какие ожидания у вас от роли и команды?",
+            ],
+        })
+
+
+class InterviewStartView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        interview = get_object_or_404(
+            Interview.objects.prefetch_related("participants"),
+            pk=pk,
+        )
+        is_recruiter = request.user.is_superuser or request.user.role in {User.Role.ADMIN, User.Role.HR}
+        if not is_recruiter and not interview.participants.filter(pk=request.user.pk).exists():
+            raise PermissionDenied("Вы не участвуете в этом собеседовании")
+        if interview.status == Interview.Status.SCHEDULED:
+            interview.status = Interview.Status.IN_PROGRESS
+            interview.save(update_fields=["status", "updated_at"])
+        return Response(InterviewSerializer(interview, context={"request": request}).data)
+
+
+class InterviewFeedbackView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, pk):
+        interview = get_object_or_404(
+            Interview.objects.prefetch_related("participants", "feedback__participant"),
+            pk=pk,
+        )
+        is_recruiter = request.user.is_superuser or request.user.role in {User.Role.ADMIN, User.Role.HR}
+        if not is_recruiter and not interview.participants.filter(pk=request.user.pk).exists():
+            raise PermissionDenied("Оценку могут оставить только участники интервью")
+        if interview.status in {Interview.Status.COMPLETED, Interview.Status.CANCELLED}:
+            raise ValidationError("Собеседование уже закрыто")
+        feedback = InterviewFeedback.objects.filter(interview=interview, participant=request.user).first()
+        serializer = InterviewFeedbackSerializer(
+            feedback,
+            data=request.data,
+            context={"request": request, "interview": interview},
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save(interview=interview, participant=request.user)
+        if interview.status == Interview.Status.SCHEDULED:
+            interview.status = Interview.Status.IN_PROGRESS
+            interview.save(update_fields=["status", "updated_at"])
+        AuditEvent.objects.create(
+            actor=request.user,
+            entity_type="interview",
+            entity_id=str(interview.pk),
+            action="feedback_submitted",
+        )
+        interview = (
+            Interview.objects.select_related("candidate", "candidate__vacancy", "created_by")
+            .prefetch_related("participants", "feedback__participant")
+            .get(pk=interview.pk)
+        )
+        return Response(InterviewSerializer(interview, context={"request": request}).data)
+
+
+class InterviewCompleteView(APIView):
+    permission_classes = [IsRecruiter]
+
+    @transaction.atomic
+    def post(self, request, pk):
+        interview = get_object_or_404(Interview.objects.select_related("candidate"), pk=pk)
+        decision = request.data.get("decision")
+        if decision not in {
+            Interview.Decision.ADVANCE,
+            Interview.Decision.HOLD,
+            Interview.Decision.REJECT,
+        }:
+            raise ValidationError({"decision": "Выберите итоговое решение"})
+        interview.decision = decision
+        interview.summary = str(request.data.get("summary", "")).strip()
+        interview.status = Interview.Status.COMPLETED
+        interview.completed_at = timezone.now()
+        interview.save(update_fields=["decision", "summary", "status", "completed_at", "updated_at"])
+        interview.candidate.next_action_at = None
+        interview.candidate.save(update_fields=["next_action_at", "updated_at"])
+        AuditEvent.objects.create(
+            actor=request.user,
+            entity_type="interview",
+            entity_id=str(interview.pk),
+            action="completed",
+            changes={"decision": decision},
+        )
+        interview = (
+            Interview.objects.select_related("candidate", "candidate__vacancy", "created_by")
+            .prefetch_related("participants", "feedback__participant")
+            .get(pk=interview.pk)
+        )
+        return Response(InterviewSerializer(interview, context={"request": request}).data)
 
 
 class VacancyListCreateView(generics.ListCreateAPIView):

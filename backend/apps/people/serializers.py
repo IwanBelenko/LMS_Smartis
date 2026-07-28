@@ -20,6 +20,8 @@ from .models import (
     EmployeeLearning,
     EmployeeProfile,
     EmploymentEvent,
+    Interview,
+    InterviewFeedback,
     Position,
     StaffPosition,
     Vacancy,
@@ -741,6 +743,111 @@ class CandidateSerializer(serializers.ModelSerializer):
             attrs["department"] = vacancy.department
             attrs["desired_position"] = vacancy.position.name
         return attrs
+
+
+class InterviewFeedbackSerializer(serializers.ModelSerializer):
+    participant_name = serializers.SerializerMethodField()
+    recommendation_label = serializers.CharField(source="get_recommendation_display", read_only=True)
+
+    class Meta:
+        model = InterviewFeedback
+        fields = [
+            "id", "interview", "participant", "participant_name", "answers",
+            "overall_score", "recommendation", "recommendation_label", "comment", "submitted_at",
+        ]
+        read_only_fields = ["id", "interview", "participant", "submitted_at"]
+
+    def get_participant_name(self, obj):
+        return obj.participant.get_full_name() or obj.participant.email
+
+    def validate_overall_score(self, value):
+        if not 1 <= value <= 5:
+            raise serializers.ValidationError("Общая оценка должна быть от 1 до 5")
+        return value
+
+    def validate(self, attrs):
+        interview = self.context["interview"]
+        answers = attrs.get("answers", [])
+        if not isinstance(answers, list) or len(answers) != len(interview.questions):
+            raise serializers.ValidationError({"answers": "Оцените каждый вопрос сценария"})
+        for index, answer in enumerate(answers):
+            if not isinstance(answer, dict) or not 1 <= int(answer.get("score", 0)) <= 5:
+                raise serializers.ValidationError({"answers": f"Оценка вопроса {index + 1} должна быть от 1 до 5"})
+            answer["question"] = interview.questions[index]
+            answer["score"] = int(answer["score"])
+            answer["note"] = str(answer.get("note", "")).strip()
+        attrs["answers"] = answers
+        return attrs
+
+
+class InterviewSerializer(serializers.ModelSerializer):
+    candidate_name = serializers.CharField(source="candidate.full_name", read_only=True)
+    vacancy_title = serializers.CharField(source="candidate.vacancy.title", read_only=True)
+    status_label = serializers.CharField(source="get_status_display", read_only=True)
+    format_label = serializers.CharField(source="get_format_display", read_only=True)
+    decision_label = serializers.CharField(source="get_decision_display", read_only=True)
+    participant_names = serializers.SerializerMethodField()
+    feedback = InterviewFeedbackSerializer(many=True, read_only=True)
+    average_score = serializers.SerializerMethodField()
+    can_submit_feedback = serializers.SerializerMethodField()
+    my_feedback_id = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Interview
+        fields = [
+            "id", "candidate", "candidate_name", "vacancy_title", "title", "scheduled_at",
+            "duration_minutes", "format", "format_label", "location", "meeting_url",
+            "participants", "participant_names", "questions", "status", "status_label",
+            "decision", "decision_label", "summary", "feedback", "average_score",
+            "can_submit_feedback", "my_feedback_id", "created_by", "completed_at",
+            "created_at", "updated_at",
+        ]
+        read_only_fields = [
+            "id", "status", "decision", "summary", "created_by", "completed_at",
+            "created_at", "updated_at",
+        ]
+
+    def get_participant_names(self, obj):
+        return [
+            participant.get_full_name() or participant.email
+            for participant in obj.participants.all()
+        ]
+
+    def get_average_score(self, obj):
+        scores = [item.overall_score for item in obj.feedback.all()]
+        return round(sum(scores) / len(scores), 1) if scores else None
+
+    def get_can_submit_feedback(self, obj):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if not user or obj.status in {Interview.Status.COMPLETED, Interview.Status.CANCELLED}:
+            return False
+        return (
+            user.is_superuser
+            or user.role in {User.Role.ADMIN, User.Role.HR}
+            or obj.participants.filter(pk=user.pk).exists()
+        )
+
+    def get_my_feedback_id(self, obj):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if not user:
+            return None
+        feedback = next((item for item in obj.feedback.all() if item.participant_id == user.pk), None)
+        return feedback.pk if feedback else None
+
+    def validate_questions(self, value):
+        if not isinstance(value, list) or not 1 <= len(value) <= 20:
+            raise serializers.ValidationError("Добавьте от 1 до 20 вопросов")
+        questions = [str(question).strip() for question in value]
+        if any(not question for question in questions):
+            raise serializers.ValidationError("Вопросы не должны быть пустыми")
+        return questions
+
+    def validate_participants(self, value):
+        if not value:
+            raise serializers.ValidationError("Добавьте хотя бы одного участника")
+        return value
 
 
 class CandidateHireSerializer(serializers.Serializer):

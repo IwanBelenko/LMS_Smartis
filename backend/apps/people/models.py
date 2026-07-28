@@ -577,6 +577,86 @@ class Candidate(models.Model):
         return self.full_name
 
 
+class Interview(models.Model):
+    class Status(models.TextChoices):
+        SCHEDULED = "scheduled", "Запланировано"
+        IN_PROGRESS = "in_progress", "Проводится"
+        COMPLETED = "completed", "Завершено"
+        CANCELLED = "cancelled", "Отменено"
+
+    class Format(models.TextChoices):
+        ONLINE = "online", "Онлайн"
+        OFFICE = "office", "В офисе"
+        PHONE = "phone", "Телефон"
+
+    class Decision(models.TextChoices):
+        PENDING = "pending", "Решение не принято"
+        ADVANCE = "advance", "Перевести дальше"
+        HOLD = "hold", "Резерв"
+        REJECT = "reject", "Отказать"
+
+    candidate = models.ForeignKey(Candidate, related_name="interviews", on_delete=models.CASCADE)
+    title = models.CharField("Название", max_length=220)
+    scheduled_at = models.DateTimeField("Дата и время")
+    duration_minutes = models.PositiveSmallIntegerField("Продолжительность, минут", default=60)
+    format = models.CharField("Формат", max_length=20, choices=Format.choices, default=Format.ONLINE)
+    location = models.CharField("Место", max_length=240, blank=True)
+    meeting_url = models.URLField("Ссылка на встречу", blank=True)
+    participants = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        related_name="assigned_interviews",
+        blank=True,
+    )
+    questions = models.JSONField("Сценарий вопросов", default=list)
+    status = models.CharField("Статус", max_length=20, choices=Status.choices, default=Status.SCHEDULED)
+    decision = models.CharField("Решение", max_length=20, choices=Decision.choices, default=Decision.PENDING)
+    summary = models.TextField("Итоговый комментарий", blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="created_interviews",
+        null=True,
+        on_delete=models.SET_NULL,
+    )
+    completed_at = models.DateTimeField("Завершено", null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["scheduled_at", "id"]
+        verbose_name = "Собеседование"
+        verbose_name_plural = "Собеседования"
+
+
+class InterviewFeedback(models.Model):
+    class Recommendation(models.TextChoices):
+        ADVANCE = "advance", "Рекомендую дальше"
+        HOLD = "hold", "Нужна дополнительная оценка"
+        REJECT = "reject", "Не рекомендую"
+
+    interview = models.ForeignKey(Interview, related_name="feedback", on_delete=models.CASCADE)
+    participant = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="interview_feedback",
+        on_delete=models.CASCADE,
+    )
+    answers = models.JSONField("Оценки по вопросам", default=list)
+    overall_score = models.PositiveSmallIntegerField("Общая оценка")
+    recommendation = models.CharField("Рекомендация", max_length=20, choices=Recommendation.choices)
+    comment = models.TextField("Комментарий", blank=True)
+    submitted_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["submitted_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["interview", "participant"],
+                name="unique_interview_feedback_participant",
+            ),
+        ]
+        verbose_name = "Оценка собеседования"
+        verbose_name_plural = "Оценки собеседований"
+
+
 class AuditEvent(models.Model):
     actor = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL)
     entity_type = models.CharField(max_length=80)

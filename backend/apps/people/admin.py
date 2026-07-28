@@ -12,6 +12,8 @@ from .models import (
     EmployeeLearning,
     EmployeeProfile,
     EmploymentEvent,
+    Interview,
+    InterviewFeedback,
     Position,
     StaffPosition,
     Vacancy,
@@ -28,4 +30,5 @@ admin.site.register([
     EmployeeDocument, AbsenceRequest, PerformanceCycle, Competency, PerformanceReview, PerformanceScore,
     DailyTranscript, ProductUpdate,
     OnboardingTemplate, OnboardingPlan, CandidateStage, Vacancy, Candidate, AuditEvent,
+    Interview, InterviewFeedback,
 ])

@@ -18,6 +18,7 @@ from .models import (
     EmployeeLearning,
     EmployeeProfile,
     EmploymentEvent,
+    Interview,
     Position,
     StaffPosition,
     Vacancy,
@@ -848,6 +849,89 @@ class PeopleApiTests(TestCase):
             self.client.post(
                 "/api/v1/product-updates/",
                 {"title": "Изменение", "description": "Описание", "effective_date": "2026-08-01"},
+                format="json",
+            ).status_code,
+            403,
+        )
+
+    def test_hr_runs_interview_with_participant_feedback_and_decision(self):
+        candidate = Candidate.objects.get(full_name="Мария Тестова")
+        self.client.force_authenticate(self.hr)
+        created = self.client.post(
+            "/api/v1/interviews/",
+            {
+                "candidate": candidate.pk,
+                "title": "Интервью с руководителем",
+                "scheduled_at": "2026-08-03T10:00:00+03:00",
+                "duration_minutes": 45,
+                "format": Interview.Format.ONLINE,
+                "meeting_url": "https://telemost.yandex.ru/example",
+                "participants": [self.leader.pk],
+                "questions": ["Опыт кандидата", "Работа со сложными задачами"],
+            },
+            format="json",
+        )
+        self.assertEqual(created.status_code, 201)
+        interview_id = created.json()["id"]
+        candidate.refresh_from_db()
+        self.assertIsNotNone(candidate.next_action_at)
+
+        self.client.force_authenticate(self.leader)
+        listing = self.client.get("/api/v1/interviews/")
+        self.assertEqual(listing.status_code, 200)
+        self.assertEqual(listing.json()[0]["candidate_name"], candidate.full_name)
+        self.assertTrue(listing.json()[0]["can_submit_feedback"])
+        started = self.client.post(f"/api/v1/interviews/{interview_id}/start/")
+        self.assertEqual(started.json()["status"], Interview.Status.IN_PROGRESS)
+        feedback = self.client.post(
+            f"/api/v1/interviews/{interview_id}/feedback/",
+            {
+                "answers": [
+                    {"score": 5, "note": "Релевантный опыт"},
+                    {"score": 4, "note": "Хорошая структура ответа"},
+                ],
+                "overall_score": 5,
+                "recommendation": "advance",
+                "comment": "Рекомендую продолжить",
+            },
+            format="json",
+        )
+        self.assertEqual(feedback.status_code, 200)
+        self.assertEqual(feedback.json()["average_score"], 5.0)
+        self.assertEqual(len(feedback.json()["feedback"]), 1)
+
+        self.client.force_authenticate(self.hr)
+        completed = self.client.post(
+            f"/api/v1/interviews/{interview_id}/complete/",
+            {"decision": "advance", "summary": "Перевести на следующий этап"},
+            format="json",
+        )
+        self.assertEqual(completed.status_code, 200)
+        self.assertEqual(completed.json()["status"], Interview.Status.COMPLETED)
+        self.assertEqual(completed.json()["decision"], Interview.Decision.ADVANCE)
+        candidate.refresh_from_db()
+        self.assertIsNone(candidate.next_action_at)
+
+    def test_unrelated_employee_cannot_open_or_score_interview(self):
+        candidate = Candidate.objects.get(full_name="Мария Тестова")
+        interview = Interview.objects.create(
+            candidate=candidate,
+            title="Интервью",
+            scheduled_at="2026-08-03T10:00:00+03:00",
+            questions=["Первый вопрос"],
+            created_by=self.hr,
+        )
+        interview.participants.add(self.leader)
+        self.client.force_authenticate(self.employee)
+        self.assertEqual(self.client.get("/api/v1/interviews/").json(), [])
+        self.assertEqual(
+            self.client.post(
+                f"/api/v1/interviews/{interview.pk}/feedback/",
+                {
+                    "answers": [{"score": 3, "note": ""}],
+                    "overall_score": 3,
+                    "recommendation": "hold",
+                },
                 format="json",
             ).status_code,
             403,
