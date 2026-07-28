@@ -64,7 +64,7 @@ function Brand({ login = false }: { login?: boolean }) {
 }
 
 type ViewId =
-  | "home" | "trajectory" | "ranking" | "analytics" | "absences" | "documents"
+  | "home" | "trajectory" | "ranking" | "analytics" | "absences" | "documents" | "performance"
   | "organization" | "employees" | "recruitment" | "hrAnalytics"
   | "users" | "courses" | "settings";
 type User = {
@@ -242,6 +242,25 @@ type AbsenceRequest = {
   decision_note: string;
   can_review: boolean;
   can_cancel: boolean;
+};
+type Competency = { id: number; name: string; category: string; description: string; is_active: boolean };
+type PerformanceCycle = {
+  id: number; title: string; start_date: string; end_date: string;
+  status: "draft" | "active" | "completed"; status_label: string;
+  review_count: number; completed_count: number;
+};
+type PerformanceScore = {
+  id: number; competency: number; competency_name: string; competency_category: string;
+  competency_description: string; self_score: number | null; manager_score: number | null;
+  self_comment: string; manager_comment: string;
+};
+type PerformanceReview = {
+  id: number; cycle: number; cycle_title: string; cycle_end_date: string;
+  employee: number; employee_name: string; employee_email: string; department_name: string;
+  position_name: string; reviewer_name: string; status: "self" | "manager" | "completed";
+  status_label: string; self_summary: string; manager_summary: string; development_plan: string;
+  scores: PerformanceScore[]; self_average: number | null; manager_average: number | null;
+  can_self_submit: boolean; can_manager_submit: boolean;
 };
 type OnboardingPlan = {
   id: number;
@@ -483,6 +502,7 @@ const nav = [
   { id: "ranking" as const, label: "Рейтинг", icon: Trophy },
   { id: "analytics" as const, label: "Аналитика", icon: BarChart3 },
   { id: "documents" as const, label: "Документы", icon: FileText },
+  { id: "performance" as const, label: "Оценка", icon: CheckCircle2 },
 ];
 const hcmNav = [
   { id: "absences" as const, label: "Отпуска и отсутствия", icon: CalendarDays },
@@ -3563,6 +3583,221 @@ function CoursesView({ token, user }: { token: string; user: User }) {
   );
 }
 
+function PerformanceView({ token, user }: { token: string; user: User }) {
+  const canManage = user.role === "admin" || user.role === "hr";
+  const [reviews, setReviews] = useState<PerformanceReview[]>([]);
+  const [cycles, setCycles] = useState<PerformanceCycle[]>([]);
+  const [competencies, setCompetencies] = useState<Competency[]>([]);
+  const [reviewing, setReviewing] = useState<PerformanceReview | null>(null);
+  const [showCycle, setShowCycle] = useState(false);
+  const [showCompetency, setShowCompetency] = useState(false);
+  const [scores, setScores] = useState<Record<number, number>>({});
+  const [comments, setComments] = useState<Record<number, string>>({});
+  const [summary, setSummary] = useState("");
+  const [developmentPlan, setDevelopmentPlan] = useState("");
+  const [cycleForm, setCycleForm] = useState({ title: "", start_date: localDateKey(new Date()), end_date: localDateKey(new Date()) });
+  const [competencyForm, setCompetencyForm] = useState({ name: "", category: "", description: "" });
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function load() {
+    try {
+      const [nextReviews, nextCycles, nextCompetencies] = await Promise.all([
+        apiRequest<PerformanceReview[]>("/performance/reviews/", token),
+        canManage ? apiRequest<PerformanceCycle[]>("/performance/cycles/", token) : Promise.resolve([]),
+        canManage ? apiRequest<Competency[]>("/performance/competencies/", token) : Promise.resolve([]),
+      ]);
+      setReviews(nextReviews);
+      setCycles(nextCycles);
+      setCompetencies(nextCompetencies);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось загрузить оценки");
+    }
+  }
+
+  useEffect(() => { void load(); }, [token, canManage]);
+
+  function openReview(item: PerformanceReview) {
+    const managerMode = item.can_manager_submit;
+    setReviewing(item);
+    setScores(Object.fromEntries(item.scores.map((score) => [
+      score.competency,
+      (managerMode ? score.manager_score : score.self_score) || 0,
+    ])));
+    setComments(Object.fromEntries(item.scores.map((score) => [
+      score.competency,
+      managerMode ? score.manager_comment : score.self_comment,
+    ])));
+    setSummary(managerMode ? item.manager_summary : item.self_summary);
+    setDevelopmentPlan(item.development_plan);
+  }
+
+  async function saveAssessment(event: FormEvent) {
+    event.preventDefault();
+    if (!reviewing) return;
+    const managerMode = reviewing.can_manager_submit;
+    setSaving(true);
+    setError("");
+    try {
+      await apiRequest(`/performance/reviews/${reviewing.id}/${managerMode ? "manager" : "self"}/`, token, {
+        method: "POST",
+        body: JSON.stringify({
+          scores: reviewing.scores.map((score) => ({
+            competency: score.competency,
+            score: scores[score.competency] || 0,
+            comment: comments[score.competency] || "",
+          })),
+          summary,
+          development_plan: managerMode ? developmentPlan : "",
+        }),
+      });
+      setReviewing(null);
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось сохранить оценку");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function createCycle(event: FormEvent) {
+    event.preventDefault();
+    setSaving(true);
+    try {
+      await apiRequest("/performance/cycles/", token, {
+        method: "POST",
+        body: JSON.stringify(cycleForm),
+      });
+      setShowCycle(false);
+      setCycleForm({ title: "", start_date: localDateKey(new Date()), end_date: localDateKey(new Date()) });
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось создать цикл");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function createCompetency(event: FormEvent) {
+    event.preventDefault();
+    setSaving(true);
+    try {
+      await apiRequest("/performance/competencies/", token, {
+        method: "POST",
+        body: JSON.stringify(competencyForm),
+      });
+      setShowCompetency(false);
+      setCompetencyForm({ name: "", category: "", description: "" });
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось добавить компетенцию");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function launchCycle(cycle: PerformanceCycle) {
+    try {
+      await apiRequest(`/performance/cycles/${cycle.id}/launch/`, token, { method: "POST", body: "{}" });
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось запустить цикл");
+    }
+  }
+
+  const pending = reviews.filter((item) => item.status !== "completed").length;
+  const completed = reviews.filter((item) => item.status === "completed");
+  const average = completed.flatMap((item) => item.scores.map((score) => score.manager_score).filter((value): value is number => value !== null));
+  const averageScore = average.length ? (average.reduce((sum, value) => sum + value, 0) / average.length).toFixed(1) : "—";
+
+  return (
+    <>
+      <PageHeader
+        title="Оценка и развитие"
+        subtitle={canManage ? "Циклы оценки, компетенции и планы развития сотрудников" : "Ваши задачи по оценке и результаты"}
+        action={canManage ? <div className="page-actions"><button className="secondary-button" type="button" onClick={() => setShowCompetency(true)}><Plus />Компетенция</button><button className="primary-button" type="button" onClick={() => setShowCycle(true)}><Plus />Новый цикл</button></div> : undefined}
+      />
+      {error && <div className="form-error">{error}</div>}
+      <section className="performance-metrics">
+        <article><span>Оценок в работе</span><strong>{pending}</strong></article>
+        <article><span>Завершено</span><strong>{completed.length}</strong></article>
+        <article><span>Средняя оценка</span><strong>{averageScore}</strong></article>
+      </section>
+
+      {canManage && (
+        <section className="panel performance-cycles">
+          <header><div><span className="eyebrow">Управление</span><h2>Циклы оценки</h2></div><span>{competencies.length} компетенций</span></header>
+          <div>
+            {cycles.map((cycle) => (
+              <article key={cycle.id}>
+                <div><strong>{cycle.title}</strong><span>{displayDate(cycle.start_date)} — {displayDate(cycle.end_date)}</span></div>
+                <div className="performance-cycle__progress"><span><i style={{ width: `${cycle.review_count ? cycle.completed_count / cycle.review_count * 100 : 0}%` }} /></span><small>{cycle.completed_count} из {cycle.review_count}</small></div>
+                <span className={`performance-status performance-status--${cycle.status}`}>{cycle.status_label}</span>
+                {cycle.status === "draft" && <button className="primary-button" type="button" onClick={() => void launchCycle(cycle)}>Запустить</button>}
+              </article>
+            ))}
+            {!cycles.length && <div className="performance-empty">Создайте первый цикл оценки.</div>}
+          </div>
+        </section>
+      )}
+
+      <section className="panel performance-reviews">
+        <header><div><span className="eyebrow">Задачи</span><h2>{canManage ? "Оценки сотрудников" : "Мои оценки"}</h2></div></header>
+        <div>
+          {reviews.map((item) => (
+            <article key={item.id}>
+              <div className="performance-review__avatar">{(item.employee_name || item.employee_email).slice(0, 1)}</div>
+              <div className="performance-review__person"><strong>{item.employee_name || item.employee_email}</strong><span>{item.position_name || item.department_name || item.cycle_title}</span></div>
+              <div><strong>{item.cycle_title}</strong><span>до {displayDate(item.cycle_end_date)}</span></div>
+              <div className="performance-review__score"><strong>{item.manager_average ?? item.self_average ?? "—"}</strong><span>из 5</span></div>
+              <span className={`performance-status performance-status--${item.status}`}>{item.status_label}</span>
+              <button className={item.can_self_submit || item.can_manager_submit ? "primary-button" : "secondary-button"} type="button" onClick={() => openReview(item)}>{item.can_self_submit ? "Самооценка" : item.can_manager_submit ? "Оценить" : "Результаты"}</button>
+            </article>
+          ))}
+          {!reviews.length && <div className="performance-empty">Активных оценок пока нет.</div>}
+        </div>
+      </section>
+
+      {showCycle && (
+        <div className="hcm-dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setShowCycle(false); }}>
+          <section className="hcm-dialog performance-dialog" role="dialog" aria-modal="true">
+            <header><div><span className="eyebrow">Новый цикл</span><h2>Запланировать оценку</h2></div><button className="icon-button" type="button" aria-label="Закрыть" onClick={() => setShowCycle(false)}><X /></button></header>
+            <form className="hcm-form" onSubmit={createCycle}><div className="hcm-form__grid"><label className="hcm-form__wide">Название<input value={cycleForm.title} onChange={(event) => setCycleForm({ ...cycleForm, title: event.target.value })} required /></label><label>Начало<input type="date" value={cycleForm.start_date} onChange={(event) => setCycleForm({ ...cycleForm, start_date: event.target.value })} required /></label><label>Окончание<input type="date" min={cycleForm.start_date} value={cycleForm.end_date} onChange={(event) => setCycleForm({ ...cycleForm, end_date: event.target.value })} required /></label></div><footer><button className="secondary-button" type="button" onClick={() => setShowCycle(false)}>Отмена</button><button className="primary-button" type="submit" disabled={saving}>Создать</button></footer></form>
+          </section>
+        </div>
+      )}
+
+      {showCompetency && (
+        <div className="hcm-dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setShowCompetency(false); }}>
+          <section className="hcm-dialog performance-dialog" role="dialog" aria-modal="true">
+            <header><div><span className="eyebrow">Модель компетенций</span><h2>Добавить компетенцию</h2></div><button className="icon-button" type="button" aria-label="Закрыть" onClick={() => setShowCompetency(false)}><X /></button></header>
+            <form className="hcm-form" onSubmit={createCompetency}><div className="hcm-form__grid"><label>Название<input value={competencyForm.name} onChange={(event) => setCompetencyForm({ ...competencyForm, name: event.target.value })} required /></label><label>Категория<input value={competencyForm.category} onChange={(event) => setCompetencyForm({ ...competencyForm, category: event.target.value })} /></label><label className="hcm-form__wide">Описание<textarea value={competencyForm.description} onChange={(event) => setCompetencyForm({ ...competencyForm, description: event.target.value })} /></label></div><footer><button className="secondary-button" type="button" onClick={() => setShowCompetency(false)}>Отмена</button><button className="primary-button" type="submit" disabled={saving}>Добавить</button></footer></form>
+          </section>
+        </div>
+      )}
+
+      {reviewing && (
+        <div className="hcm-dialog-backdrop">
+          <section className="hcm-dialog performance-assessment-dialog" role="dialog" aria-modal="true">
+            <header><div><span className="eyebrow">{reviewing.cycle_title}</span><h2>{reviewing.can_manager_submit ? `Оценка: ${reviewing.employee_name}` : reviewing.can_self_submit ? "Самооценка" : "Результаты оценки"}</h2></div><button className="icon-button" type="button" aria-label="Закрыть" onClick={() => setReviewing(null)}><X /></button></header>
+            <form className="performance-assessment" onSubmit={saveAssessment}>
+              {reviewing.scores.map((item) => {
+                const editable = reviewing.can_self_submit || reviewing.can_manager_submit;
+                const current = editable ? scores[item.competency] : item.manager_score || item.self_score || 0;
+                return <article key={item.id}><div><strong>{item.competency_name}</strong><span>{item.competency_category || item.competency_description}</span></div><div className="score-scale">{[1, 2, 3, 4, 5].map((value) => <button className={current === value ? "score-scale__item score-scale__item--active" : "score-scale__item"} type="button" disabled={!editable} onClick={() => setScores({ ...scores, [item.competency]: value })} key={value}>{value}</button>)}</div>{editable && <textarea value={comments[item.competency] || ""} onChange={(event) => setComments({ ...comments, [item.competency]: event.target.value })} placeholder="Комментарий к оценке" />}</article>;
+              })}
+              {(reviewing.can_self_submit || reviewing.can_manager_submit) && <label>Итоговый комментарий<textarea value={summary} onChange={(event) => setSummary(event.target.value)} /></label>}
+              {reviewing.can_manager_submit && <label>Индивидуальный план развития<textarea value={developmentPlan} onChange={(event) => setDevelopmentPlan(event.target.value)} placeholder="Цели, навыки и следующие шаги" /></label>}
+              {!reviewing.can_self_submit && !reviewing.can_manager_submit && <div className="performance-result"><div><span>Самооценка</span><strong>{reviewing.self_average ?? "—"}</strong></div><div><span>Руководитель</span><strong>{reviewing.manager_average ?? "—"}</strong></div>{reviewing.development_plan && <p><strong>План развития</strong>{reviewing.development_plan}</p>}</div>}
+              <footer><button className="secondary-button" type="button" onClick={() => setReviewing(null)}>Закрыть</button>{(reviewing.can_self_submit || reviewing.can_manager_submit) && <button className="primary-button" type="submit" disabled={saving}>{reviewing.can_manager_submit ? "Завершить оценку" : "Отправить руководителю"}</button>}</footer>
+            </form>
+          </section>
+        </div>
+      )}
+    </>
+  );
+}
+
 function DocumentsView({ token, user }: { token: string; user: User }) {
   const canManage = user.role === "admin" || user.role === "hr";
   const [items, setItems] = useState<EmployeeDocument[]>([]);
@@ -3995,6 +4230,7 @@ function Placeholder({ active }: { active: ViewId }) {
     trajectory: "Траектория обучения", ranking: "Рейтинг", analytics: "Аналитика дэйликов",
     absences: "Отпуска и отсутствия",
     documents: "Документы",
+    performance: "Оценка и развитие",
     courses: "Курсы", settings: "Настройки", employees: "Сотрудники",
     organization: "Оргструктура", recruitment: "Подбор", hrAnalytics: "HR-аналитика",
   };
@@ -4079,6 +4315,8 @@ function App() {
       <main className="main-content">
         {active === "home" ? (
           <HomeView user={user} />
+        ) : active === "performance" ? (
+          <PerformanceView token={token} user={user} />
         ) : active === "documents" ? (
           <DocumentsView token={token} user={user} />
         ) : active === "absences" ? (

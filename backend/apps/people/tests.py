@@ -11,6 +11,7 @@ from .models import (
     AbsenceRequest,
     Candidate,
     CandidateStage,
+    Competency,
     EmployeeDocument,
     EmployeeGoal,
     EmployeeLearning,
@@ -21,6 +22,8 @@ from .models import (
     Vacancy,
     OnboardingPlan,
     OnboardingTemplate,
+    PerformanceCycle,
+    PerformanceReview,
 )
 
 
@@ -590,3 +593,85 @@ class PeopleApiTests(TestCase):
         )
         self.assertEqual(upload.status_code, 403)
         self.assertEqual(decision.status_code, 403)
+
+    def test_hr_launches_performance_cycle_for_active_employees(self):
+        self.department.manager = self.leader
+        self.department.save(update_fields=["manager"])
+        Competency.objects.create(name="Командная работа", category="Корпоративные")
+        Competency.objects.create(name="Работа с данными", category="Профессиональные")
+        self.client.force_authenticate(self.hr)
+        created = self.client.post(
+            "/api/v1/performance/cycles/",
+            {
+                "title": "Оценка за II полугодие",
+                "start_date": "2026-07-01",
+                "end_date": "2026-08-15",
+            },
+            format="json",
+        )
+        self.assertEqual(created.status_code, 201)
+        launched = self.client.post(
+            f"/api/v1/performance/cycles/{created.json()['id']}/launch/",
+            {},
+            format="json",
+        )
+        self.assertEqual(launched.status_code, 200)
+        self.assertEqual(launched.json()["status"], PerformanceCycle.Status.ACTIVE)
+        self.assertEqual(launched.json()["review_count"], 2)
+        review = PerformanceReview.objects.get(cycle_id=created.json()["id"], employee=self.profile)
+        self.assertEqual(review.reviewer, self.leader)
+        self.assertEqual(review.scores.count(), 2)
+
+    def test_employee_and_manager_complete_performance_review(self):
+        self.department.manager = self.leader
+        self.department.save(update_fields=["manager"])
+        competency = Competency.objects.create(name="Ответственность")
+        cycle = PerformanceCycle.objects.create(
+            title="Квартальная оценка",
+            start_date=date.today(),
+            end_date=date.today() + timedelta(days=30),
+            status=PerformanceCycle.Status.ACTIVE,
+            created_by=self.hr,
+        )
+        review = PerformanceReview.objects.create(
+            cycle=cycle,
+            employee=self.profile,
+            reviewer=self.leader,
+        )
+        review.scores.create(competency=competency)
+        payload = {"scores": [{"competency": competency.pk, "score": 4, "comment": "Есть прогресс"}]}
+
+        self.client.force_authenticate(self.employee)
+        self_assessment = self.client.post(
+            f"/api/v1/performance/reviews/{review.pk}/self/",
+            {**payload, "summary": "Итоги квартала"},
+            format="json",
+        )
+        self.assertEqual(self_assessment.status_code, 200)
+        self.assertEqual(self_assessment.json()["status"], PerformanceReview.Status.MANAGER)
+
+        self.client.force_authenticate(self.leader)
+        manager_assessment = self.client.post(
+            f"/api/v1/performance/reviews/{review.pk}/manager/",
+            {**payload, "summary": "Хорошая динамика", "development_plan": "Углубить аналитику"},
+            format="json",
+        )
+        self.assertEqual(manager_assessment.status_code, 200)
+        self.assertEqual(manager_assessment.json()["status"], PerformanceReview.Status.COMPLETED)
+        self.assertEqual(manager_assessment.json()["manager_average"], 4.0)
+        cycle.refresh_from_db()
+        self.assertEqual(cycle.status, PerformanceCycle.Status.COMPLETED)
+
+    def test_employee_cannot_see_foreign_performance_review(self):
+        cycle = PerformanceCycle.objects.create(
+            title="Оценка",
+            start_date=date.today(),
+            end_date=date.today() + timedelta(days=7),
+            created_by=self.hr,
+        )
+        foreign = PerformanceReview.objects.create(
+            cycle=cycle,
+            employee=self.other_employee.employee_profile,
+        )
+        self.client.force_authenticate(self.employee)
+        self.assertEqual(self.client.get(f"/api/v1/performance/reviews/{foreign.pk}/").status_code, 404)

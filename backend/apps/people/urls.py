@@ -35,9 +35,23 @@ from .views import (
     OnboardingTemplateDetailView,
     OnboardingTemplateListCreateView,
     OnboardingOptionsView,
+    CompetencyListCreateView,
+    PerformanceCycleLaunchView,
+    PerformanceCycleListCreateView,
+    PerformanceManagerSubmitView,
+    PerformanceReviewDetailView,
+    PerformanceReviewListView,
+    PerformanceSelfSubmitView,
 )
 
 urlpatterns = [
+    path("performance/competencies/", CompetencyListCreateView.as_view(), name="performance-competencies"),
+    path("performance/cycles/", PerformanceCycleListCreateView.as_view(), name="performance-cycles"),
+    path("performance/cycles/<int:pk>/launch/", PerformanceCycleLaunchView.as_view(), name="performance-cycle-launch"),
+    path("performance/reviews/", PerformanceReviewListView.as_view(), name="performance-reviews"),
+    path("performance/reviews/<int:pk>/", PerformanceReviewDetailView.as_view(), name="performance-review-detail"),
+    path("performance/reviews/<int:pk>/self/", PerformanceSelfSubmitView.as_view(), name="performance-self-submit"),
+    path("performance/reviews/<int:pk>/manager/", PerformanceManagerSubmitView.as_view(), name="performance-manager-submit"),
     path("documents/", DocumentListCreateView.as_view(), name="documents"),
     path("documents/<int:pk>/download/", DocumentDownloadView.as_view(), name="document-download"),
     path("documents/<int:pk>/send/", DocumentSendView.as_view(), name="document-send"),

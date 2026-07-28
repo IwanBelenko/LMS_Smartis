@@ -13,6 +13,7 @@ from .models import (
     AbsenceRequest,
     Candidate,
     CandidateStage,
+    Competency,
     EmployeeDocument,
     EmployeeGoal,
     EmployeeLearning,
@@ -23,6 +24,9 @@ from .models import (
     Vacancy,
     OnboardingPlan,
     OnboardingTemplate,
+    PerformanceCycle,
+    PerformanceReview,
+    PerformanceScore,
 )
 
 
@@ -446,6 +450,113 @@ class AbsenceRequestSerializer(serializers.ModelSerializer):
             if overlaps.exists():
                 raise serializers.ValidationError("На эти даты уже есть активная заявка")
         return attrs
+
+
+class CompetencySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Competency
+        fields = ["id", "name", "category", "description", "is_active"]
+
+
+class PerformanceCycleSerializer(serializers.ModelSerializer):
+    status_label = serializers.CharField(source="get_status_display", read_only=True)
+    review_count = serializers.IntegerField(source="reviews.count", read_only=True)
+    completed_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = PerformanceCycle
+        fields = [
+            "id", "title", "start_date", "end_date", "status", "status_label",
+            "review_count", "completed_count", "created_by", "created_at", "updated_at",
+        ]
+        read_only_fields = ["id", "status", "created_by", "created_at", "updated_at"]
+
+    def get_completed_count(self, obj):
+        return obj.reviews.filter(status=PerformanceReview.Status.COMPLETED).count()
+
+    def validate(self, attrs):
+        if attrs.get("start_date") and attrs.get("end_date") and attrs["start_date"] > attrs["end_date"]:
+            raise serializers.ValidationError("Дата окончания должна быть не раньше даты начала")
+        return attrs
+
+
+class PerformanceScoreSerializer(serializers.ModelSerializer):
+    competency_name = serializers.CharField(source="competency.name", read_only=True)
+    competency_category = serializers.CharField(source="competency.category", read_only=True)
+    competency_description = serializers.CharField(source="competency.description", read_only=True)
+
+    class Meta:
+        model = PerformanceScore
+        fields = [
+            "id", "competency", "competency_name", "competency_category", "competency_description",
+            "self_score", "manager_score", "self_comment", "manager_comment",
+        ]
+
+
+class PerformanceReviewSerializer(serializers.ModelSerializer):
+    employee_name = serializers.CharField(source="employee.user.get_full_name", read_only=True)
+    employee_email = serializers.CharField(source="employee.user.email", read_only=True)
+    department_name = serializers.CharField(source="employee.user.department.name", read_only=True)
+    position_name = serializers.CharField(source="employee.position.name", read_only=True)
+    reviewer_name = serializers.CharField(source="reviewer.get_full_name", read_only=True)
+    cycle_title = serializers.CharField(source="cycle.title", read_only=True)
+    cycle_end_date = serializers.DateField(source="cycle.end_date", read_only=True)
+    status_label = serializers.CharField(source="get_status_display", read_only=True)
+    scores = PerformanceScoreSerializer(many=True, read_only=True)
+    self_average = serializers.SerializerMethodField()
+    manager_average = serializers.SerializerMethodField()
+    can_self_submit = serializers.SerializerMethodField()
+    can_manager_submit = serializers.SerializerMethodField()
+
+    class Meta:
+        model = PerformanceReview
+        fields = [
+            "id", "cycle", "cycle_title", "cycle_end_date", "employee", "employee_name",
+            "employee_email", "department_name", "position_name", "reviewer", "reviewer_name",
+            "status", "status_label", "self_summary", "manager_summary", "development_plan",
+            "self_submitted_at", "completed_at", "scores", "self_average", "manager_average",
+            "can_self_submit", "can_manager_submit", "created_at", "updated_at",
+        ]
+
+    def _average(self, values):
+        numbers = [value for value in values if value is not None]
+        return round(sum(numbers) / len(numbers), 1) if numbers else None
+
+    def get_self_average(self, obj):
+        return self._average(score.self_score for score in obj.scores.all())
+
+    def get_manager_average(self, obj):
+        return self._average(score.manager_score for score in obj.scores.all())
+
+    def get_can_self_submit(self, obj):
+        request = self.context.get("request")
+        return bool(
+            request
+            and obj.employee.user_id == request.user.id
+            and obj.status == PerformanceReview.Status.SELF
+        )
+
+    def get_can_manager_submit(self, obj):
+        request = self.context.get("request")
+        if not request or obj.status != PerformanceReview.Status.MANAGER:
+            return False
+        return bool(
+            request.user.is_superuser
+            or request.user.role in {User.Role.ADMIN, User.Role.HR}
+            or obj.reviewer_id == request.user.id
+        )
+
+
+class PerformanceSubmissionSerializer(serializers.Serializer):
+    scores = serializers.ListField(child=serializers.DictField(), allow_empty=False)
+    summary = serializers.CharField(required=False, allow_blank=True)
+    development_plan = serializers.CharField(required=False, allow_blank=True)
+
+    def validate_scores(self, value):
+        for item in value:
+            if not item.get("competency") or not isinstance(item.get("score"), int) or not 1 <= item["score"] <= 5:
+                raise serializers.ValidationError("Для каждой компетенции укажите оценку от 1 до 5")
+        return value
 
 
 class OnboardingTemplateSerializer(serializers.ModelSerializer):

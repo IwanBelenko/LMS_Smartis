@@ -2,6 +2,7 @@ from datetime import date, timedelta
 import mimetypes
 
 from django.http import FileResponse
+from django.db import transaction
 from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -19,6 +20,7 @@ from .models import (
     AuditEvent,
     Candidate,
     CandidateStage,
+    Competency,
     EmployeeDocument,
     EmployeeGoal,
     EmployeeLearning,
@@ -29,6 +31,9 @@ from .models import (
     Vacancy,
     OnboardingPlan,
     OnboardingTemplate,
+    PerformanceCycle,
+    PerformanceReview,
+    PerformanceScore,
 )
 from .permissions import IsHcmUser, IsRecruiter
 from .serializers import (
@@ -36,6 +41,7 @@ from .serializers import (
     CandidateSerializer,
     CandidateHireSerializer,
     CandidateStageSerializer,
+    CompetencySerializer,
     EmployeeDocumentSerializer,
     EmployeeGoalSerializer,
     EmployeeLearningSerializer,
@@ -48,8 +54,159 @@ from .serializers import (
     VacancySerializer,
     OnboardingPlanSerializer,
     OnboardingTemplateSerializer,
+    PerformanceCycleSerializer,
+    PerformanceReviewSerializer,
+    PerformanceSubmissionSerializer,
 )
 from .services import assign_onboarding
+
+
+def review_queryset_for(user):
+    queryset = PerformanceReview.objects.select_related(
+        "cycle", "employee__user__department", "employee__position", "reviewer"
+    ).prefetch_related("scores__competency")
+    if user.is_superuser or user.role in {User.Role.ADMIN, User.Role.HR}:
+        return queryset
+    if user.role == User.Role.LEADER:
+        return queryset.filter(Q(reviewer=user) | Q(employee__user=user)).distinct()
+    return queryset.filter(employee__user=user)
+
+
+class CompetencyListCreateView(generics.ListCreateAPIView):
+    serializer_class = CompetencySerializer
+    permission_classes = [IsAuthenticated]
+    queryset = Competency.objects.all()
+
+    def perform_create(self, serializer):
+        if not can_manage_documents(self.request.user):
+            raise PermissionDenied("Добавлять компетенции могут только HR и администраторы")
+        serializer.save()
+
+
+class PerformanceCycleListCreateView(generics.ListCreateAPIView):
+    serializer_class = PerformanceCycleSerializer
+    permission_classes = [IsHcmUser]
+    queryset = PerformanceCycle.objects.prefetch_related("reviews")
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user)
+
+
+class PerformanceCycleLaunchView(APIView):
+    permission_classes = [IsHcmUser]
+
+    @transaction.atomic
+    def post(self, request, pk):
+        cycle = get_object_or_404(PerformanceCycle, pk=pk)
+        if cycle.status != PerformanceCycle.Status.DRAFT:
+            raise ValidationError("Запустить можно только черновик цикла")
+        competencies = list(Competency.objects.filter(is_active=True))
+        if not competencies:
+            raise ValidationError("Добавьте хотя бы одну активную компетенцию")
+        employees = EmployeeProfile.objects.filter(
+            status__in=[EmployeeProfile.Status.EMPLOYED, EmployeeProfile.Status.PROBATION]
+        ).select_related("user__department__manager")
+        for employee in employees:
+            review, created = PerformanceReview.objects.get_or_create(
+                cycle=cycle,
+                employee=employee,
+                defaults={"reviewer": getattr(employee.user.department, "manager", None)},
+            )
+            if created:
+                PerformanceScore.objects.bulk_create([
+                    PerformanceScore(review=review, competency=competency)
+                    for competency in competencies
+                ])
+        cycle.status = PerformanceCycle.Status.ACTIVE
+        cycle.save(update_fields=["status", "updated_at"])
+        AuditEvent.objects.create(
+            actor=request.user, entity_type="performance_cycle", entity_id=str(cycle.pk), action="launched"
+        )
+        return Response(PerformanceCycleSerializer(cycle, context={"request": request}).data)
+
+
+class PerformanceReviewListView(generics.ListAPIView):
+    serializer_class = PerformanceReviewSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return review_queryset_for(self.request.user)
+
+
+class PerformanceReviewDetailView(generics.RetrieveAPIView):
+    serializer_class = PerformanceReviewSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return review_queryset_for(self.request.user)
+
+
+def validate_review_scores(review, submitted):
+    expected = set(review.scores.values_list("competency_id", flat=True))
+    received = {item["competency"] for item in submitted}
+    if expected != received:
+        raise ValidationError("Заполните оценки по всем компетенциям")
+
+
+class PerformanceSelfSubmitView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, pk):
+        review = get_object_or_404(review_queryset_for(request.user), pk=pk)
+        if review.employee.user_id != request.user.id:
+            raise PermissionDenied("Самооценка доступна только сотруднику")
+        if review.status != PerformanceReview.Status.SELF:
+            raise ValidationError("Самооценка уже завершена")
+        serializer = PerformanceSubmissionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        validate_review_scores(review, serializer.validated_data["scores"])
+        for item in serializer.validated_data["scores"]:
+            PerformanceScore.objects.filter(review=review, competency_id=item["competency"]).update(
+                self_score=item["score"],
+                self_comment=item.get("comment", ""),
+            )
+        review.self_summary = serializer.validated_data.get("summary", "")
+        review.status = PerformanceReview.Status.MANAGER
+        review.self_submitted_at = timezone.now()
+        review.save(update_fields=["self_summary", "status", "self_submitted_at", "updated_at"])
+        review._prefetched_objects_cache = {}
+        return Response(PerformanceReviewSerializer(review, context={"request": request}).data)
+
+
+class PerformanceManagerSubmitView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, pk):
+        review = get_object_or_404(review_queryset_for(request.user), pk=pk)
+        if not (
+            request.user.is_superuser
+            or request.user.role in {User.Role.ADMIN, User.Role.HR}
+            or review.reviewer_id == request.user.id
+        ):
+            raise PermissionDenied("Оценка доступна только назначенному руководителю")
+        if review.status != PerformanceReview.Status.MANAGER:
+            raise ValidationError("Сначала сотрудник должен завершить самооценку")
+        serializer = PerformanceSubmissionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        validate_review_scores(review, serializer.validated_data["scores"])
+        for item in serializer.validated_data["scores"]:
+            PerformanceScore.objects.filter(review=review, competency_id=item["competency"]).update(
+                manager_score=item["score"],
+                manager_comment=item.get("comment", ""),
+            )
+        review.manager_summary = serializer.validated_data.get("summary", "")
+        review.development_plan = serializer.validated_data.get("development_plan", "")
+        review.status = PerformanceReview.Status.COMPLETED
+        review.completed_at = timezone.now()
+        review.save(update_fields=["manager_summary", "development_plan", "status", "completed_at", "updated_at"])
+        review._prefetched_objects_cache = {}
+        cycle = review.cycle
+        if not cycle.reviews.exclude(status=PerformanceReview.Status.COMPLETED).exists():
+            cycle.status = PerformanceCycle.Status.COMPLETED
+            cycle.save(update_fields=["status", "updated_at"])
+        return Response(PerformanceReviewSerializer(review, context={"request": request}).data)
 
 
 def can_manage_documents(user):

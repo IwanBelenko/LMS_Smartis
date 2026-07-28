@@ -227,6 +227,99 @@ class AbsenceRequest(models.Model):
         return f"{self.employee}: {self.get_absence_type_display()}"
 
 
+class PerformanceCycle(models.Model):
+    class Status(models.TextChoices):
+        DRAFT = "draft", "Черновик"
+        ACTIVE = "active", "Идёт оценка"
+        COMPLETED = "completed", "Завершён"
+
+    title = models.CharField("Название", max_length=180)
+    start_date = models.DateField("Начало")
+    end_date = models.DateField("Окончание")
+    status = models.CharField("Статус", max_length=20, choices=Status.choices, default=Status.DRAFT)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="created_performance_cycles",
+        null=True,
+        on_delete=models.SET_NULL,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-start_date", "-created_at"]
+        verbose_name = "Цикл оценки"
+        verbose_name_plural = "Циклы оценки"
+
+    def __str__(self):
+        return self.title
+
+
+class Competency(models.Model):
+    name = models.CharField("Компетенция", max_length=160, unique=True)
+    category = models.CharField("Категория", max_length=120, blank=True)
+    description = models.TextField("Описание", blank=True)
+    is_active = models.BooleanField("Активна", default=True)
+
+    class Meta:
+        ordering = ["category", "name"]
+        verbose_name = "Компетенция"
+        verbose_name_plural = "Компетенции"
+
+    def __str__(self):
+        return self.name
+
+
+class PerformanceReview(models.Model):
+    class Status(models.TextChoices):
+        SELF = "self", "Ожидает самооценки"
+        MANAGER = "manager", "Ожидает руководителя"
+        COMPLETED = "completed", "Завершена"
+
+    cycle = models.ForeignKey(PerformanceCycle, related_name="reviews", on_delete=models.CASCADE)
+    employee = models.ForeignKey(EmployeeProfile, related_name="performance_reviews", on_delete=models.CASCADE)
+    reviewer = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="performance_reviews",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    status = models.CharField("Статус", max_length=20, choices=Status.choices, default=Status.SELF)
+    self_summary = models.TextField("Итоги сотрудника", blank=True)
+    manager_summary = models.TextField("Итоги руководителя", blank=True)
+    development_plan = models.TextField("План развития", blank=True)
+    self_submitted_at = models.DateTimeField("Самооценка завершена", null=True, blank=True)
+    completed_at = models.DateTimeField("Завершена", null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["status", "-created_at"]
+        constraints = [
+            models.UniqueConstraint(fields=["cycle", "employee"], name="unique_cycle_employee_review"),
+        ]
+        verbose_name = "Оценка сотрудника"
+        verbose_name_plural = "Оценки сотрудников"
+
+
+class PerformanceScore(models.Model):
+    review = models.ForeignKey(PerformanceReview, related_name="scores", on_delete=models.CASCADE)
+    competency = models.ForeignKey(Competency, related_name="scores", on_delete=models.PROTECT)
+    self_score = models.PositiveSmallIntegerField("Самооценка", null=True, blank=True)
+    manager_score = models.PositiveSmallIntegerField("Оценка руководителя", null=True, blank=True)
+    self_comment = models.TextField("Комментарий сотрудника", blank=True)
+    manager_comment = models.TextField("Комментарий руководителя", blank=True)
+
+    class Meta:
+        ordering = ["competency__category", "competency__name"]
+        constraints = [
+            models.UniqueConstraint(fields=["review", "competency"], name="unique_review_competency"),
+        ]
+        verbose_name = "Оценка компетенции"
+        verbose_name_plural = "Оценки компетенций"
+
+
 class OnboardingTemplate(models.Model):
     name = models.CharField("Название", max_length=180)
     department = models.ForeignKey(
