@@ -48,7 +48,7 @@ import {
   Workflow,
   X,
 } from "lucide-react";
-import type { FormEvent } from "react";
+import type { FormEvent, PointerEvent as ReactPointerEvent } from "react";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import smartisWordmarkDark from "./assets/smartis-wordmark-dark.png";
 import smartisWordmarkLight from "./assets/smartis-wordmark-light.png";
@@ -887,21 +887,113 @@ function PageHeader({
 
 function SmartisSpiderMark() {
   return (
-    <svg className="development-spider" viewBox="0 0 44 34" aria-hidden="true">
-      <path d="M15 13C10 11 8 7 6 4M13 17 3 14M15 21c-5 2-7 6-8 9M29 13c5-2 7-6 9-9M31 17l10-3M29 21c5 2 7 6 8 9" />
-      <ellipse cx="22" cy="18" rx="12.5" ry="9" />
+    <svg className="development-spider" viewBox="0 0 48 42" aria-hidden="true">
+      <path d="M17 16C11 14 9 9 6 5M15 20 4 16M16 24 5 27M18 27c-6 3-8 7-9 11M31 16c6-2 8-7 11-11M33 20l11-4M32 24l11 3M30 27c6 3 8 7 9 11" />
+      <ellipse cx="24" cy="24" rx="11.5" ry="10" />
+      <circle cx="24" cy="13" r="7" />
+      <circle className="development-spider__eye" cx="21.5" cy="11.5" r="1.1" />
+      <circle className="development-spider__eye" cx="26.5" cy="11.5" r="1.1" />
     </svg>
   );
 }
 
 const developmentNodePositions = [
-  [50, 10],
-  [82, 29],
-  [82, 72],
-  [50, 89],
-  [18, 72],
-  [18, 29],
+  [50, 7],
+  [79, 18],
+  [92, 50],
+  [79, 82],
+  [50, 93],
+  [21, 82],
+  [8, 50],
+  [21, 18],
 ] as const;
+
+type DevelopmentPoint = { x: number; y: number };
+type DevelopmentSegment = { start: DevelopmentPoint; end: DevelopmentPoint };
+
+const developmentCenter = { x: 50, y: 50 };
+const developmentRingFactors = [0.2, 0.4, 0.6, 0.8, 1] as const;
+const developmentRingPoints = developmentRingFactors.map((factor) =>
+  developmentNodePositions.map(([x, y]) => ({
+    x: developmentCenter.x + (x - developmentCenter.x) * factor,
+    y: developmentCenter.y + (y - developmentCenter.y) * factor,
+  })),
+);
+const developmentWebSegments: DevelopmentSegment[] = [
+  ...developmentNodePositions.map(([x, y]) => ({ start: developmentCenter, end: { x, y } })),
+  ...developmentRingPoints.flatMap((ring) =>
+    ring.map((point, index) => ({ start: point, end: ring[(index + 1) % ring.length] })),
+  ),
+];
+
+type DevelopmentCourseNode = {
+  id: string;
+  title: string;
+  progress: number;
+  status: "locked" | "available" | "in_progress" | "completed";
+  segment: number | null;
+  left: number;
+  top: number;
+};
+
+const developmentSegmentNames = ["Продукт", "Процессы", "Коммуникации", "Данные"] as const;
+
+function positionDevelopmentCourse(segment: number | null, index: number, total: number) {
+  if (segment === null) {
+    const angle = -90 + index * (360 / Math.max(total, 1));
+    return {
+      left: 50 + Math.cos(angle * Math.PI / 180) * 42,
+      top: 50 + Math.sin(angle * Math.PI / 180) * 41,
+    };
+  }
+  const centers = [-45, 45, 135, 225];
+  const ring = 0.25 + Math.floor(index / 2) * 0.125;
+  const angle = centers[segment] + (index % 2 === 0 ? -11 : 11);
+  return {
+    left: 50 + Math.cos(angle * Math.PI / 180) * 42 * ring,
+    top: 50 + Math.sin(angle * Math.PI / 180) * 41 * ring,
+  };
+}
+
+const demoDevelopmentCourses: DevelopmentCourseNode[] = Array.from({ length: 50 }, (_, index) => {
+  const segment = index < 40 ? Math.floor(index / 10) : null;
+  const segmentIndex = segment === null ? index - 40 : index % 10;
+  const position = positionDevelopmentCourse(segment, segmentIndex, segment === null ? 10 : 10);
+  const status = index < 20 ? "completed" : index < 30 ? "in_progress" : index < 35 ? "available" : "locked";
+  return {
+    id: `demo-${index + 1}`,
+    title: segment === null
+      ? `Дополнительный курс ${segmentIndex + 1}`
+      : `${developmentSegmentNames[segment]} · курс ${segmentIndex + 1}`,
+    progress: status === "completed" ? 100 : status === "in_progress" ? 25 + (index % 5) * 12 : 0,
+    status,
+    segment,
+    ...position,
+  };
+});
+
+function closestPointOnDevelopmentWeb(point: DevelopmentPoint) {
+  let nearest = developmentCenter;
+  let nearestDistance = Number.POSITIVE_INFINITY;
+  for (const segment of developmentWebSegments) {
+    const dx = segment.end.x - segment.start.x;
+    const dy = segment.end.y - segment.start.y;
+    const lengthSquared = dx * dx + dy * dy;
+    const projection = lengthSquared
+      ? Math.max(0, Math.min(1, ((point.x - segment.start.x) * dx + (point.y - segment.start.y) * dy) / lengthSquared))
+      : 0;
+    const candidate = {
+      x: segment.start.x + projection * dx,
+      y: segment.start.y + projection * dy,
+    };
+    const distance = (candidate.x - point.x) ** 2 + (candidate.y - point.y) ** 2;
+    if (distance < nearestDistance) {
+      nearest = candidate;
+      nearestDistance = distance;
+    }
+  }
+  return nearest;
+}
 
 function DevelopmentNetwork({
   learning,
@@ -913,18 +1005,63 @@ function DevelopmentNetwork({
   onNavigate: (view: ViewId) => void;
 }) {
   const courses = [...learning.paths.flatMap((path) => path.courses), ...learning.standalone];
-  const visibleCourses = courses.slice(0, developmentNodePositions.length);
-  const completedCourses = courses.filter((course) => course.status === "completed").length;
-  const averageProgress = courses.length
-    ? Math.round(courses.reduce((sum, course) => sum + course.progress, 0) / courses.length)
+  const actualDevelopmentCourses: DevelopmentCourseNode[] = [
+    ...learning.paths.slice(0, 4).flatMap((path, segment) =>
+      path.courses.slice(0, 10).map((course, index) => ({
+        id: `course-${course.id}`,
+        title: course.course_title,
+        progress: course.progress,
+        status: course.status,
+        segment,
+        ...positionDevelopmentCourse(segment, index, 10),
+      })),
+    ),
+    ...learning.standalone.slice(0, 10).map((course, index, items) => ({
+      id: `course-${course.id}`,
+      title: course.course_title,
+      progress: course.progress,
+      status: course.status,
+      segment: null,
+      ...positionDevelopmentCourse(null, index, items.length),
+    })),
+  ];
+  const demoMode = actualDevelopmentCourses.length < 8;
+  const networkCourses = demoMode ? demoDevelopmentCourses : actualDevelopmentCourses;
+  const completedCourses = networkCourses.filter((course) => course.status === "completed").length;
+  const openCourses = networkCourses.filter((course) => course.status !== "locked").length;
+  const averageProgress = networkCourses.length
+    ? Math.round(networkCourses.reduce((sum, course) => sum + course.progress, 0) / networkCourses.length)
     : 0;
-  const scoredCourses = courses.filter((course) => course.score !== null);
-  const averageScore = scoredCourses.length
-    ? Math.round(scoredCourses.reduce((sum, course) => sum + (course.score || 0), 0) / scoredCourses.length)
-    : null;
-  const currentCourse = courses.find((course) => course.status === "in_progress")
-    || courses.find((course) => course.status === "available");
-  const level = Math.max(1, completedCourses + 1);
+  const currentCourse = networkCourses.find((course) => course.status === "in_progress")
+    || networkCourses.find((course) => course.status === "available");
+  const level = Math.max(1, Math.floor(completedCourses / 5) + 1);
+  const [spiderPose, setSpiderPose] = useState({ x: 50, y: 36.4, angle: 0, moving: false });
+  const [activeNode, setActiveNode] = useState<string | null>(null);
+  const activeCourse = networkCourses.find((course) => course.id === activeNode);
+
+  function moveSpider(event: ReactPointerEvent<HTMLDivElement>) {
+    if (event.pointerType === "touch" && event.buttons === 0) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const pointer = {
+      x: Math.max(0, Math.min(100, ((event.clientX - rect.left) / rect.width) * 100)),
+      y: Math.max(0, Math.min(100, ((event.clientY - rect.top) / rect.height) * 100)),
+    };
+    const next = closestPointOnDevelopmentWeb(pointer);
+    setSpiderPose((previous) => {
+      const distance = Math.hypot(next.x - previous.x, next.y - previous.y);
+      const angle = distance > 0.35
+        ? Math.atan2(next.y - previous.y, next.x - previous.x) * 180 / Math.PI + 90
+        : previous.angle;
+      return { ...next, angle, moving: distance > 0.15 };
+    });
+    const nearestNode = networkCourses
+      .map((course) => ({
+        id: course.id,
+        distance: Math.hypot(pointer.x - course.left, pointer.y - course.top),
+      }))
+      .sort((a, b) => a.distance - b.distance)[0];
+    setActiveNode(nearestNode && nearestNode.distance < 6 ? nearestNode.id : null);
+  }
 
   return (
     <section className={"panel development-card " + (compact ? "development-card--compact" : "")}>
@@ -934,70 +1071,100 @@ function DevelopmentNetwork({
           <h2>Сеть развития</h2>
           <p>Каждый завершённый курс укрепляет вашу профессиональную сеть</p>
         </div>
-        {!compact && <span className="development-level">Уровень {level}</span>}
+        <div className="development-card__badges">
+          {demoMode && <span className="development-demo-badge">Демо · 50 курсов</span>}
+          {!compact && <span className="development-level">Уровень {level}</span>}
+        </div>
       </div>
       <div className="development-card__body">
-        <div className="development-map" aria-label="Карта назначенных курсов">
+        <div
+          className="development-map"
+          aria-label="Интерактивная карта назначенных курсов"
+          onPointerMove={moveSpider}
+          onPointerLeave={() => {
+            setSpiderPose({ x: 50, y: 36.4, angle: 0, moving: false });
+            setActiveNode(null);
+          }}
+        >
+          <div className="development-map__hint"><span />Проведите курсором по нитям</div>
           <svg className="development-map__links" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-            {visibleCourses.map((course, index) => (
-              <line
-                key={course.id}
-                className={course.progress > 0 ? "development-map__link development-map__link--active" : "development-map__link"}
-                x1="50"
-                y1="50"
-                x2={developmentNodePositions[index][0]}
-                y2={developmentNodePositions[index][1]}
+            <path className="development-web__segment development-web__segment--1" d="M50 50 50 7 92 50Z" />
+            <path className="development-web__segment development-web__segment--2" d="M50 50 92 50 50 93Z" />
+            <path className="development-web__segment development-web__segment--3" d="M50 50 50 93 8 50Z" />
+            <path className="development-web__segment development-web__segment--4" d="M50 50 8 50 50 7Z" />
+            {developmentNodePositions.map(([x, y], index) => (
+              <line className="development-web__thread" key={`spoke-${index}`} x1="50" y1="50" x2={x} y2={y} />
+            ))}
+            {developmentRingPoints.map((ring, index) => (
+              <polygon
+                className={`development-web__ring development-web__ring--${index + 1}`}
+                key={`ring-${index}`}
+                points={ring.map((point) => `${point.x},${point.y}`).join(" ")}
               />
             ))}
           </svg>
-          <div className="development-map__center">
+          {developmentSegmentNames.map((name, index) => {
+            const positions = [[69, 22], [78, 72], [31, 78], [22, 28]] as const;
+            return <span className={`development-segment-label development-segment-label--${index + 1}`} style={{ left: `${positions[index][0]}%`, top: `${positions[index][1]}%` }} key={name}>{name}<small>10 курсов</small></span>;
+          })}
+          {developmentNodePositions.map(([left, top], index) => (
+            <span className="development-map__anchor" style={{ left: `${left}%`, top: `${top}%` }} key={`anchor-${index}`} />
+          ))}
+          <div
+            className={`development-map__spider ${spiderPose.moving ? "development-map__spider--moving" : ""}`}
+            style={{
+              left: `${spiderPose.x}%`,
+              top: `${spiderPose.y}%`,
+              transform: `translate(-50%, -50%) rotate(${spiderPose.angle}deg)`,
+            }}
+            aria-hidden="true"
+          >
             <SmartisSpiderMark />
+          </div>
+          <div className="development-map__center">
             <strong>{averageProgress}%</strong>
             <span>общий прогресс</span>
           </div>
-          {visibleCourses.map((course, index) => {
-            const [left, top] = developmentNodePositions[index];
-            return (
-              <button
-                className={`development-node development-node--${course.status}`}
-                style={{ left: `${left}%`, top: `${top}%` }}
-                type="button"
-                key={course.id}
-                title={course.course_title}
-                onClick={() => onNavigate("trajectory")}
-              >
-                <span
-                  className="development-node__ring"
-                  style={{ background: `conic-gradient(var(--brand) ${course.progress}%, var(--surface-soft) 0)` }}
-                >
-                  <span>{course.status === "completed" ? <CheckCircle2 /> : `${course.progress}%`}</span>
-                </span>
-                <strong>{course.course_title}</strong>
-              </button>
-            );
-          })}
-          {!courses.length && (
-            <div className="development-map__empty">
-              <span />
-              <p>Первый узел появится после назначения курса</p>
+          {networkCourses.map((course) => (
+            <button
+              className={`development-course-dot development-course-dot--${course.status} ${activeNode === course.id ? "development-course-dot--active" : ""}`}
+              style={{ left: `${course.left}%`, top: `${course.top}%` }}
+              type="button"
+              key={course.id}
+              aria-label={`${course.title}: ${course.status === "locked" ? "закрыт" : `${course.progress}%`}`}
+              onClick={() => { if (!demoMode) onNavigate("trajectory"); }}
+              onFocus={() => setActiveNode(course.id)}
+              onBlur={() => setActiveNode(null)}
+            >
+              {course.status === "completed" && <CheckCircle2 />}
+            </button>
+          ))}
+          {activeCourse && (
+            <div className={`development-course-tooltip ${activeCourse.top < 18 ? "development-course-tooltip--below" : ""}`} style={{ left: `${activeCourse.left}%`, top: `${activeCourse.top}%` }}>
+              <strong>{activeCourse.title}</strong>
+              <span>{activeCourse.status === "locked" ? "Закрыт · завершите предыдущие курсы" : `${activeCourse.progress}% пройдено`}</span>
             </div>
           )}
         </div>
         <aside className="development-summary">
           <div>
-            <span>Освоено курсов</span>
-            <strong>{completedCourses} из {courses.length}</strong>
+            <span>Доступно курсов</span>
+            <strong>{openCourses} из {networkCourses.length}</strong>
           </div>
           <div>
-            <span>Средний результат</span>
-            <strong>{averageScore === null ? "—" : `${averageScore}%`}</strong>
+            <span>Завершено</span>
+            <strong>{completedCourses}</strong>
+          </div>
+          <div>
+            <span>Траектории</span>
+            <strong>4 сегмента</strong>
           </div>
           <div className="development-summary__focus">
             <span>Текущий фокус</span>
-            <strong>{currentCourse?.course_title || (courses.length ? "Сеть завершена" : "Ожидает назначения")}</strong>
+            <strong>{currentCourse?.title || (networkCourses.length ? "Сеть завершена" : "Ожидает назначения")}</strong>
             {currentCourse && <small>{currentCourse.progress}% · следующий узел уже формируется</small>}
           </div>
-          <button className="secondary-button" type="button" onClick={() => onNavigate("trajectory")}>
+          <button className="secondary-button" type="button" onClick={() => onNavigate("trajectory")} disabled={demoMode}>
             Открыть обучение <ChevronRight />
           </button>
         </aside>

@@ -182,29 +182,65 @@ svg { width: 20px; height: 20px; flex: 0 0 auto; }
 .development-card__heading .eyebrow { margin-bottom: 4px; }
 .development-card__heading h2 { margin-bottom: 4px; }
 .development-card__heading p { color: var(--muted); font-size: .78rem; }
+.development-card__badges { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 7px; }
 .development-level {
   padding: 7px 10px; border: 1px solid color-mix(in srgb, var(--brand) 35%, var(--border));
   border-radius: 999px; background: color-mix(in srgb, var(--brand) 10%, var(--surface));
   color: var(--brand-hover); font-size: .7rem; font-weight: 700; white-space: nowrap;
 }
+.development-demo-badge {
+  padding: 6px 8px; border-radius: 5px; background: var(--surface-soft);
+  color: var(--muted); font-size: .65rem; font-weight: 650; white-space: nowrap;
+}
 .development-card__body { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(230px, .5fr); }
 .development-map {
-  min-height: 430px; position: relative; overflow: hidden;
+  min-height: 520px; position: relative; overflow: hidden; cursor: crosshair; touch-action: pan-y;
   background:
     radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--brand) 11%, transparent) 0 8%, transparent 34%),
     radial-gradient(circle, color-mix(in srgb, var(--muted) 22%, transparent) 1px, transparent 1.2px);
   background-size: auto, 22px 22px;
 }
-.development-map::after {
-  content: ""; position: absolute; inset: 14% 20%; border: 1px solid color-mix(in srgb, var(--brand) 16%, transparent);
-  border-radius: 50%; pointer-events: none;
+.development-map__hint {
+  position: absolute; z-index: 6; top: 12px; left: 14px; padding: 5px 7px; border-radius: 5px;
+  display: flex; align-items: center; gap: 6px; background: color-mix(in srgb, var(--surface) 82%, transparent);
+  color: var(--muted); font-size: .61rem; pointer-events: none; backdrop-filter: blur(5px);
 }
+.development-map__hint > span { width: 5px; height: 5px; border-radius: 50%; background: var(--brand); box-shadow: 0 0 0 4px color-mix(in srgb, var(--brand) 12%, transparent); }
 .development-map__links { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 1; overflow: visible; }
+.development-web__thread, .development-web__ring {
+  fill: none; stroke: color-mix(in srgb, var(--muted) 31%, transparent); stroke-width: .42;
+  vector-effect: non-scaling-stroke;
+}
+.development-web__segment { stroke: none; }
+.development-web__segment--1 { fill: color-mix(in srgb, var(--brand) 5%, transparent); }
+.development-web__segment--2 { fill: color-mix(in srgb, var(--brand) 8%, transparent); }
+.development-web__segment--3 { fill: color-mix(in srgb, var(--brand) 4%, transparent); }
+.development-web__segment--4 { fill: color-mix(in srgb, var(--brand) 7%, transparent); }
+.development-web__ring--1 { stroke: color-mix(in srgb, var(--brand) 30%, var(--border)); }
+.development-web__ring--2 { stroke: color-mix(in srgb, var(--muted) 38%, transparent); }
+.development-web__ring--3 { stroke: color-mix(in srgb, var(--muted) 28%, transparent); }
 .development-map__link {
-  stroke: color-mix(in srgb, var(--muted) 35%, transparent); stroke-width: .45;
+  stroke: color-mix(in srgb, var(--muted) 38%, transparent); stroke-width: .55;
   stroke-dasharray: 2 2; vector-effect: non-scaling-stroke;
 }
-.development-map__link--active { stroke: color-mix(in srgb, var(--brand) 80%, var(--border)); stroke-dasharray: none; }
+.development-map__link--active { stroke: color-mix(in srgb, var(--brand) 82%, var(--border)); stroke-width: .9; stroke-dasharray: none; }
+.development-map__anchor {
+  width: 8px; height: 8px; position: absolute; z-index: 2; transform: translate(-50%, -50%);
+  border: 1px solid color-mix(in srgb, var(--muted) 45%, transparent); border-radius: 50%;
+  background: var(--surface);
+}
+.development-segment-label {
+  position: absolute; z-index: 2; transform: translate(-50%, -50%); display: grid; gap: 1px;
+  color: color-mix(in srgb, var(--foreground) 72%, transparent); font-size: .62rem; font-weight: 700;
+  text-align: center; pointer-events: none;
+}
+.development-segment-label small { color: var(--muted); font-size: .52rem; font-weight: 500; }
+.development-map__spider {
+  width: 48px; height: 42px; position: absolute; z-index: 5; transform-origin: center;
+  display: grid; place-items: center; pointer-events: none;
+  transition: left 75ms linear, top 75ms linear, transform 110ms ease-out;
+  filter: drop-shadow(0 5px 5px rgba(35, 48, 26, .22));
+}
 .development-map__center {
   width: 136px; height: 136px; position: absolute; z-index: 3; left: 50%; top: 50%;
   transform: translate(-50%, -50%); border: 1px solid color-mix(in srgb, var(--brand) 45%, var(--border));
@@ -218,18 +254,53 @@ svg { width: 20px; height: 20px; flex: 0 0 auto; }
 .development-map__center strong { margin-top: 1px; font-size: 1.15rem; }
 .development-map__center span { color: var(--muted); font-size: .6rem; }
 .development-spider {
-  width: 46px; height: 36px; color: var(--brand);
-  filter: drop-shadow(0 3px 3px rgba(35, 48, 26, 0.16));
+  width: 48px; height: 42px; color: var(--brand);
   animation: development-spider-float 1.5s ease-in-out infinite alternate;
 }
-.development-spider path { fill: none; stroke: currentColor; stroke-width: 7; stroke-linecap: round; stroke-linejoin: round; }
-.development-spider ellipse { fill: currentColor; }
+.development-spider path { fill: none; stroke: currentColor; stroke-width: 5.8; stroke-linecap: round; stroke-linejoin: round; }
+.development-spider ellipse, .development-spider circle:not(.development-spider__eye) { fill: currentColor; }
+.development-spider__eye { fill: var(--surface); }
+.development-map__spider--moving .development-spider { animation: development-spider-walk .22s ease-in-out infinite alternate; }
+.development-course-dot {
+  width: 14px; height: 14px; padding: 0; position: absolute; z-index: 4; transform: translate(-50%, -50%);
+  border: 2px solid var(--surface); border-radius: 50%; display: grid; place-items: center;
+  background: var(--brand); color: var(--surface); cursor: pointer;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--brand) 52%, var(--border));
+  transition: transform .16s ease, box-shadow .16s ease, opacity .16s ease;
+}
+.development-course-dot svg { width: 9px; height: 9px; stroke-width: 3; }
+.development-course-dot--in_progress { background: var(--surface); box-shadow: inset 0 0 0 3px var(--brand), 0 0 0 1px var(--brand); }
+.development-course-dot--available { background: var(--surface); box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--brand) 55%, transparent), 0 0 0 1px var(--brand); }
+.development-course-dot--locked { width: 10px; height: 10px; border-width: 2px; background: var(--border); box-shadow: none; opacity: .72; }
+.development-course-dot--active, .development-course-dot:hover, .development-course-dot:focus-visible {
+  z-index: 6; transform: translate(-50%, -50%) scale(1.48);
+  box-shadow: 0 0 0 6px color-mix(in srgb, var(--brand) 13%, transparent), 0 4px 14px color-mix(in srgb, var(--brand) 28%, transparent);
+}
+.development-course-tooltip {
+  width: 180px; padding: 9px 10px; position: absolute; z-index: 8;
+  transform: translate(-50%, calc(-100% - 12px)); border: 1px solid var(--border); border-radius: 6px;
+  display: grid; gap: 3px; background: color-mix(in srgb, var(--surface) 92%, transparent);
+  box-shadow: 0 10px 28px rgba(15, 15, 15, .16); pointer-events: none; backdrop-filter: blur(10px);
+}
+.development-course-tooltip::after {
+  content: ""; width: 7px; height: 7px; position: absolute; left: 50%; bottom: -5px;
+  transform: translateX(-50%) rotate(45deg); border-right: 1px solid var(--border); border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.development-course-tooltip--below { transform: translate(-50%, 16px); }
+.development-course-tooltip--below::after { top: -5px; bottom: auto; border: 0; border-top: 1px solid var(--border); border-left: 1px solid var(--border); }
+.development-course-tooltip strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .67rem; }
+.development-course-tooltip span { color: var(--muted); font-size: .59rem; }
 .development-node {
   width: 126px; padding: 0; position: absolute; z-index: 3; transform: translate(-50%, -50%);
   border: 0; display: grid; justify-items: center; gap: 6px;
   background: transparent; color: var(--foreground); cursor: pointer;
 }
 .development-node:hover .development-node__ring { transform: translateY(-2px); box-shadow: 0 8px 22px color-mix(in srgb, var(--brand) 18%, transparent); }
+.development-node--active .development-node__ring {
+  transform: translateY(-3px) scale(1.06);
+  box-shadow: 0 0 0 7px color-mix(in srgb, var(--brand) 10%, transparent), 0 9px 24px color-mix(in srgb, var(--brand) 24%, transparent);
+}
 .development-node__ring {
   width: 58px; height: 58px; padding: 4px; border-radius: 50%; display: grid; place-items: center;
   transition: transform .18s ease, box-shadow .18s ease;
@@ -262,10 +333,14 @@ svg { width: 20px; height: 20px; flex: 0 0 auto; }
 .development-summary__focus { min-height: 104px; }
 .development-summary .secondary-button { width: 100%; margin-top: 16px; justify-content: center; }
 .development-card--compact .development-card__body { grid-template-columns: minmax(0, 1.7fr) minmax(220px, .5fr); }
-.development-card--compact .development-map { min-height: 340px; }
+.development-card--compact .development-map { min-height: 450px; }
 @keyframes development-spider-float {
   from { transform: translateY(1px) rotate(-1.5deg); }
   to { transform: translateY(-2px) rotate(1.5deg); }
+}
+@keyframes development-spider-walk {
+  from { transform: translateY(1px) scaleX(.94) rotate(-2deg); }
+  to { transform: translateY(-1px) scaleX(1.04) rotate(2deg); }
 }
 @keyframes development-pulse {
   0%, 100% { opacity: .45; transform: scale(.98); }
@@ -2385,8 +2460,10 @@ button.vacancy-card { padding: 13px; display: grid; align-content: center; gap: 
   .offer-review dl > div:nth-child(odd), .offer-review dl > div:nth-child(even) { padding-right: 0; padding-left: 0; border-right: 0; }
   .offer-review__actions { align-items: stretch; flex-direction: column; }
   .development-card__heading { min-height: 0; align-items: flex-start; flex-direction: column; }
-  .development-map, .development-card--compact .development-map { min-height: 390px; }
-  .development-map::after { inset: 17% 8%; }
+  .development-map, .development-card--compact .development-map { min-height: 430px; }
+  .development-card__badges { justify-content: flex-start; }
+  .development-segment-label { display: none; }
+  .development-course-tooltip { width: 150px; }
   .development-map__center { width: 112px; height: 112px; }
   .development-node { width: 92px; }
   .development-node__ring { width: 50px; height: 50px; }
