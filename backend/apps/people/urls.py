@@ -10,6 +10,11 @@ from .views import (
     CandidateHireView,
     CandidateStageListView,
     EmployeeDetailView,
+    DocumentArchiveView,
+    DocumentDecisionView,
+    DocumentDownloadView,
+    DocumentListCreateView,
+    DocumentSendView,
     EmployeeDocumentListCreateView,
     EmployeeGoalDetailView,
     EmployeeGoalListCreateView,
@@ -33,6 +38,11 @@ from .views import (
 )
 
 urlpatterns = [
+    path("documents/", DocumentListCreateView.as_view(), name="documents"),
+    path("documents/<int:pk>/download/", DocumentDownloadView.as_view(), name="document-download"),
+    path("documents/<int:pk>/send/", DocumentSendView.as_view(), name="document-send"),
+    path("documents/<int:pk>/decision/", DocumentDecisionView.as_view(), name="document-decision"),
+    path("documents/<int:pk>/archive/", DocumentArchiveView.as_view(), name="document-archive"),
     path("absences/", AbsenceListCreateView.as_view(), name="absences"),
     path("absences/<int:pk>/", AbsenceDetailView.as_view(), name="absence-detail"),
     path("absences/<int:pk>/decision/", AbsenceDecisionView.as_view(), name="absence-decision"),

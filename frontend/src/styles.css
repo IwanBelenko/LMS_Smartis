@@ -1645,6 +1645,67 @@ button.vacancy-card { padding: 13px; display: grid; align-content: center; gap: 
 .onboarding-template-checklist { min-height: 132px !important; line-height: 1.55; }
 .organization-dialog { width: min(620px, 100%); }
 
+.document-metrics {
+  border: 1px solid var(--border); border-radius: 8px; display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)); overflow: hidden; background: var(--surface);
+}
+.document-metrics article { min-height: 88px; padding: 16px 20px; display: grid; align-content: center; gap: 5px; }
+.document-metrics article + article { border-left: 1px solid var(--border); }
+.document-metrics span { color: var(--muted); font-size: .74rem; }
+.document-metrics strong { font-size: 1.55rem; letter-spacing: -.02em; }
+.document-metric--attention strong { color: var(--warning); }
+.document-register { padding: 0; overflow: hidden; }
+.document-register > header {
+  min-height: 76px; padding: 15px 18px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+}
+.document-filters { display: flex; align-items: center; gap: 3px; padding: 3px; border-radius: 7px; background: var(--surface-soft); }
+.document-filter {
+  min-height: 30px; padding: 5px 9px; border: 0; border-radius: 5px;
+  background: transparent; color: var(--muted); font-size: .7rem; font-weight: 700; cursor: pointer;
+}
+.document-filter:hover { color: var(--foreground); }
+.document-filter--active { background: var(--surface); color: var(--foreground); box-shadow: 0 1px 3px rgba(0, 0, 0, .08); }
+.document-list { display: grid; }
+.document-list > article {
+  min-height: 74px; padding: 13px 16px; border-bottom: 1px solid var(--border);
+  display: grid; grid-template-columns: 36px minmax(180px, 1.3fr) minmax(140px, .8fr) minmax(150px, .8fr) auto;
+  align-items: center; gap: 12px;
+}
+.document-list > article:last-child { border-bottom: 0; }
+.document-list > article:hover { background: color-mix(in srgb, var(--surface-soft) 50%, var(--surface)); }
+.document-list__icon { width: 36px; height: 36px; border-radius: 7px; display: grid; place-items: center; background: color-mix(in srgb, var(--brand) 14%, var(--surface)); color: var(--brand-hover); }
+.document-list__icon svg { width: 17px; height: 17px; }
+.document-list__main, .document-list__employee, .document-list__file { min-width: 0; display: grid; gap: 4px; }
+.document-list__main strong, .document-list__employee strong, .document-list__file strong { overflow: hidden; font-size: .76rem; text-overflow: ellipsis; white-space: nowrap; }
+.document-list__main span, .document-list__employee span, .document-list__file span { color: var(--muted); font-size: .66rem; }
+.document-status {
+  justify-self: end; padding: 5px 8px; border-radius: 999px; background: var(--surface-soft);
+  color: var(--muted); font-size: .64rem; font-weight: 700; white-space: nowrap;
+}
+.document-status--awaiting { color: var(--warning); background: color-mix(in srgb, var(--warning) 13%, var(--surface)); }
+.document-status--signed { color: var(--brand-hover); background: color-mix(in srgb, var(--brand) 16%, var(--surface)); }
+.document-status--declined { color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, var(--surface)); }
+.document-list__actions { grid-column: 2 / -1; display: flex; align-items: center; gap: 8px; }
+.document-list__actions .primary-button, .document-list__actions .secondary-button { min-height: 32px; padding: 6px 10px; border-radius: 6px; font-size: .68rem; }
+.document-list__actions svg { width: 14px; height: 14px; }
+.document-list__comment { grid-column: 2 / -1; padding: 7px 9px; border-radius: 5px; background: var(--surface-soft); font-size: .68rem; }
+.document-empty { min-height: 260px; padding: 26px; display: grid; place-content: center; justify-items: center; gap: 7px; color: var(--muted); text-align: center; }
+.document-empty svg { width: 32px; height: 32px; color: var(--brand); }
+.document-empty strong { color: var(--foreground); font-size: .86rem; }
+.document-empty span { font-size: .72rem; }
+.document-dialog { width: min(640px, 100%); }
+.document-decision-dialog { width: min(500px, 100%); }
+.document-file-field { padding: 12px; border: 1px dashed var(--border); border-radius: 7px; background: var(--surface-soft); }
+.document-file-field input { min-height: auto; padding: 0; border: 0; background: transparent; }
+.document-signature-option {
+  grid-column: 1 / -1; padding: 11px 12px; border: 1px solid var(--border); border-radius: 7px;
+  display: flex; grid-template-columns: 18px 1fr; align-items: flex-start; gap: 10px; cursor: pointer;
+}
+.document-signature-option input { width: 16px; min-height: 16px; margin-top: 2px; accent-color: var(--brand); }
+.document-signature-option span { display: grid; gap: 3px; color: var(--foreground); }
+.document-signature-option small { color: var(--muted); font-weight: 400; }
+
 .absence-error { margin-top: -10px; }
 .absence-metrics {
   border: 1px solid var(--border); border-radius: 8px; display: grid;
@@ -1727,6 +1788,8 @@ button.vacancy-card { padding: 13px; display: grid; align-content: center; gap: 
 .danger-button:disabled { opacity: .6; cursor: wait; }
 
 @media (max-width: 980px) {
+  .document-list > article { grid-template-columns: 36px minmax(160px, 1fr) minmax(140px, .8fr) auto; }
+  .document-list__file { grid-column: 2 / 4; }
   .role-access-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .role-access-card:nth-child(odd) { border-left: 0; }
   .role-access-card:nth-child(n + 3) { border-top: 1px solid var(--border); }
@@ -1747,6 +1810,13 @@ button.vacancy-card { padding: 13px; display: grid; align-content: center; gap: 
 }
 
 @media (max-width: 620px) {
+  .document-metrics { grid-template-columns: 1fr; }
+  .document-metrics article + article { border-top: 1px solid var(--border); border-left: 0; }
+  .document-register > header { align-items: flex-start; flex-direction: column; }
+  .document-filters { width: 100%; overflow-x: auto; }
+  .document-list > article { grid-template-columns: 36px minmax(0, 1fr) auto; }
+  .document-list__employee, .document-list__file { grid-column: 2 / -1; }
+  .document-status { grid-column: 3; grid-row: 1; }
   .absence-metrics { grid-template-columns: 1fr; }
   .absence-metrics article + article { border-top: 1px solid var(--border); border-left: 0; }
   .absence-calendar { overflow-x: auto; }

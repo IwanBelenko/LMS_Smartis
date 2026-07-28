@@ -1,5 +1,7 @@
 from datetime import date, timedelta
+import tempfile
 
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from rest_framework.test import APIClient
 
@@ -523,3 +525,68 @@ class PeopleApiTests(TestCase):
         response = self.client.post(f"/api/v1/absences/{absence.pk}/cancel/", {}, format="json")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["status"], AbsenceRequest.Status.CANCELLED)
+
+    def test_hr_uploads_and_sends_document_for_confirmation(self):
+        self.client.force_authenticate(self.hr)
+        with tempfile.TemporaryDirectory() as media_root, self.settings(MEDIA_ROOT=media_root):
+            uploaded = self.client.post(
+                "/api/v1/documents/",
+                {
+                    "employee": self.profile.pk,
+                    "title": "Дополнительное соглашение",
+                    "document_type": "Кадровый документ",
+                    "requires_signature": "true",
+                    "file": SimpleUploadedFile("agreement.pdf", b"%PDF-1.4 test", content_type="application/pdf"),
+                },
+                format="multipart",
+            )
+            self.assertEqual(uploaded.status_code, 201)
+            self.assertTrue(uploaded.json()["has_file"])
+            self.assertEqual(uploaded.json()["status"], EmployeeDocument.Status.DRAFT)
+            sent = self.client.post(f"/api/v1/documents/{uploaded.json()['id']}/send/", {}, format="json")
+            self.assertEqual(sent.status_code, 200)
+            self.assertEqual(sent.json()["status"], EmployeeDocument.Status.AWAITING)
+
+    def test_employee_sees_and_confirms_only_own_documents(self):
+        own = EmployeeDocument.objects.create(
+            employee=self.profile,
+            title="Приказ",
+            requires_signature=True,
+            status=EmployeeDocument.Status.AWAITING,
+        )
+        EmployeeDocument.objects.create(
+            employee=self.other_employee.employee_profile,
+            title="Чужой документ",
+        )
+        self.client.force_authenticate(self.employee)
+        listing = self.client.get("/api/v1/documents/")
+        self.assertEqual([item["id"] for item in listing.json()], [own.pk])
+        signed = self.client.post(
+            f"/api/v1/documents/{own.pk}/decision/",
+            {"action": "sign", "comment": "Ознакомлена"},
+            format="json",
+        )
+        self.assertEqual(signed.status_code, 200)
+        self.assertEqual(signed.json()["status"], EmployeeDocument.Status.SIGNED)
+        self.assertIsNotNone(signed.json()["signed_at"])
+
+    def test_employee_cannot_upload_or_confirm_another_document(self):
+        foreign = EmployeeDocument.objects.create(
+            employee=self.other_employee.employee_profile,
+            title="Чужой приказ",
+            requires_signature=True,
+            status=EmployeeDocument.Status.AWAITING,
+        )
+        self.client.force_authenticate(self.employee)
+        upload = self.client.post(
+            "/api/v1/documents/",
+            {"employee": self.profile.pk, "title": "Самостоятельная загрузка"},
+            format="multipart",
+        )
+        decision = self.client.post(
+            f"/api/v1/documents/{foreign.pk}/decision/",
+            {"action": "sign"},
+            format="json",
+        )
+        self.assertEqual(upload.status_code, 403)
+        self.assertEqual(decision.status_code, 403)

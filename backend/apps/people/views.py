@@ -1,9 +1,13 @@
 from datetime import date, timedelta
+import mimetypes
 
+from django.http import FileResponse
 from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import generics, status
+from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -46,6 +50,128 @@ from .serializers import (
     OnboardingTemplateSerializer,
 )
 from .services import assign_onboarding
+
+
+def can_manage_documents(user):
+    return user.is_superuser or user.role in {User.Role.ADMIN, User.Role.HR}
+
+
+def document_queryset_for(user):
+    queryset = EmployeeDocument.objects.select_related(
+        "employee__user__department", "uploaded_by"
+    )
+    return queryset if can_manage_documents(user) else queryset.filter(employee__user=user)
+
+
+class DocumentListCreateView(generics.ListCreateAPIView):
+    serializer_class = EmployeeDocumentSerializer
+    permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def get_queryset(self):
+        queryset = document_queryset_for(self.request.user)
+        status_filter = self.request.query_params.get("status")
+        return queryset.filter(status=status_filter) if status_filter else queryset
+
+    def perform_create(self, serializer):
+        if not can_manage_documents(self.request.user):
+            raise PermissionDenied("Добавлять кадровые документы могут только HR и администраторы")
+        employee_id = self.request.data.get("employee")
+        if not employee_id:
+            raise ValidationError({"employee": "Выберите сотрудника"})
+        employee = get_object_or_404(EmployeeProfile, pk=employee_id)
+        document = serializer.save(employee=employee, uploaded_by=self.request.user)
+        AuditEvent.objects.create(
+            actor=self.request.user,
+            entity_type="employee_document",
+            entity_id=str(document.pk),
+            action="uploaded",
+        )
+
+
+class DocumentDownloadView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        document = get_object_or_404(document_queryset_for(request.user), pk=pk)
+        if not document.file:
+            return Response({"detail": "Файл не загружен"}, status=status.HTTP_404_NOT_FOUND)
+        content_type = mimetypes.guess_type(document.file_original_name)[0] or "application/octet-stream"
+        return FileResponse(
+            document.file.open("rb"),
+            content_type=content_type,
+            as_attachment=content_type != "application/pdf",
+            filename=document.file_original_name or f"document-{document.pk}",
+        )
+
+
+class DocumentSendView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        if not can_manage_documents(request.user):
+            raise PermissionDenied("Недостаточно прав")
+        document = get_object_or_404(EmployeeDocument, pk=pk)
+        if not document.requires_signature:
+            raise ValidationError("Для документа не требуется подтверждение")
+        if not document.file:
+            raise ValidationError("Сначала загрузите файл документа")
+        if document.status not in {EmployeeDocument.Status.DRAFT, EmployeeDocument.Status.DECLINED}:
+            raise ValidationError("Документ уже отправлен или завершён")
+        document.status = EmployeeDocument.Status.AWAITING
+        document.sent_at = timezone.now()
+        document.signed_at = None
+        document.decision_comment = ""
+        document.save(update_fields=["status", "sent_at", "signed_at", "decision_comment", "updated_at"])
+        AuditEvent.objects.create(
+            actor=request.user, entity_type="employee_document", entity_id=str(document.pk), action="sent"
+        )
+        return Response(EmployeeDocumentSerializer(document, context={"request": request}).data)
+
+
+class DocumentDecisionView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        document = get_object_or_404(
+            EmployeeDocument.objects.select_related("employee__user__department", "uploaded_by"),
+            pk=pk,
+        )
+        if document.employee.user_id != request.user.id:
+            raise PermissionDenied("Подтвердить документ может только назначенный сотрудник")
+        if document.status != EmployeeDocument.Status.AWAITING:
+            raise ValidationError("Документ не ожидает подтверждения")
+        action = request.data.get("action")
+        if action not in {"sign", "decline"}:
+            raise ValidationError("Укажите действие sign или decline")
+        document.status = (
+            EmployeeDocument.Status.SIGNED if action == "sign" else EmployeeDocument.Status.DECLINED
+        )
+        document.signed_at = timezone.now() if action == "sign" else None
+        document.decision_comment = request.data.get("comment", "")
+        document.save(update_fields=["status", "signed_at", "decision_comment", "updated_at"])
+        AuditEvent.objects.create(
+            actor=request.user,
+            entity_type="employee_document",
+            entity_id=str(document.pk),
+            action=action,
+        )
+        return Response(EmployeeDocumentSerializer(document, context={"request": request}).data)
+
+
+class DocumentArchiveView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        if not can_manage_documents(request.user):
+            raise PermissionDenied("Недостаточно прав")
+        document = get_object_or_404(EmployeeDocument, pk=pk)
+        document.status = EmployeeDocument.Status.ARCHIVED
+        document.save(update_fields=["status", "updated_at"])
+        AuditEvent.objects.create(
+            actor=request.user, entity_type="employee_document", entity_id=str(document.pk), action="archived"
+        )
+        return Response(EmployeeDocumentSerializer(document, context={"request": request}).data)
 
 
 def absence_queryset_for(user):
@@ -267,7 +393,7 @@ class EmployeeDocumentListCreateView(EmployeeScopedMixin, generics.ListCreateAPI
         return EmployeeDocument.objects.filter(employee=self.get_employee())
 
     def perform_create(self, serializer):
-        document = serializer.save(employee=self.get_employee())
+        document = serializer.save(employee=self.get_employee(), uploaded_by=self.request.user)
         AuditEvent.objects.create(actor=self.request.user, entity_type="employee_document", entity_id=str(document.pk), action="created")
 
 

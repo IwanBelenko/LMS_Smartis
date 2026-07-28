@@ -1,5 +1,8 @@
 from datetime import date
+import hashlib
+from pathlib import Path
 
+from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 from django.utils.text import slugify
@@ -286,10 +289,72 @@ class EmployeeLearningSerializer(serializers.ModelSerializer):
 
 
 class EmployeeDocumentSerializer(serializers.ModelSerializer):
+    employee = serializers.PrimaryKeyRelatedField(read_only=True)
+    employee_name = serializers.CharField(source="employee.user.get_full_name", read_only=True)
+    employee_email = serializers.CharField(source="employee.user.email", read_only=True)
+    department_name = serializers.CharField(source="employee.user.department.name", read_only=True)
+    status_label = serializers.CharField(source="get_status_display", read_only=True)
+    uploaded_by_name = serializers.CharField(source="uploaded_by.get_full_name", read_only=True)
+    file = serializers.FileField(write_only=True, required=False)
+    has_file = serializers.SerializerMethodField()
+    can_sign = serializers.SerializerMethodField()
+    can_manage = serializers.SerializerMethodField()
+
     class Meta:
         model = EmployeeDocument
-        fields = ["id", "employee", "title", "document_type", "number", "issue_date", "expires_at", "created_at"]
-        read_only_fields = ["id", "employee", "created_at"]
+        fields = [
+            "id", "employee", "employee_name", "employee_email", "department_name",
+            "title", "document_type", "number", "issue_date", "expires_at", "file",
+            "file_original_name", "file_size", "file_sha256", "has_file",
+            "requires_signature", "status", "status_label", "uploaded_by",
+            "uploaded_by_name", "sent_at", "signed_at", "decision_comment",
+            "can_sign", "can_manage", "created_at", "updated_at",
+        ]
+        read_only_fields = [
+            "id", "file_original_name", "file_size", "file_sha256", "status",
+            "uploaded_by", "sent_at", "signed_at", "decision_comment", "created_at", "updated_at",
+        ]
+
+    def get_has_file(self, obj):
+        return bool(obj.file)
+
+    def get_can_sign(self, obj):
+        request = self.context.get("request")
+        return bool(
+            request
+            and obj.employee.user_id == request.user.id
+            and obj.status == EmployeeDocument.Status.AWAITING
+        )
+
+    def get_can_manage(self, obj):
+        request = self.context.get("request")
+        return bool(
+            request
+            and (
+                request.user.is_superuser
+                or request.user.role in {User.Role.ADMIN, User.Role.HR}
+            )
+        )
+
+    def validate_file(self, value):
+        if value.size > settings.MAX_HR_DOCUMENT_UPLOAD_SIZE:
+            raise serializers.ValidationError("Файл превышает допустимый размер 20 МБ")
+        allowed = {".pdf", ".doc", ".docx", ".xls", ".xlsx", ".jpg", ".jpeg", ".png"}
+        if Path(value.name).suffix.lower() not in allowed:
+            raise serializers.ValidationError("Поддерживаются PDF, Word, Excel, JPG и PNG")
+        return value
+
+    def create(self, validated_data):
+        uploaded = validated_data.get("file")
+        if uploaded:
+            digest = hashlib.sha256()
+            for chunk in uploaded.chunks():
+                digest.update(chunk)
+            uploaded.seek(0)
+            validated_data["file_original_name"] = Path(uploaded.name).name
+            validated_data["file_size"] = uploaded.size
+            validated_data["file_sha256"] = digest.hexdigest()
+        return super().create(validated_data)
 
 
 class AbsenceRequestSerializer(serializers.ModelSerializer):

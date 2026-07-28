@@ -1,5 +1,7 @@
 from django.conf import settings
 from django.db import models
+from pathlib import Path
+from uuid import uuid4
 
 from apps.identity.models import Department
 
@@ -140,14 +142,43 @@ class EmployeeLearning(models.Model):
         verbose_name_plural = "Назначения обучения"
 
 
+def employee_document_path(instance, filename):
+    suffix = Path(filename).suffix.lower()
+    return f"people/{instance.employee_id}/documents/{uuid4().hex}{suffix}"
+
+
 class EmployeeDocument(models.Model):
+    class Status(models.TextChoices):
+        DRAFT = "draft", "Черновик"
+        AWAITING = "awaiting", "Ожидает подтверждения"
+        SIGNED = "signed", "Подтверждён"
+        DECLINED = "declined", "Отклонён"
+        ARCHIVED = "archived", "В архиве"
+
     employee = models.ForeignKey(EmployeeProfile, related_name="documents", on_delete=models.CASCADE)
     title = models.CharField("Документ", max_length=220)
     document_type = models.CharField("Тип", max_length=120, blank=True)
     number = models.CharField("Номер", max_length=120, blank=True)
     issue_date = models.DateField("Дата выдачи", null=True, blank=True)
     expires_at = models.DateField("Действует до", null=True, blank=True)
+    file = models.FileField("Файл", upload_to=employee_document_path, blank=True)
+    file_original_name = models.CharField("Исходное имя файла", max_length=255, blank=True)
+    file_size = models.PositiveBigIntegerField("Размер файла", default=0)
+    file_sha256 = models.CharField("Контрольная сумма", max_length=64, blank=True)
+    requires_signature = models.BooleanField("Требует подтверждения", default=False)
+    status = models.CharField("Статус", max_length=20, choices=Status.choices, default=Status.DRAFT)
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="uploaded_employee_documents",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    sent_at = models.DateTimeField("Отправлен", null=True, blank=True)
+    signed_at = models.DateTimeField("Подтверждён", null=True, blank=True)
+    decision_comment = models.TextField("Комментарий сотрудника", blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ["-issue_date", "-created_at"]

@@ -64,7 +64,7 @@ function Brand({ login = false }: { login?: boolean }) {
 }
 
 type ViewId =
-  | "home" | "trajectory" | "ranking" | "analytics" | "absences"
+  | "home" | "trajectory" | "ranking" | "analytics" | "absences" | "documents"
   | "organization" | "employees" | "recruitment" | "hrAnalytics"
   | "users" | "courses" | "settings";
 type User = {
@@ -216,8 +216,13 @@ type EmployeeLearning = {
   progress: number; score: number | null; assigned_at: string; completed_at: string | null;
 };
 type EmployeeDocument = {
-  id: number; title: string; document_type: string; number: string;
-  issue_date: string | null; expires_at: string | null;
+  id: number; employee: number; employee_name: string; employee_email: string;
+  department_name: string | null; title: string; document_type: string; number: string;
+  issue_date: string | null; expires_at: string | null; file_original_name: string;
+  file_size: number; file_sha256: string; has_file: boolean; requires_signature: boolean;
+  status: "draft" | "awaiting" | "signed" | "declined" | "archived"; status_label: string;
+  uploaded_by_name: string; sent_at: string | null; signed_at: string | null;
+  decision_comment: string; can_sign: boolean; can_manage: boolean;
 };
 type AbsenceRequest = {
   id: number;
@@ -385,7 +390,7 @@ async function apiUpload<T>(path: string, token: string, body: FormData): Promis
   });
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
-    throw new Error(data.detail || "Не удалось загрузить файл");
+    throw new Error(data.detail || Object.values(data).flat().join(" ") || "Не удалось загрузить файл");
   }
   return response.json();
 }
@@ -477,9 +482,10 @@ const nav = [
   { id: "trajectory" as const, label: "Траектория", icon: Route },
   { id: "ranking" as const, label: "Рейтинг", icon: Trophy },
   { id: "analytics" as const, label: "Аналитика", icon: BarChart3 },
-  { id: "absences" as const, label: "Отсутствия", icon: CalendarDays },
+  { id: "documents" as const, label: "Документы", icon: FileText },
 ];
 const hcmNav = [
+  { id: "absences" as const, label: "Отпуска и отсутствия", icon: CalendarDays },
   { id: "organization" as const, label: "Оргструктура", icon: Building2 },
   { id: "employees" as const, label: "Сотрудники", icon: ContactRound },
   { id: "recruitment" as const, label: "Подбор", icon: BriefcaseBusiness },
@@ -544,8 +550,8 @@ function Sidebar({
       <div className="sidebar__header">
         <Brand />
       </div>
-      <nav className="nav-group" aria-label="Обучение">
-        <p>Обучение</p>
+      <nav className="nav-group" aria-label="Рабочее пространство">
+        <p>Рабочее пространство</p>
         {group(nav)}
       </nav>
       {availableHcmNav.length > 0 && (
@@ -617,7 +623,7 @@ function IconRail({
       >
         <CurtainToggleIcon open={open} />
       </button>
-      <nav className="icon-rail__group" aria-label="Обучение">{railGroup(nav)}</nav>
+      <nav className="icon-rail__group" aria-label="Рабочее пространство">{railGroup(nav)}</nav>
       {availableHcmNav.length > 0 && (
         <>
           <span className="icon-rail__divider" aria-hidden="true" />
@@ -3551,6 +3557,206 @@ function CoursesView({ token, user }: { token: string; user: User }) {
   );
 }
 
+function DocumentsView({ token, user }: { token: string; user: User }) {
+  const canManage = user.role === "admin" || user.role === "hr";
+  const [items, setItems] = useState<EmployeeDocument[]>([]);
+  const [employees, setEmployees] = useState<EmployeeProfile[]>([]);
+  const [filter, setFilter] = useState<"all" | EmployeeDocument["status"]>("all");
+  const [showUpload, setShowUpload] = useState(false);
+  const [decision, setDecision] = useState<{ item: EmployeeDocument; action: "sign" | "decline" } | null>(null);
+  const [decisionComment, setDecisionComment] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({
+    employee: "", title: "", document_type: "", number: "",
+    issue_date: "", expires_at: "", requires_signature: true,
+  });
+
+  async function load() {
+    try {
+      const [documents, people] = await Promise.all([
+        apiRequest<EmployeeDocument[]>("/documents/", token),
+        canManage ? apiRequest<EmployeeProfile[]>("/employees/", token) : Promise.resolve([]),
+      ]);
+      setItems(documents);
+      setEmployees(people);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось загрузить документы");
+    }
+  }
+
+  useEffect(() => { void load(); }, [token, canManage]);
+
+  async function uploadDocument(event: FormEvent) {
+    event.preventDefault();
+    if (!file) {
+      setError("Выберите файл документа");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      const body = new FormData();
+      body.append("employee", form.employee);
+      body.append("title", form.title);
+      body.append("document_type", form.document_type);
+      body.append("number", form.number);
+      if (form.issue_date) body.append("issue_date", form.issue_date);
+      if (form.expires_at) body.append("expires_at", form.expires_at);
+      body.append("requires_signature", String(form.requires_signature));
+      body.append("file", file);
+      await apiUpload<EmployeeDocument>("/documents/", token, body);
+      setShowUpload(false);
+      setFile(null);
+      setForm({ employee: "", title: "", document_type: "", number: "", issue_date: "", expires_at: "", requires_signature: true });
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось загрузить документ");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function documentAction(item: EmployeeDocument, action: "send" | "archive") {
+    try {
+      await apiRequest(`/documents/${item.id}/${action}/`, token, { method: "POST", body: "{}" });
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось изменить документ");
+    }
+  }
+
+  async function submitDecision(event: FormEvent) {
+    event.preventDefault();
+    if (!decision) return;
+    setSaving(true);
+    try {
+      await apiRequest(`/documents/${decision.item.id}/decision/`, token, {
+        method: "POST",
+        body: JSON.stringify({ action: decision.action, comment: decisionComment }),
+      });
+      setDecision(null);
+      setDecisionComment("");
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось подтвердить документ");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function downloadDocument(item: EmployeeDocument) {
+    try {
+      const response = await fetch(`${API}/documents/${item.id}/download/`, {
+        headers: { Authorization: `Token ${token}` },
+      });
+      if (!response.ok) throw new Error("Не удалось открыть файл");
+      const blob = await response.blob();
+      const href = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = href;
+      anchor.download = item.file_original_name || item.title;
+      anchor.click();
+      window.setTimeout(() => URL.revokeObjectURL(href), 1000);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось открыть файл");
+    }
+  }
+
+  const visible = filter === "all" ? items : items.filter((item) => item.status === filter);
+  const awaiting = items.filter((item) => item.status === "awaiting").length;
+  const signed = items.filter((item) => item.status === "signed").length;
+
+  return (
+    <>
+      <PageHeader
+        title="Документы"
+        subtitle={canManage ? "Кадровые документы и контроль подтверждения сотрудниками" : "Ваши кадровые документы и запросы на подтверждение"}
+        action={canManage ? <button className="primary-button" type="button" onClick={() => setShowUpload(true)}><Upload />Загрузить документ</button> : undefined}
+      />
+      {error && <div className="form-error">{error}</div>}
+      <section className="document-metrics">
+        <article><span>Всего документов</span><strong>{items.length}</strong></article>
+        <article className={awaiting ? "document-metric--attention" : ""}><span>Ожидают подтверждения</span><strong>{awaiting}</strong></article>
+        <article><span>Подтверждены</span><strong>{signed}</strong></article>
+      </section>
+      <section className="panel document-register">
+        <header>
+          <div><span className="eyebrow">Реестр</span><h2>{canManage ? "Документы сотрудников" : "Мои документы"}</h2></div>
+          <div className="document-filters">
+            {([["all", "Все"], ["awaiting", "Ожидают"], ["signed", "Подтверждены"], ["draft", "Черновики"]] as const).map(([value, label]) => (
+              <button className={filter === value ? "document-filter document-filter--active" : "document-filter"} type="button" onClick={() => setFilter(value)} key={value}>{label}</button>
+            ))}
+          </div>
+        </header>
+        <div className="document-list">
+          {visible.map((item) => (
+            <article key={item.id}>
+              <div className="document-list__icon"><FileText /></div>
+              <div className="document-list__main">
+                <strong>{item.title}</strong>
+                <span>{item.document_type || "Кадровый документ"}{item.number ? ` · № ${item.number}` : ""}</span>
+              </div>
+              {canManage && <div className="document-list__employee"><strong>{item.employee_name || item.employee_email}</strong><span>{item.department_name || "Без отдела"}</span></div>}
+              <div className="document-list__file">
+                <strong>{item.file_original_name || "Файл не прикреплён"}</strong>
+                <span>{item.file_size ? formatFileSize(item.file_size) : item.issue_date ? `от ${displayDate(item.issue_date)}` : "—"}</span>
+              </div>
+              <span className={`document-status document-status--${item.status}`}>{item.status_label}</span>
+              <div className="document-list__actions">
+                {item.has_file && <button className="secondary-button" type="button" onClick={() => void downloadDocument(item)}><Download />Скачать</button>}
+                {item.can_manage && item.requires_signature && ["draft", "declined"].includes(item.status) && <button className="primary-button" type="button" onClick={() => void documentAction(item, "send")}>Отправить сотруднику</button>}
+                {item.can_sign && <>
+                  <button className="primary-button" type="button" onClick={() => { setDecision({ item, action: "sign" }); setDecisionComment(""); }}><CheckCircle2 />Подтвердить</button>
+                  <button className="secondary-button" type="button" onClick={() => { setDecision({ item, action: "decline" }); setDecisionComment(""); }}>Отклонить</button>
+                </>}
+                {item.can_manage && item.status !== "archived" && <button className="text-button" type="button" onClick={() => void documentAction(item, "archive")}>В архив</button>}
+              </div>
+              {item.decision_comment && <p className="document-list__comment">Комментарий: {item.decision_comment}</p>}
+            </article>
+          ))}
+          {!visible.length && <div className="document-empty"><FileText /><strong>Документов пока нет</strong><span>{filter === "all" ? "Новые документы появятся здесь." : "В этом статусе документов нет."}</span></div>}
+        </div>
+      </section>
+
+      {showUpload && (
+        <div className="hcm-dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setShowUpload(false); }}>
+          <section className="hcm-dialog document-dialog" role="dialog" aria-modal="true" aria-labelledby="document-upload-title">
+            <header><div><span className="eyebrow">Кадровый документ</span><h2 id="document-upload-title">Загрузить сотруднику</h2></div><button className="icon-button" type="button" aria-label="Закрыть" onClick={() => setShowUpload(false)}><X /></button></header>
+            <form className="hcm-form" onSubmit={uploadDocument}>
+              <div className="hcm-form__grid">
+                <label className="hcm-form__wide">Сотрудник<select value={form.employee} onChange={(event) => setForm({ ...form, employee: event.target.value })} required><option value="">Выберите сотрудника</option>{employees.map((employee) => <option value={employee.id} key={employee.id}>{employee.full_name || employee.email}</option>)}</select></label>
+                <label className="hcm-form__wide">Название<input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} required /></label>
+                <label>Тип<input value={form.document_type} onChange={(event) => setForm({ ...form, document_type: event.target.value })} placeholder="Приказ, заявление…" /></label>
+                <label>Номер<input value={form.number} onChange={(event) => setForm({ ...form, number: event.target.value })} /></label>
+                <label>Дата документа<input type="date" value={form.issue_date} onChange={(event) => setForm({ ...form, issue_date: event.target.value })} /></label>
+                <label>Действует до<input type="date" value={form.expires_at} onChange={(event) => setForm({ ...form, expires_at: event.target.value })} /></label>
+                <label className="hcm-form__wide document-file-field"><span>Файл до 20 МБ · PDF, Word, Excel, JPG или PNG</span><input type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png" onChange={(event) => setFile(event.target.files?.[0] || null)} required /></label>
+                <label className="document-signature-option"><input type="checkbox" checked={form.requires_signature} onChange={(event) => setForm({ ...form, requires_signature: event.target.checked })} /><span><strong>Запросить подтверждение</strong><small>После загрузки документ можно отправить сотруднику.</small></span></label>
+              </div>
+              <footer><button className="secondary-button" type="button" onClick={() => setShowUpload(false)}>Отмена</button><button className="primary-button" type="submit" disabled={saving}>{saving ? "Загружаем…" : "Загрузить"}</button></footer>
+            </form>
+          </section>
+        </div>
+      )}
+
+      {decision && (
+        <div className="hcm-dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setDecision(null); }}>
+          <section className="hcm-dialog document-decision-dialog" role="dialog" aria-modal="true">
+            <header><div><span className="eyebrow">Подтверждение документа</span><h2>{decision.item.title}</h2></div><button className="icon-button" type="button" aria-label="Закрыть" onClick={() => setDecision(null)}><X /></button></header>
+            <p>{decision.action === "sign" ? "Подтвердите, что ознакомились с документом." : "Укажите причину отклонения документа."}</p>
+            <form className="hcm-form" onSubmit={submitDecision}>
+              <label>Комментарий<textarea value={decisionComment} onChange={(event) => setDecisionComment(event.target.value)} required={decision.action === "decline"} placeholder={decision.action === "decline" ? "Что необходимо исправить" : "Необязательно"} /></label>
+              <footer><button className="secondary-button" type="button" onClick={() => setDecision(null)}>Отмена</button><button className={decision.action === "sign" ? "primary-button" : "danger-button"} type="submit" disabled={saving}>{decision.action === "sign" ? "Подтвердить" : "Отклонить"}</button></footer>
+            </form>
+          </section>
+        </div>
+      )}
+    </>
+  );
+}
+
 const absenceTypes = [
   ["vacation", "Отпуск"],
   ["sick", "Больничный"],
@@ -3782,6 +3988,7 @@ function Placeholder({ active }: { active: ViewId }) {
   const labels: Record<string, string> = {
     trajectory: "Траектория обучения", ranking: "Рейтинг", analytics: "Аналитика дэйликов",
     absences: "Отпуска и отсутствия",
+    documents: "Документы",
     courses: "Курсы", settings: "Настройки", employees: "Сотрудники",
     organization: "Оргструктура", recruitment: "Подбор", hrAnalytics: "HR-аналитика",
   };
@@ -3866,6 +4073,8 @@ function App() {
       <main className="main-content">
         {active === "home" ? (
           <HomeView user={user} />
+        ) : active === "documents" ? (
+          <DocumentsView token={token} user={user} />
         ) : active === "absences" ? (
           <AbsencesView token={token} user={user} />
         ) : active === "users" ? (
