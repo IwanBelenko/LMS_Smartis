@@ -708,43 +708,98 @@ function IconRail({
   onNavigate: (view: ViewId) => void;
   onOpen: () => void;
 }) {
+  const [expanded, setExpanded] = useState<"learning" | "hr" | "admin" | null>(null);
+  const railRef = useRef<HTMLElement>(null);
   const availableHcmNav = visibleHcmNav(user);
   const availableAdminNav = visibleAdminNav(user);
-  const railGroup = (items: typeof nav | typeof hcmNav | typeof adminNav) => items.map(({ id, label, icon: Icon }) => (
-    <button
-      className={active === id ? "icon-rail__item icon-rail__item--active" : "icon-rail__item"}
-      type="button"
-      key={id}
-      aria-label={label}
-      data-tooltip={label}
-      onClick={() => onNavigate(id)}
-    >
-      <Icon aria-hidden="true" />
-    </button>
-  ));
+  const learningNav = nav.filter((item) => item.id !== "home");
+  useEffect(() => {
+    function closeNestedMenu(event: MouseEvent) {
+      if (!railRef.current?.contains(event.target as Node)) setExpanded(null);
+    }
+    document.addEventListener("mousedown", closeNestedMenu);
+    return () => document.removeEventListener("mousedown", closeNestedMenu);
+  }, []);
+
+  function nestedGroup(
+    id: "learning" | "hr" | "admin",
+    label: string,
+    Icon: typeof BookOpen,
+    items: typeof nav | typeof hcmNav | typeof adminNav,
+  ) {
+    const isActive = items.some((item) => item.id === active);
+    const isExpanded = expanded === id;
+    return (
+      <div className="icon-rail__nested" key={id}>
+        <button
+          className={isActive || isExpanded ? "icon-rail__item icon-rail__item--active" : "icon-rail__item"}
+          type="button"
+          aria-label={label}
+          aria-expanded={isExpanded}
+          data-tooltip={isExpanded ? undefined : label}
+          onClick={() => setExpanded(isExpanded ? null : id)}
+        >
+          <Icon aria-hidden="true" />
+          <ChevronRight className="icon-rail__nested-arrow" aria-hidden="true" />
+        </button>
+        {isExpanded && (
+          <div className="icon-rail__submenu" role="menu" aria-label={label}>
+            <header><span>{label}</span><small>{items.length}</small></header>
+            {items.map(({ id: view, label: itemLabel, icon: ItemIcon }) => (
+              <button
+                className={active === view ? "icon-rail__submenu-item icon-rail__submenu-item--active" : "icon-rail__submenu-item"}
+                type="button"
+                role="menuitem"
+                onClick={() => { onNavigate(view); setExpanded(null); }}
+                key={view}
+              >
+                <ItemIcon aria-hidden="true" />
+                <span>{itemLabel}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
   return (
-    <aside className="icon-rail" aria-label="Быстрая навигация">
+    <aside className="icon-rail" aria-label="Быстрая навигация" ref={railRef}>
       <button
         className="icon-rail__toggle"
         type="button"
         aria-label={open ? "Скрыть полное меню" : "Открыть полное меню"}
         aria-expanded={open}
         data-tooltip={open ? "Скрыть меню" : "Открыть меню"}
-        onClick={onOpen}
+        onClick={() => { setExpanded(null); onOpen(); }}
       >
         <CurtainToggleIcon open={open} />
       </button>
-      <nav className="icon-rail__group" aria-label="Рабочее пространство">{railGroup(nav)}</nav>
+      <nav className="icon-rail__group" aria-label="Основные разделы">
+        <button
+          className={active === "home" ? "icon-rail__item icon-rail__item--active" : "icon-rail__item"}
+          type="button"
+          aria-label="Главная"
+          data-tooltip="Главная"
+          onClick={() => { onNavigate("home"); setExpanded(null); }}
+        >
+          <Home aria-hidden="true" />
+        </button>
+        {nestedGroup("learning", "Обучение", BookOpen, learningNav)}
+      </nav>
       {availableHcmNav.length > 0 && (
         <>
           <span className="icon-rail__divider" aria-hidden="true" />
-          <nav className="icon-rail__group" aria-label="HR">{railGroup(availableHcmNav)}</nav>
+          <nav className="icon-rail__group" aria-label="HR">
+            {nestedGroup("hr", "HR", ContactRound, availableHcmNav)}
+          </nav>
         </>
       )}
       {availableAdminNav.length > 0 && (
         <>
           <span className="icon-rail__divider" aria-hidden="true" />
-          <nav className="icon-rail__group" aria-label="Администрирование">{railGroup(availableAdminNav)}</nav>
+          <nav className="icon-rail__group" aria-label="Администрирование">
+            {nestedGroup("admin", "Администрирование", Settings, availableAdminNav)}
+          </nav>
         </>
       )}
       <div className="icon-rail__user" data-tooltip={`${user.first_name || user.email} · ${user.role_label}`}>
