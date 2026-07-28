@@ -21,6 +21,10 @@ from .views import (
     StaffPositionListCreateView,
     VacancyDetailView,
     VacancyListCreateView,
+    EmployeeOnboardingView,
+    OnboardingTemplateDetailView,
+    OnboardingTemplateListCreateView,
+    OnboardingOptionsView,
 )
 
 urlpatterns = [
@@ -30,6 +34,7 @@ urlpatterns = [
     path("employees/<int:employee_id>/history/", EmploymentEventListCreateView.as_view(), name="employee-history"),
     path("employees/<int:employee_id>/learning/", EmployeeLearningListCreateView.as_view(), name="employee-learning"),
     path("employees/<int:employee_id>/documents/", EmployeeDocumentListCreateView.as_view(), name="employee-documents"),
+    path("employees/<int:employee_id>/onboarding/", EmployeeOnboardingView.as_view(), name="employee-onboarding"),
     path("employee-goals/<int:pk>/", EmployeeGoalDetailView.as_view(), name="employee-goal-detail"),
     path("employee-learning/<int:pk>/", EmployeeLearningDetailView.as_view(), name="employee-learning-detail"),
     path("positions/", PositionListView.as_view(), name="positions"),
@@ -43,5 +48,8 @@ urlpatterns = [
     path("candidate-stages/", CandidateStageListView.as_view(), name="candidate-stages"),
     path("vacancies/", VacancyListCreateView.as_view(), name="vacancies"),
     path("vacancies/<int:pk>/", VacancyDetailView.as_view(), name="vacancy-detail"),
+    path("onboarding-templates/", OnboardingTemplateListCreateView.as_view(), name="onboarding-templates"),
+    path("onboarding-templates/<int:pk>/", OnboardingTemplateDetailView.as_view(), name="onboarding-template-detail"),
+    path("onboarding-options/", OnboardingOptionsView.as_view(), name="onboarding-options"),
     path("hcm/summary/", HcmSummaryView.as_view(), name="hcm-summary"),
 ]

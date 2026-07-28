@@ -5,6 +5,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.identity.models import Department
+from apps.learning.models import LearningPath
 from .models import (
     AuditEvent,
     Candidate,
@@ -17,6 +18,8 @@ from .models import (
     Position,
     StaffPosition,
     Vacancy,
+    OnboardingPlan,
+    OnboardingTemplate,
 )
 from .permissions import IsHcmUser, IsRecruiter
 from .serializers import (
@@ -33,7 +36,10 @@ from .serializers import (
     OrganizationDepartmentSerializer,
     StaffPositionSerializer,
     VacancySerializer,
+    OnboardingPlanSerializer,
+    OnboardingTemplateSerializer,
 )
+from .services import assign_onboarding
 
 
 class EmployeeListCreateView(generics.ListCreateAPIView):
@@ -141,6 +147,39 @@ class EmployeeDocumentListCreateView(EmployeeScopedMixin, generics.ListCreateAPI
     def perform_create(self, serializer):
         document = serializer.save(employee=self.get_employee())
         AuditEvent.objects.create(actor=self.request.user, entity_type="employee_document", entity_id=str(document.pk), action="created")
+
+
+class EmployeeOnboardingView(APIView):
+    permission_classes = [IsHcmUser]
+
+    def get_employee(self, employee_id):
+        return get_object_or_404(
+            EmployeeProfile.objects.select_related("user__department", "position"),
+            pk=employee_id,
+        )
+
+    def get(self, request, employee_id):
+        plan = OnboardingPlan.objects.filter(employee=self.get_employee(employee_id)).select_related(
+            "template", "learning_path", "responsible"
+        ).first()
+        return Response(OnboardingPlanSerializer(plan).data if plan else None)
+
+    def post(self, request, employee_id):
+        plan = assign_onboarding(self.get_employee(employee_id))
+        return Response(OnboardingPlanSerializer(plan).data, status=201)
+
+    def patch(self, request, employee_id):
+        plan = get_object_or_404(
+            OnboardingPlan.objects.select_related("template", "learning_path", "responsible"),
+            employee=self.get_employee(employee_id),
+        )
+        serializer = OnboardingPlanSerializer(plan, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        AuditEvent.objects.create(
+            actor=request.user, entity_type="onboarding_plan", entity_id=str(plan.pk), action="updated"
+        )
+        return Response(serializer.data)
 
 
 class EmployeeGoalDetailView(generics.RetrieveUpdateAPIView):
@@ -258,6 +297,36 @@ class VacancyDetailView(generics.RetrieveUpdateAPIView):
         vacancy = serializer.save()
         AuditEvent.objects.create(
             actor=self.request.user, entity_type="vacancy", entity_id=str(vacancy.pk), action="updated"
+        )
+
+
+class OnboardingTemplateListCreateView(generics.ListCreateAPIView):
+    serializer_class = OnboardingTemplateSerializer
+    permission_classes = [IsHcmUser]
+    queryset = OnboardingTemplate.objects.select_related(
+        "department", "position", "learning_path", "responsible"
+    )
+
+
+class OnboardingTemplateDetailView(generics.RetrieveUpdateAPIView):
+    serializer_class = OnboardingTemplateSerializer
+    permission_classes = [IsHcmUser]
+    queryset = OnboardingTemplate.objects.select_related(
+        "department", "position", "learning_path", "responsible"
+    )
+
+
+class OnboardingOptionsView(APIView):
+    permission_classes = [IsHcmUser]
+
+    def get(self, request):
+        return Response(
+            {
+                "learning_paths": list(
+                    LearningPath.objects.exclude(status=LearningPath.Status.ARCHIVED)
+                    .values("id", "title", "status")
+                ),
+            }
         )
 
 

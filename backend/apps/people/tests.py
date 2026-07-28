@@ -4,7 +4,7 @@ from django.test import TestCase
 from rest_framework.test import APIClient
 
 from apps.identity.models import Department, User
-from apps.learning.models import Course
+from apps.learning.models import Course, LearningPath, LearningPathCourse
 from .models import (
     Candidate,
     CandidateStage,
@@ -16,6 +16,8 @@ from .models import (
     Position,
     StaffPosition,
     Vacancy,
+    OnboardingPlan,
+    OnboardingTemplate,
 )
 
 
@@ -308,6 +310,17 @@ class PeopleApiTests(TestCase):
             openings=1,
             recruiter=self.hr,
         )
+        course = Course.objects.create(title="Добро пожаловать", author=self.admin)
+        path = LearningPath.objects.create(title="Адаптация аналитика", author=self.admin)
+        LearningPathCourse.objects.create(learning_path=path, course=course, position=0)
+        OnboardingTemplate.objects.create(
+            name="Адаптация аналитика",
+            department=self.department,
+            position=self.position,
+            learning_path=path,
+            responsible=self.hr,
+            checklist=["Получить доступы", "Познакомиться с командой"],
+        )
         offer = CandidateStage.objects.create(name="Оффер", position=4, is_terminal=True)
         candidate = Candidate.objects.get(full_name="Мария Тестова")
         candidate.vacancy = vacancy
@@ -334,12 +347,33 @@ class PeopleApiTests(TestCase):
         self.assertEqual(candidate.hired_employee.user.department, self.department)
         self.assertEqual(candidate.hired_employee.user.status, User.Status.INVITED)
         self.assertEqual(vacancy.status, Vacancy.Status.CLOSED)
+        plan = OnboardingPlan.objects.get(employee=candidate.hired_employee)
+        self.assertEqual(plan.learning_path, path)
+        self.assertEqual(plan.responsible, self.hr)
+        self.assertEqual(len(plan.checklist), 2)
+        self.assertTrue(
+            EmployeeLearning.objects.filter(employee=candidate.hired_employee, course=course).exists()
+        )
         self.assertTrue(
             EmploymentEvent.objects.filter(
                 employee=candidate.hired_employee,
                 event_type=EmploymentEvent.Type.HIRED,
             ).exists()
         )
+
+    def test_hr_completes_onboarding_checklist(self):
+        self.client.force_authenticate(self.hr)
+        created = self.client.post(f"/api/v1/employees/{self.profile.pk}/onboarding/", {}, format="json")
+        self.assertEqual(created.status_code, 201)
+        checklist = [{**item, "done": True} for item in created.json()["checklist"]]
+        updated = self.client.patch(
+            f"/api/v1/employees/{self.profile.pk}/onboarding/",
+            {"checklist": checklist},
+            format="json",
+        )
+        self.assertEqual(updated.status_code, 200)
+        self.assertEqual(updated.json()["progress"], 100)
+        self.assertEqual(updated.json()["status"], OnboardingPlan.Status.COMPLETED)
 
     def test_candidate_cannot_be_hired_before_terminal_stage(self):
         staff = StaffPosition.objects.create(

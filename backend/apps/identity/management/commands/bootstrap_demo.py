@@ -3,7 +3,7 @@ from datetime import date, timedelta
 
 from django.core.management.base import BaseCommand
 from apps.identity.models import Department, User
-from apps.learning.models import Course
+from apps.learning.models import Course, LearningPath
 from apps.people.models import (
     Candidate,
     CandidateStage,
@@ -15,7 +15,9 @@ from apps.people.models import (
     Position,
     StaffPosition,
     Vacancy,
+    OnboardingTemplate,
 )
+from apps.people.services import assign_onboarding
 
 
 class Command(BaseCommand):
@@ -157,6 +159,35 @@ class Command(BaseCommand):
                 },
             )
             demo_vacancies[vacancy_title] = vacancy
+        default_path = LearningPath.objects.filter(status=LearningPath.Status.PUBLISHED).first() or LearningPath.objects.first()
+        for template_department, template_position in [
+            (department, analyst_position),
+            (product_department, manager_position),
+            (support_department, support_position),
+        ]:
+            OnboardingTemplate.objects.update_or_create(
+                department=template_department,
+                position=template_position,
+                defaults={
+                    "name": f"Адаптация: {template_position.name}",
+                    "learning_path": default_path,
+                    "responsible": template_department.manager,
+                    "duration_days": 30,
+                    "checklist": [
+                        "Познакомиться с командой и руководителем",
+                        "Получить доступы к рабочим системам",
+                        "Изучить правила и процессы Smartis",
+                        "Согласовать цели на испытательный срок",
+                    ],
+                    "is_active": True,
+                },
+            )
+        for profile in EmployeeProfile.objects.select_related("user__department", "position"):
+            plan = assign_onboarding(profile)
+            if plan.due_date < date.today() and plan.status == plan.Status.ACTIVE:
+                plan.start_date = date.today()
+                plan.due_date = date.today() + timedelta(days=plan.template.duration_days if plan.template else 30)
+                plan.save(update_fields=["start_date", "due_date", "updated_at"])
 
         first_profile = EmployeeProfile.objects.order_by("id").first()
         if first_profile:

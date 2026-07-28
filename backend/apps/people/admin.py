@@ -12,9 +12,11 @@ from .models import (
     Position,
     StaffPosition,
     Vacancy,
+    OnboardingPlan,
+    OnboardingTemplate,
 )
 
 admin.site.register([
     Position, StaffPosition, EmployeeProfile, EmployeeGoal, EmploymentEvent, EmployeeLearning,
-    EmployeeDocument, CandidateStage, Vacancy, Candidate, AuditEvent,
+    EmployeeDocument, OnboardingTemplate, OnboardingPlan, CandidateStage, Vacancy, Candidate, AuditEvent,
 ])

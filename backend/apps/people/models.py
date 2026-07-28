@@ -155,6 +155,93 @@ class EmployeeDocument(models.Model):
         verbose_name_plural = "Документы сотрудников"
 
 
+class OnboardingTemplate(models.Model):
+    name = models.CharField("Название", max_length=180)
+    department = models.ForeignKey(
+        Department,
+        related_name="onboarding_templates",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+    )
+    position = models.ForeignKey(
+        Position,
+        related_name="onboarding_templates",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+    )
+    learning_path = models.ForeignKey(
+        "learning.LearningPath",
+        related_name="onboarding_templates",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    responsible = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="onboarding_templates",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    duration_days = models.PositiveSmallIntegerField("Срок адаптации, дней", default=30)
+    checklist = models.JSONField("Чек-лист", default=list, blank=True)
+    is_active = models.BooleanField("Активен", default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name"]
+        verbose_name = "Шаблон онбординга"
+        verbose_name_plural = "Шаблоны онбординга"
+
+    def __str__(self):
+        return self.name
+
+
+class OnboardingPlan(models.Model):
+    class Status(models.TextChoices):
+        ACTIVE = "active", "В процессе"
+        COMPLETED = "completed", "Завершён"
+        CANCELLED = "cancelled", "Отменён"
+
+    employee = models.ForeignKey(EmployeeProfile, related_name="onboarding_plans", on_delete=models.CASCADE)
+    template = models.ForeignKey(
+        OnboardingTemplate,
+        related_name="plans",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    learning_path = models.ForeignKey(
+        "learning.LearningPath",
+        related_name="onboarding_plans",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    responsible = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="responsible_onboarding_plans",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    checklist = models.JSONField("Чек-лист", default=list, blank=True)
+    status = models.CharField("Статус", max_length=20, choices=Status.choices, default=Status.ACTIVE)
+    start_date = models.DateField("Начало")
+    due_date = models.DateField("Плановое завершение")
+    completed_at = models.DateTimeField("Завершён", null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "План онбординга"
+        verbose_name_plural = "Планы онбординга"
+
+
 class CandidateStage(models.Model):
     name = models.CharField("Этап", max_length=120, unique=True)
     position = models.PositiveSmallIntegerField("Порядок", default=0)

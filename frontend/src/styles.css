@@ -1497,6 +1497,27 @@ button.vacancy-card { padding: 13px; display: grid; align-content: center; gap: 
 .employee-document-list article > svg { color: var(--brand-hover); }
 .employee-document-list article > div { min-width: 0; display: grid; gap: 3px; }
 .employee-document-list article span, .employee-document-list article time { color: var(--muted); font-size: .75rem; }
+.onboarding-layout { display: grid; grid-template-columns: minmax(260px, .75fr) minmax(360px, 1.25fr); gap: 12px; }
+.onboarding-summary { display: grid; align-content: start; gap: 16px; }
+.onboarding-summary > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.onboarding-summary > header span {
+  color: var(--brand-hover); font-size: .68rem; font-weight: 700; text-transform: uppercase;
+}
+.onboarding-summary h3 { margin-top: 5px; }
+.onboarding-summary > header > strong { font-size: 1.55rem; }
+.onboarding-summary dl { display: grid; gap: 11px; }
+.onboarding-summary dl > div { padding-top: 10px; border-top: 1px solid var(--border); display: grid; gap: 4px; }
+.onboarding-summary dt { color: var(--muted); font-size: .68rem; }
+.onboarding-summary dd { margin: 0; font-size: .8rem; font-weight: 600; }
+.onboarding-checklist { display: grid; align-content: start; gap: 8px; }
+.onboarding-checklist > div:last-child { display: grid; }
+.onboarding-task {
+  min-height: 48px; padding: 9px 5px; border-top: 1px solid var(--border);
+  display: grid; grid-template-columns: 20px minmax(0, 1fr); align-items: center; gap: 9px;
+  color: var(--foreground); font-size: .8rem; cursor: pointer;
+}
+.onboarding-task input { width: 17px; height: 17px; accent-color: var(--brand); }
+.onboarding-task--done span { color: var(--muted); text-decoration: line-through; }
 
 .organization-metrics {
   display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1542,7 +1563,7 @@ button.vacancy-card { padding: 13px; display: grid; align-content: center; gap: 
 .organization-staff-list { display: grid; }
 .organization-staff-list > article {
   min-height: 62px; padding: 0 8px; border-top: 1px solid var(--border);
-  display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 9px;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 7px;
 }
 .organization-staff-list > article:hover { background: var(--surface-soft); }
 .organization-staff-list__main {
@@ -1562,6 +1583,14 @@ button.vacancy-card { padding: 13px; display: grid; align-content: center; gap: 
   padding: 5px 7px; border-radius: 5px; background: color-mix(in srgb, var(--brand) 14%, var(--surface));
   color: var(--brand-hover); font-size: .67rem; font-weight: 700;
 }
+.organization-staff-list__onboarding {
+  min-height: 29px; padding: 5px 7px; border: 0; border-radius: 5px;
+  display: flex; align-items: center; gap: 5px; background: transparent;
+  color: var(--muted); font-size: .68rem; font-weight: 650; cursor: pointer;
+}
+.organization-staff-list__onboarding:hover { background: var(--surface-soft); color: var(--foreground); }
+.organization-staff-list__onboarding svg { width: 14px; height: 14px; }
+.onboarding-template-checklist { min-height: 132px !important; line-height: 1.55; }
 .organization-dialog { width: min(620px, 100%); }
 
 @media (max-width: 980px) {
@@ -1574,6 +1603,7 @@ button.vacancy-card { padding: 13px; display: grid; align-content: center; gap: 
   .hcm-analytics-grid { grid-template-columns: 1fr; }
   .employee-overview { grid-template-columns: 1fr; }
   .employee-competencies { grid-column: 1; }
+  .onboarding-layout { grid-template-columns: 1fr; }
   .organization-layout { grid-template-columns: 1fr; }
   .organization-tree, .organization-details { min-height: auto; }
 }

@@ -195,6 +195,31 @@ type EmployeeDocument = {
   id: number; title: string; document_type: string; number: string;
   issue_date: string | null; expires_at: string | null;
 };
+type OnboardingPlan = {
+  id: number;
+  template_name: string | null;
+  learning_path_name: string | null;
+  responsible_name: string | null;
+  checklist: Array<{ id: string; title: string; done: boolean }>;
+  status: "active" | "completed" | "cancelled";
+  status_label: string;
+  progress: number;
+  start_date: string;
+  due_date: string;
+  completed_at: string | null;
+};
+type OnboardingTemplateConfig = {
+  id: number;
+  name: string;
+  department: number | null;
+  position: number | null;
+  learning_path: number | null;
+  responsible: number | null;
+  duration_days: number;
+  checklist: Array<string | { title: string }>;
+  is_active: boolean;
+};
+type LearningPathOption = { id: number; title: string; status: string };
 type QuizOption = { text: string; correct: boolean };
 type QuizQuestion = { prompt: string; options: QuizOption[] };
 type QuizData = { passing_score: number; questions: QuizQuestion[] };
@@ -788,7 +813,7 @@ function HcmMetricCards({ summary }: { summary: HcmSummary | null }) {
   );
 }
 
-type EmployeeProfileTab = "overview" | "learning" | "history" | "goals" | "documents";
+type EmployeeProfileTab = "overview" | "onboarding" | "learning" | "history" | "goals" | "documents";
 
 function displayDate(value: string | null) {
   return value ? new Intl.DateTimeFormat("ru-RU").format(new Date(`${value}T00:00:00`)) : "—";
@@ -812,6 +837,7 @@ function EmployeeProfileView({
   const [history, setHistory] = useState<EmploymentEvent[]>([]);
   const [learning, setLearning] = useState<EmployeeLearning[]>([]);
   const [documents, setDocuments] = useState<EmployeeDocument[]>([]);
+  const [onboarding, setOnboarding] = useState<OnboardingPlan | null>(null);
   const [courses, setCourses] = useState<Course[]>([]);
   const [showAdd, setShowAdd] = useState(false);
   const [error, setError] = useState("");
@@ -824,18 +850,20 @@ function EmployeeProfileView({
 
   async function loadProfile() {
     try {
-      const [nextGoals, nextHistory, nextLearning, nextDocuments, nextCourses] = await Promise.all([
+      const [nextGoals, nextHistory, nextLearning, nextDocuments, nextCourses, nextOnboarding] = await Promise.all([
         apiRequest<EmployeeGoal[]>(`/employees/${employee.id}/goals/`, token),
         apiRequest<EmploymentEvent[]>(`/employees/${employee.id}/history/`, token),
         apiRequest<EmployeeLearning[]>(`/employees/${employee.id}/learning/`, token),
         apiRequest<EmployeeDocument[]>(`/employees/${employee.id}/documents/`, token),
         apiRequest<Course[]>("/courses/", token),
+        apiRequest<OnboardingPlan | null>(`/employees/${employee.id}/onboarding/`, token),
       ]);
       setGoals(nextGoals);
       setHistory(nextHistory);
       setLearning(nextLearning);
       setDocuments(nextDocuments);
       setCourses(nextCourses);
+      setOnboarding(nextOnboarding);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Не удалось загрузить карточку");
     }
@@ -918,9 +946,25 @@ function EmployeeProfileView({
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Не удалось добавить документ"); }
   }
 
+  async function toggleOnboardingItem(itemId: string) {
+    if (!onboarding) return;
+    try {
+      const checklist = onboarding.checklist.map((item) =>
+        item.id === itemId ? { ...item, done: !item.done } : item,
+      );
+      const updated = await apiRequest<OnboardingPlan>(`/employees/${employee.id}/onboarding/`, token, {
+        method: "PATCH",
+        body: JSON.stringify({ checklist }),
+      });
+      setOnboarding(updated);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось обновить онбординг");
+    }
+  }
+
   const availableCourses = courses.filter((course) => !learning.some((item) => item.course === course.id));
   const tabs: { id: EmployeeProfileTab; label: string }[] = [
-    { id: "overview", label: "Обзор" }, { id: "learning", label: "Обучение" },
+    { id: "overview", label: "Обзор" }, { id: "onboarding", label: "Онбординг" }, { id: "learning", label: "Обучение" },
     { id: "history", label: "История" }, { id: "goals", label: "Цели" }, { id: "documents", label: "Документы" },
   ];
   const addLabels: Partial<Record<EmployeeProfileTab, string>> = {
@@ -972,7 +1016,32 @@ function EmployeeProfileView({
 
       {tab !== "overview" && (
         <section className="employee-profile-section">
-          <header><div><h2>{tabs.find((item) => item.id === tab)?.label}</h2><p>{tab === "learning" ? "Назначенные курсы и результаты" : tab === "history" ? "Хронология кадровых изменений" : tab === "goals" ? "Индивидуальный план развития" : "Реестр документов сотрудника"}</p></div>{canManage && addLabels[tab] && <button className="primary-button" type="button" onClick={() => setShowAdd((value) => !value)}><Plus /> {addLabels[tab]}</button>}</header>
+          <header><div><h2>{tabs.find((item) => item.id === tab)?.label}</h2><p>{tab === "onboarding" ? "План адаптации нового сотрудника" : tab === "learning" ? "Назначенные курсы и результаты" : tab === "history" ? "Хронология кадровых изменений" : tab === "goals" ? "Индивидуальный план развития" : "Реестр документов сотрудника"}</p></div>{canManage && addLabels[tab] && <button className="primary-button" type="button" onClick={() => setShowAdd((value) => !value)}><Plus /> {addLabels[tab]}</button>}</header>
+
+          {tab === "onboarding" && <>
+            {onboarding ? (
+              <div className="onboarding-layout">
+                <article className="panel onboarding-summary">
+                  <header><div><span>{onboarding.status_label}</span><h3>{onboarding.template_name || "План адаптации"}</h3></div><strong>{onboarding.progress}%</strong></header>
+                  <div className="mini-progress"><i style={{ width: `${onboarding.progress}%` }} /></div>
+                  <dl>
+                    <div><dt>Ответственный</dt><dd>{onboarding.responsible_name || "Не назначен"}</dd></div>
+                    <div><dt>Срок</dt><dd>{displayDate(onboarding.due_date)}</dd></div>
+                    <div><dt>Траектория</dt><dd>{onboarding.learning_path_name || "Без траектории"}</dd></div>
+                  </dl>
+                </article>
+                <section className="panel onboarding-checklist">
+                  <div className="section-heading"><div><h3>Чек-лист адаптации</h3><p>Задачи сотрудника и ответственного</p></div></div>
+                  <div>{onboarding.checklist.map((item) => (
+                    <label key={item.id} className={item.done ? "onboarding-task onboarding-task--done" : "onboarding-task"}>
+                      <input type="checkbox" checked={item.done} onChange={() => void toggleOnboardingItem(item.id)} />
+                      <span>{item.title}</span>
+                    </label>
+                  ))}</div>
+                </section>
+              </div>
+            ) : <div className="hcm-empty"><CheckCircle2 /><p>План онбординга не назначен</p></div>}
+          </>}
 
           {tab === "learning" && <>
             {showAdd && <form className="panel employee-inline-form" onSubmit={assignCourse}><label>Курс<select value={learningForm.course} onChange={(e) => setLearningForm({ ...learningForm, course: e.target.value })} required><option value="">Выберите курс</option>{availableCourses.map((course) => <option key={course.id} value={course.id}>{course.title}</option>)}</select></label><label>Статус<select value={learningForm.status} onChange={(e) => setLearningForm({ ...learningForm, status: e.target.value })}><option value="assigned">Назначен</option><option value="in_progress">Проходит</option><option value="completed">Завершён</option></select></label><button className="primary-button" type="submit">Назначить</button></form>}
@@ -1008,26 +1077,36 @@ function OrganizationView({ token }: { token: string }) {
   const [staff, setStaff] = useState<StaffPosition[]>([]);
   const [employees, setEmployees] = useState<EmployeeProfile[]>([]);
   const [positions, setPositions] = useState<Position[]>([]);
+  const [onboardingTemplates, setOnboardingTemplates] = useState<OnboardingTemplateConfig[]>([]);
+  const [learningPathOptions, setLearningPathOptions] = useState<LearningPathOption[]>([]);
   const [selected, setSelected] = useState<number | null>(null);
   const [departmentDialog, setDepartmentDialog] = useState<OrgDepartment | "new" | null>(null);
   const [staffDialog, setStaffDialog] = useState<StaffPosition | "new" | null>(null);
+  const [onboardingDialog, setOnboardingDialog] = useState<StaffPosition | null>(null);
   const [departmentForm, setDepartmentForm] = useState({ name: "", code: "", parent: "", manager: "" });
   const [staffForm, setStaffForm] = useState({ position: "", headcount: "1", note: "" });
+  const [onboardingForm, setOnboardingForm] = useState({
+    name: "", learning_path: "", responsible: "", duration_days: "30", checklist: "",
+  });
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
   async function load() {
     try {
-      const [nextDepartments, nextStaff, nextEmployees, nextPositions] = await Promise.all([
+      const [nextDepartments, nextStaff, nextEmployees, nextPositions, nextTemplates, nextOptions] = await Promise.all([
         apiRequest<OrgDepartment[]>("/org/departments/", token),
         apiRequest<StaffPosition[]>("/org/staff-positions/", token),
         apiRequest<EmployeeProfile[]>("/employees/", token),
         apiRequest<Position[]>("/positions/", token),
+        apiRequest<OnboardingTemplateConfig[]>("/onboarding-templates/", token),
+        apiRequest<{ learning_paths: LearningPathOption[] }>("/onboarding-options/", token),
       ]);
       setDepartments(nextDepartments);
       setStaff(nextStaff);
       setEmployees(nextEmployees);
       setPositions(nextPositions);
+      setOnboardingTemplates(nextTemplates);
+      setLearningPathOptions(nextOptions.learning_paths);
       setSelected((current) => current && nextDepartments.some((item) => item.id === current)
         ? current
         : nextDepartments.find((item) => item.parent === null)?.id || nextDepartments[0]?.id || null);
@@ -1138,6 +1217,53 @@ function OrganizationView({ token }: { token: string }) {
     }
   }
 
+  function openOnboardingTemplate(item: StaffPosition) {
+    const template = onboardingTemplates.find(
+      (entry) => entry.department === item.department && entry.position === item.position,
+    );
+    setOnboardingDialog(item);
+    setOnboardingForm({
+      name: template?.name || `Адаптация: ${item.position_name}`,
+      learning_path: template?.learning_path ? String(template.learning_path) : "",
+      responsible: template?.responsible ? String(template.responsible) : "",
+      duration_days: String(template?.duration_days || 30),
+      checklist: (template?.checklist || [
+        "Познакомиться с командой и руководителем",
+        "Получить доступы к рабочим системам",
+        "Изучить правила и процессы компании",
+        "Согласовать цели на испытательный срок",
+      ]).map((entry) => typeof entry === "string" ? entry : entry.title).join("\n"),
+    });
+  }
+
+  async function saveOnboardingTemplate(event: FormEvent) {
+    event.preventDefault();
+    if (!onboardingDialog) return;
+    const existing = onboardingTemplates.find(
+      (entry) => entry.department === onboardingDialog.department && entry.position === onboardingDialog.position,
+    );
+    try {
+      await apiRequest(existing ? `/onboarding-templates/${existing.id}/` : "/onboarding-templates/", token, {
+        method: existing ? "PATCH" : "POST",
+        body: JSON.stringify({
+          name: onboardingForm.name,
+          department: onboardingDialog.department,
+          position: onboardingDialog.position,
+          learning_path: onboardingForm.learning_path ? Number(onboardingForm.learning_path) : null,
+          responsible: onboardingForm.responsible ? Number(onboardingForm.responsible) : null,
+          duration_days: Number(onboardingForm.duration_days),
+          checklist: onboardingForm.checklist.split("\n").map((item) => item.trim()).filter(Boolean),
+          is_active: true,
+        }),
+      });
+      setOnboardingDialog(null);
+      setNotice(`Шаблон адаптации для «${onboardingDialog.position_name}» сохранён`);
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось сохранить шаблон адаптации");
+    }
+  }
+
   return (
     <>
       <PageHeader
@@ -1202,6 +1328,7 @@ function OrganizationView({ token }: { token: string }) {
                     </button>
                     {item.vacancies > 0 && item.open_vacancy_count === 0 && <button className="organization-staff-list__vacancy" type="button" onClick={() => void createVacancyFromStaff(item)}>Открыть вакансию</button>}
                     {item.open_vacancy_count > 0 && <span className="organization-staff-list__opened">В подборе</span>}
+                    <button className="organization-staff-list__onboarding" type="button" onClick={() => openOnboardingTemplate(item)}><Settings2 /> Адаптация</button>
                   </article>
                 ))}
                 {!visibleStaff.length && <div className="hcm-empty"><BriefcaseBusiness /><p>Штатные позиции ещё не добавлены</p></div>}
@@ -1238,6 +1365,23 @@ function OrganizationView({ token }: { token: string }) {
                 <label className="hcm-form__wide">Комментарий<input value={staffForm.note} onChange={(event) => setStaffForm({ ...staffForm, note: event.target.value })} /></label>
               </div>
               <footer><button className="secondary-button" type="button" onClick={() => setStaffDialog(null)}>Отмена</button><button className="primary-button" type="submit">Сохранить</button></footer>
+            </form>
+          </section>
+        </div>
+      )}
+      {onboardingDialog && (
+        <div className="hcm-dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setOnboardingDialog(null); }}>
+          <section className="hcm-dialog organization-dialog" role="dialog" aria-modal="true" aria-labelledby="onboarding-template-title">
+            <header><div><h2 id="onboarding-template-title">Шаблон адаптации</h2><p>{onboardingDialog.department_name} · {onboardingDialog.position_name}</p></div><button className="icon-button" type="button" onClick={() => setOnboardingDialog(null)} aria-label="Закрыть"><X /></button></header>
+            <form className="hcm-form" onSubmit={saveOnboardingTemplate}>
+              <div className="hcm-form__grid">
+                <label className="hcm-form__wide">Название<input value={onboardingForm.name} onChange={(event) => setOnboardingForm({ ...onboardingForm, name: event.target.value })} required /></label>
+                <label>Траектория<select value={onboardingForm.learning_path} onChange={(event) => setOnboardingForm({ ...onboardingForm, learning_path: event.target.value })}><option value="">Без траектории</option>{learningPathOptions.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label>
+                <label>Ответственный<select value={onboardingForm.responsible} onChange={(event) => setOnboardingForm({ ...onboardingForm, responsible: event.target.value })}><option value="">Руководитель отдела</option>{employees.map((item) => <option key={item.user} value={item.user}>{item.full_name}</option>)}</select></label>
+                <label>Срок, дней<input type="number" min="1" value={onboardingForm.duration_days} onChange={(event) => setOnboardingForm({ ...onboardingForm, duration_days: event.target.value })} required /></label>
+                <label className="hcm-form__wide">Чек-лист<textarea className="onboarding-template-checklist" value={onboardingForm.checklist} onChange={(event) => setOnboardingForm({ ...onboardingForm, checklist: event.target.value })} placeholder="Одна задача на строку" required /></label>
+              </div>
+              <footer><button className="secondary-button" type="button" onClick={() => setOnboardingDialog(null)}>Отмена</button><button className="primary-button" type="submit">Сохранить шаблон</button></footer>
             </form>
           </section>
         </div>

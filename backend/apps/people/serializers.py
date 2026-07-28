@@ -17,6 +17,8 @@ from .models import (
     Position,
     StaffPosition,
     Vacancy,
+    OnboardingPlan,
+    OnboardingTemplate,
 )
 
 
@@ -289,6 +291,69 @@ class EmployeeDocumentSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "employee", "created_at"]
 
 
+class OnboardingTemplateSerializer(serializers.ModelSerializer):
+    department_name = serializers.CharField(source="department.name", read_only=True)
+    position_name = serializers.CharField(source="position.name", read_only=True)
+    learning_path_name = serializers.CharField(source="learning_path.title", read_only=True)
+    responsible_name = serializers.CharField(source="responsible.get_full_name", read_only=True)
+
+    class Meta:
+        model = OnboardingTemplate
+        fields = [
+            "id", "name", "department", "department_name", "position", "position_name",
+            "learning_path", "learning_path_name", "responsible", "responsible_name",
+            "duration_days", "checklist", "is_active", "created_at", "updated_at",
+        ]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+    def validate_checklist(self, value):
+        if not isinstance(value, list):
+            raise serializers.ValidationError("Чек-лист должен быть списком")
+        return value
+
+
+class OnboardingPlanSerializer(serializers.ModelSerializer):
+    template_name = serializers.CharField(source="template.name", read_only=True)
+    learning_path_name = serializers.CharField(source="learning_path.title", read_only=True)
+    responsible_name = serializers.CharField(source="responsible.get_full_name", read_only=True)
+    status_label = serializers.CharField(source="get_status_display", read_only=True)
+    progress = serializers.SerializerMethodField()
+
+    class Meta:
+        model = OnboardingPlan
+        fields = [
+            "id", "employee", "template", "template_name", "learning_path", "learning_path_name",
+            "responsible", "responsible_name", "checklist", "status", "status_label",
+            "progress", "start_date", "due_date", "completed_at", "created_at", "updated_at",
+        ]
+        read_only_fields = [
+            "id", "employee", "template", "learning_path", "responsible", "status_label",
+            "progress", "start_date", "due_date", "completed_at", "created_at", "updated_at",
+        ]
+
+    def get_progress(self, obj):
+        if not obj.checklist:
+            return 0
+        return round(sum(bool(item.get("done")) for item in obj.checklist) / len(obj.checklist) * 100)
+
+    def validate_checklist(self, value):
+        if not isinstance(value, list) or any(not isinstance(item, dict) or not item.get("title") for item in value):
+            raise serializers.ValidationError("Некорректный чек-лист")
+        return value
+
+    def update(self, instance, validated_data):
+        instance = super().update(instance, validated_data)
+        if instance.checklist and all(item.get("done") for item in instance.checklist):
+            instance.status = OnboardingPlan.Status.COMPLETED
+            instance.completed_at = timezone.now()
+            instance.save(update_fields=["status", "completed_at", "updated_at"])
+        elif instance.status == OnboardingPlan.Status.COMPLETED:
+            instance.status = OnboardingPlan.Status.ACTIVE
+            instance.completed_at = None
+            instance.save(update_fields=["status", "completed_at", "updated_at"])
+        return instance
+
+
 class CandidateStageSerializer(serializers.ModelSerializer):
     candidates_count = serializers.IntegerField(read_only=True)
 
@@ -427,6 +492,8 @@ class CandidateHireSerializer(serializers.Serializer):
         candidate.hired_employee = profile
         candidate.hired_at = timezone.now()
         candidate.save(update_fields=["hired_employee", "hired_at", "updated_at"])
+        from .services import assign_onboarding
+        assign_onboarding(profile)
         if vacancy.candidates.filter(hired_employee__isnull=False).count() >= vacancy.openings:
             vacancy.status = Vacancy.Status.CLOSED
             vacancy.save(update_fields=["status", "updated_at"])
