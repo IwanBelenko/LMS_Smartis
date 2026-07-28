@@ -1143,6 +1143,41 @@ function DevelopmentNetwork({
           <div className="development-map__hint"><span />Курсор по нитям · Ctrl/⌘ + колесо меняет масштаб</div>
           <div className="development-map__viewport" style={{ transform: `scale(${webZoom})` }}>
             <svg className="development-map__links" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+            <g className="development-web__depth" transform="translate(.18 .3)">
+              {developmentNodePositions.map(([x, y], index) => (
+                <line className="development-web__depth-thread" key={`depth-spoke-${index}`} x1="50" y1="50" x2={x} y2={y} />
+              ))}
+              {developmentRingPoints.map((ring, index) => (
+                <path className="development-web__depth-thread" key={`depth-ring-${index}`} d={developmentRingPath(ring)} />
+              ))}
+              {developmentNodePositions.map(([x, y], index) => {
+                const adjacentSegments = [
+                  Math.floor(((index - 1 + developmentNodePositions.length) % developmentNodePositions.length) / 3),
+                  Math.floor(index / 3) % 4,
+                ];
+                const openRatio = Math.max(...adjacentSegments.map((segment) => segmentOpenCounts[segment] / 10));
+                const openFactor = Math.min(1, .16 + openRatio * .84);
+                return openRatio > 0 && (
+                  <line
+                    className="development-web__depth-thread development-web__depth-thread--open"
+                    key={`depth-open-spoke-${index}`}
+                    x1="50"
+                    y1="50"
+                    x2={50 + (x - 50) * openFactor}
+                    y2={50 + (y - 50) * openFactor}
+                  />
+                );
+              })}
+              {developmentRingPoints.flatMap((ring, ringIndex) =>
+                segmentOpenCounts.map((count, segment) => ringIndex < Math.ceil((count / 10) * developmentRingPoints.length) && (
+                  <path
+                    className="development-web__depth-thread development-web__depth-thread--open"
+                    d={developmentRingArcPath(ring, segment)}
+                    key={`depth-open-ring-${ringIndex}-${segment}`}
+                  />
+                )),
+              )}
+            </g>
             <path className="development-web__segment development-web__segment--1" d="M50 50 50 7 92 50Z" />
             <path className="development-web__segment development-web__segment--2" d="M50 50 92 50 50 93Z" />
             <path className="development-web__segment development-web__segment--3" d="M50 50 50 93 8 50Z" />
