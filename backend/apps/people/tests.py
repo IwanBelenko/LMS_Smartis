@@ -675,3 +675,55 @@ class PeopleApiTests(TestCase):
         )
         self.client.force_authenticate(self.employee)
         self.assertEqual(self.client.get(f"/api/v1/performance/reviews/{foreign.pk}/").status_code, 404)
+
+    def test_employee_inbox_contains_only_personal_actions(self):
+        own = EmployeeDocument.objects.create(
+            employee=self.profile,
+            title="Личное соглашение",
+            requires_signature=True,
+            status=EmployeeDocument.Status.AWAITING,
+        )
+        EmployeeDocument.objects.create(
+            employee=self.other_employee.employee_profile,
+            title="Чужой документ",
+            requires_signature=True,
+            status=EmployeeDocument.Status.AWAITING,
+        )
+        self.client.force_authenticate(self.employee)
+        response = self.client.get("/api/v1/inbox/")
+        self.assertEqual(response.status_code, 200)
+        identifiers = [item["id"] for item in response.json()["items"]]
+        self.assertIn(f"document-{own.pk}", identifiers)
+        self.assertEqual(len([item for item in identifiers if item.startswith("document-")]), 1)
+
+    def test_leader_inbox_contains_department_approvals(self):
+        absence = AbsenceRequest.objects.create(
+            employee=self.profile,
+            absence_type=AbsenceRequest.Type.VACATION,
+            start_date=date.today() + timedelta(days=3),
+            end_date=date.today() + timedelta(days=5),
+        )
+        AbsenceRequest.objects.create(
+            employee=self.other_employee.employee_profile,
+            absence_type=AbsenceRequest.Type.VACATION,
+            start_date=date.today() + timedelta(days=4),
+            end_date=date.today() + timedelta(days=6),
+        )
+        self.client.force_authenticate(self.leader)
+        response = self.client.get("/api/v1/inbox/")
+        identifiers = [item["id"] for item in response.json()["items"]]
+        self.assertEqual([item for item in identifiers if item.startswith("absence-")], [f"absence-{absence.pk}"])
+
+    def test_hr_inbox_prioritizes_overdue_onboarding(self):
+        plan = OnboardingPlan.objects.create(
+            employee=self.profile,
+            checklist=[{"id": "1", "title": "Получить доступ", "done": False}],
+            start_date=date.today() - timedelta(days=10),
+            due_date=date.today() - timedelta(days=1),
+        )
+        self.client.force_authenticate(self.hr)
+        response = self.client.get("/api/v1/inbox/")
+        self.assertEqual(response.status_code, 200)
+        item = next(item for item in response.json()["items"] if item["id"] == f"onboarding-{plan.pk}")
+        self.assertEqual(item["priority"], "danger")
+        self.assertGreaterEqual(response.json()["urgent"], 1)

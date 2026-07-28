@@ -24,6 +24,7 @@ from .views import (
     EmploymentEventListCreateView,
     HcmSummaryView,
     HcmDashboardView,
+    InboxView,
     PositionListView,
     OrganizationDepartmentDetailView,
     OrganizationDepartmentListCreateView,
@@ -45,6 +46,7 @@ from .views import (
 )
 
 urlpatterns = [
+    path("inbox/", InboxView.as_view(), name="inbox"),
     path("performance/competencies/", CompetencyListCreateView.as_view(), name="performance-competencies"),
     path("performance/cycles/", PerformanceCycleListCreateView.as_view(), name="performance-cycles"),
     path("performance/cycles/<int:pk>/launch/", PerformanceCycleLaunchView.as_view(), name="performance-cycle-launch"),

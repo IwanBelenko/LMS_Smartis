@@ -2,6 +2,7 @@ import {
   ArrowDown,
   ArrowUp,
   BarChart3,
+  Bell,
   BookOpen,
   BriefcaseBusiness,
   Building2,
@@ -64,7 +65,7 @@ function Brand({ login = false }: { login?: boolean }) {
 }
 
 type ViewId =
-  | "home" | "trajectory" | "ranking" | "analytics" | "absences" | "documents" | "performance"
+  | "home" | "tasks" | "trajectory" | "ranking" | "analytics" | "absences" | "documents" | "performance"
   | "organization" | "employees" | "recruitment" | "hrAnalytics"
   | "users" | "courses" | "settings";
 type User = {
@@ -262,6 +263,18 @@ type PerformanceReview = {
   scores: PerformanceScore[]; self_average: number | null; manager_average: number | null;
   can_self_submit: boolean; can_manager_submit: boolean;
 };
+type InboxItem = {
+  id: string;
+  category: "documents" | "performance" | "learning" | "onboarding" | "absences";
+  title: string;
+  description: string;
+  target_view: ViewId;
+  target_id: number | null;
+  due_date: string | null;
+  priority: "danger" | "warning" | "normal";
+  action_label: string;
+};
+type Inbox = { total: number; urgent: number; items: InboxItem[] };
 type OnboardingPlan = {
   id: number;
   template_name: string | null;
@@ -498,6 +511,7 @@ function LoginPage({ onLogin }: { onLogin: (token: string, user: User) => void }
 
 const nav = [
   { id: "home" as const, label: "Главная", icon: Home },
+  { id: "tasks" as const, label: "Задачи", icon: Bell },
   { id: "trajectory" as const, label: "Траектория", icon: Route },
   { id: "ranking" as const, label: "Рейтинг", icon: Trophy },
   { id: "analytics" as const, label: "Аналитика", icon: BarChart3 },
@@ -3583,6 +3597,80 @@ function CoursesView({ token, user }: { token: string; user: User }) {
   );
 }
 
+const inboxCategoryLabels: Record<InboxItem["category"], string> = {
+  documents: "Документы",
+  performance: "Оценка",
+  learning: "Обучение",
+  onboarding: "Адаптация",
+  absences: "Отсутствия",
+};
+
+function TaskCenterView({ token, onNavigate }: { token: string; onNavigate: (view: ViewId) => void }) {
+  const [inbox, setInbox] = useState<Inbox>({ total: 0, urgent: 0, items: [] });
+  const [filter, setFilter] = useState<"all" | "urgent" | InboxItem["category"]>("all");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    apiRequest<Inbox>("/inbox/", token)
+      .then(setInbox)
+      .catch((reason) => setError(reason instanceof Error ? reason.message : "Не удалось загрузить задачи"));
+  }, [token]);
+
+  const visible = inbox.items.filter((item) =>
+    filter === "all" ? true : filter === "urgent" ? item.priority === "danger" : item.category === filter
+  );
+  const categories = new Set(inbox.items.map((item) => item.category)).size;
+  const today = localDateKey(new Date());
+  const dueToday = inbox.items.filter((item) => item.due_date === today).length;
+
+  return (
+    <>
+      <PageHeader title="Задачи" subtitle="Единая очередь действий по обучению и работе с персоналом" />
+      {error && <div className="form-error">{error}</div>}
+      <section className="task-metrics">
+        <article><span>Всего задач</span><strong>{inbox.total}</strong></article>
+        <article className={inbox.urgent ? "task-metric--danger" : ""}><span>Срочные</span><strong>{inbox.urgent}</strong></article>
+        <article><span>На сегодня</span><strong>{dueToday}</strong></article>
+        <article><span>Направлений</span><strong>{categories}</strong></article>
+      </section>
+      <section className="panel task-center">
+        <header>
+          <div><span className="eyebrow">Входящие</span><h2>Что требует внимания</h2></div>
+          <div className="task-filters">
+            {([
+              ["all", "Все"],
+              ["urgent", "Срочные"],
+              ["documents", "Документы"],
+              ["performance", "Оценка"],
+              ["learning", "Обучение"],
+              ["onboarding", "Адаптация"],
+              ["absences", "Отсутствия"],
+            ] as const).map(([value, label]) => (
+              <button className={filter === value ? "task-filter task-filter--active" : "task-filter"} type="button" key={value} onClick={() => setFilter(value)}>{label}</button>
+            ))}
+          </div>
+        </header>
+        <div className="task-list">
+          {visible.map((item) => (
+            <article key={item.id}>
+              <div className={`task-list__icon task-list__icon--${item.category}`}><Bell /></div>
+              <div className="task-list__main"><strong>{item.title}</strong><span>{item.description}</span></div>
+              <span className="task-list__category">{inboxCategoryLabels[item.category]}</span>
+              <div className="task-list__due">
+                <Clock3 />
+                <span>{item.due_date ? (item.due_date < today ? `Просрочено · ${displayDate(item.due_date)}` : `До ${displayDate(item.due_date)}`) : "Без срока"}</span>
+              </div>
+              <span className={`task-priority task-priority--${item.priority}`}>{item.priority === "danger" ? "Срочно" : item.priority === "warning" ? "Важно" : "Планово"}</span>
+              <button className={item.priority === "danger" ? "primary-button" : "secondary-button"} type="button" onClick={() => onNavigate(item.target_view)}>{item.action_label}<ChevronRight /></button>
+            </article>
+          ))}
+          {!visible.length && <div className="task-empty"><CheckCircle2 /><strong>Всё выполнено</strong><span>В выбранной категории нет активных задач.</span></div>}
+        </div>
+      </section>
+    </>
+  );
+}
+
 function PerformanceView({ token, user }: { token: string; user: User }) {
   const canManage = user.role === "admin" || user.role === "hr";
   const [reviews, setReviews] = useState<PerformanceReview[]>([]);
@@ -4228,6 +4316,7 @@ function AbsencesView({ token, user }: { token: string; user: User }) {
 function Placeholder({ active }: { active: ViewId }) {
   const labels: Record<string, string> = {
     trajectory: "Траектория обучения", ranking: "Рейтинг", analytics: "Аналитика дэйликов",
+    tasks: "Задачи",
     absences: "Отпуска и отсутствия",
     documents: "Документы",
     performance: "Оценка и развитие",
@@ -4315,6 +4404,8 @@ function App() {
       <main className="main-content">
         {active === "home" ? (
           <HomeView user={user} />
+        ) : active === "tasks" ? (
+          <TaskCenterView token={token} onNavigate={navigate} />
         ) : active === "performance" ? (
           <PerformanceView token={token} user={user} />
         ) : active === "documents" ? (

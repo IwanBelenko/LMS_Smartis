@@ -209,6 +209,146 @@ class PerformanceManagerSubmitView(APIView):
         return Response(PerformanceReviewSerializer(review, context={"request": request}).data)
 
 
+class InboxView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        today = date.today()
+        week_end = today + timedelta(days=7)
+        items = []
+
+        def add(identifier, category, title, description, target_view, target_id=None, due_date=None, priority="normal", action_label="Открыть"):
+            items.append({
+                "id": identifier,
+                "category": category,
+                "title": title,
+                "description": description,
+                "target_view": target_view,
+                "target_id": target_id,
+                "due_date": due_date,
+                "priority": priority,
+                "action_label": action_label,
+            })
+
+        profile = EmployeeProfile.objects.filter(user=user).first()
+        if profile:
+            for document in EmployeeDocument.objects.filter(
+                employee=profile, status=EmployeeDocument.Status.AWAITING
+            ):
+                add(
+                    f"document-{document.pk}", "documents", "Подтвердить документ",
+                    document.title, "documents", document.pk,
+                    priority="warning", action_label="Ознакомиться",
+                )
+            for review in PerformanceReview.objects.filter(
+                employee=profile, status=PerformanceReview.Status.SELF
+            ).select_related("cycle"):
+                add(
+                    f"review-self-{review.pk}", "performance", "Пройти самооценку",
+                    review.cycle.title, "performance", review.pk, review.cycle.end_date,
+                    "danger" if review.cycle.end_date < today else "warning",
+                    "Начать",
+                )
+            for assignment in EmployeeLearning.objects.filter(
+                employee=profile,
+                status__in=[EmployeeLearning.Status.ASSIGNED, EmployeeLearning.Status.IN_PROGRESS],
+            ).select_related("course")[:8]:
+                add(
+                    f"learning-{assignment.pk}", "learning", "Продолжить обучение",
+                    assignment.course.title, "trajectory", assignment.course_id,
+                    priority="normal", action_label="К курсу",
+                )
+            for plan in OnboardingPlan.objects.filter(
+                employee=profile, status=OnboardingPlan.Status.ACTIVE
+            ):
+                add(
+                    f"onboarding-own-{plan.pk}", "onboarding", "Продолжить адаптацию",
+                    f"Чек-лист · срок {plan.due_date:%d.%m.%Y}", "home", plan.pk, plan.due_date,
+                    "danger" if plan.due_date < today else "warning" if plan.due_date <= week_end else "normal",
+                    "Посмотреть",
+                )
+
+        if user.role == User.Role.LEADER and user.department_id:
+            for absence in AbsenceRequest.objects.filter(
+                employee__user__department_id=user.department_id,
+                status=AbsenceRequest.Status.PENDING,
+            ).select_related("employee__user"):
+                add(
+                    f"absence-{absence.pk}", "absences", "Согласовать отсутствие",
+                    f"{absence.employee.user.get_full_name() or absence.employee.user.email} · {absence.get_absence_type_display()}",
+                    "absences", absence.pk, absence.start_date,
+                    "danger" if absence.start_date <= today else "warning",
+                    "Рассмотреть",
+                )
+            for review in PerformanceReview.objects.filter(
+                reviewer=user, status=PerformanceReview.Status.MANAGER
+            ).select_related("employee__user", "cycle"):
+                add(
+                    f"review-manager-{review.pk}", "performance", "Оценить сотрудника",
+                    f"{review.employee.user.get_full_name() or review.employee.user.email} · {review.cycle.title}",
+                    "performance", review.pk, review.cycle.end_date,
+                    "danger" if review.cycle.end_date < today else "warning",
+                    "Оценить",
+                )
+
+        if can_manage_documents(user):
+            for absence in AbsenceRequest.objects.filter(
+                status=AbsenceRequest.Status.PENDING
+            ).select_related("employee__user")[:12]:
+                add(
+                    f"absence-{absence.pk}", "absences", "Согласовать отсутствие",
+                    f"{absence.employee.user.get_full_name() or absence.employee.user.email} · {absence.get_absence_type_display()}",
+                    "absences", absence.pk, absence.start_date,
+                    "danger" if absence.start_date <= today else "warning",
+                    "Рассмотреть",
+                )
+            for document in EmployeeDocument.objects.filter(
+                requires_signature=True,
+                status__in=[EmployeeDocument.Status.DRAFT, EmployeeDocument.Status.DECLINED],
+            ).select_related("employee__user")[:12]:
+                title = "Исправить отклонённый документ" if document.status == EmployeeDocument.Status.DECLINED else "Отправить документ сотруднику"
+                add(
+                    f"document-manage-{document.pk}", "documents", title,
+                    f"{document.employee.user.get_full_name() or document.employee.user.email} · {document.title}",
+                    "documents", document.pk,
+                    priority="danger" if document.status == EmployeeDocument.Status.DECLINED else "normal",
+                    action_label="К документу",
+                )
+            for plan in OnboardingPlan.objects.filter(
+                status=OnboardingPlan.Status.ACTIVE, due_date__lte=week_end
+            ).select_related("employee__user")[:12]:
+                add(
+                    f"onboarding-{plan.pk}", "onboarding", "Проверить адаптацию",
+                    plan.employee.user.get_full_name() or plan.employee.user.email,
+                    "employees", plan.employee_id, plan.due_date,
+                    "danger" if plan.due_date < today else "warning",
+                    "Открыть карточку",
+                )
+            for review in PerformanceReview.objects.filter(
+                status=PerformanceReview.Status.MANAGER
+            ).select_related("employee__user", "cycle")[:12]:
+                add(
+                    f"review-manager-{review.pk}", "performance", "Оценка ждёт руководителя",
+                    f"{review.employee.user.get_full_name() or review.employee.user.email} · {review.cycle.title}",
+                    "performance", review.pk, review.cycle.end_date,
+                    "danger" if review.cycle.end_date < today else "warning",
+                    "Открыть",
+                )
+
+        priority_order = {"danger": 0, "warning": 1, "normal": 2}
+        unique = {item["id"]: item for item in items}
+        result = sorted(
+            unique.values(),
+            key=lambda item: (priority_order[item["priority"]], item["due_date"] or date.max),
+        )
+        return Response({
+            "total": len(result),
+            "urgent": sum(item["priority"] == "danger" for item in result),
+            "items": result,
+        })
+
+
 def can_manage_documents(user):
     return user.is_superuser or user.role in {User.Role.ADMIN, User.Role.HR}
 
