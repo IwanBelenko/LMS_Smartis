@@ -1288,10 +1288,41 @@ th { font-size: 0.72rem; text-transform: none; letter-spacing: 0.02em; }
   gap: 7px;
   background: var(--surface);
 }
+.candidate-card > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
 .candidate-card strong { font-size: 0.9rem; }
 .candidate-card p { color: var(--foreground); font-size: 0.8rem; }
+.candidate-card > label { gap: 4px; font-size: 0.68rem; }
+.candidate-card > label select { min-height: 32px; padding: 5px 8px; font-size: 0.75rem; }
+.candidate-card__edit {
+  width: 28px; height: 28px; padding: 0; border: 0; border-radius: 5px;
+  display: grid; place-items: center; background: transparent; color: var(--muted); cursor: pointer;
+}
+.candidate-card__edit:hover { background: var(--surface-soft); color: var(--foreground); }
+.candidate-card__edit svg { width: 15px; height: 15px; }
 .candidate-card footer { padding-top: 8px; border-top: 1px solid var(--border); display: grid; gap: 3px; color: var(--muted); font-size: 0.7rem; }
 .recruitment-empty { padding: 22px 6px; color: var(--muted); font-size: 0.78rem; text-align: center; }
+
+.hcm-dialog-backdrop {
+  position: fixed; inset: 0; z-index: 90; padding: 24px; display: grid; place-items: center;
+  background: color-mix(in srgb, var(--foreground) 20%, transparent);
+  backdrop-filter: blur(3px);
+}
+.hcm-dialog {
+  width: min(720px, 100%); max-height: calc(100vh - 48px); overflow: auto;
+  padding: 20px; border: 1px solid var(--border); border-radius: 10px;
+  display: grid; gap: 18px; background: var(--surface); box-shadow: 0 24px 80px rgba(0, 0, 0, 0.24);
+}
+.hcm-dialog > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.hcm-dialog > header p { margin-top: 4px; color: var(--muted); font-size: 0.82rem; }
+.hcm-form { display: grid; gap: 16px; }
+.hcm-form__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.hcm-form__wide { grid-column: 1 / -1; }
+.hcm-form textarea { min-height: 78px; }
+.hcm-form > footer {
+  margin: 0 -20px -20px; padding: 14px 20px 20px; position: sticky; bottom: -20px;
+  border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 8px;
+  background: var(--surface);
+}
 
 .hcm-analytics-grid { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(260px, 0.7fr); gap: 14px; }
 .hcm-chart { min-height: 320px; }
@@ -1323,4 +1354,9 @@ th { font-size: 0.72rem; text-transform: none; letter-spacing: 0.02em; }
   .hcm-metric, .hcm-metric:nth-child(3), .hcm-metric:nth-child(4) { border-left: 0; border-top: 1px solid var(--border); }
   .hcm-metric:first-child { border-top: 0; }
   .hcm-toolbar { align-items: stretch; flex-direction: column; }
+  .hcm-dialog-backdrop { padding: 8px; }
+  .hcm-dialog { max-height: calc(100vh - 16px); padding: 16px; }
+  .hcm-form__grid { grid-template-columns: 1fr; }
+  .hcm-form__wide { grid-column: 1; }
+  .hcm-form > footer { margin-right: -16px; margin-bottom: -16px; margin-left: -16px; padding: 12px 16px 16px; bottom: -16px; }
 }

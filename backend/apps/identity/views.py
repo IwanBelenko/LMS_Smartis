@@ -1,6 +1,6 @@
 from rest_framework import generics, status
 from rest_framework.authtoken.models import Token
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -34,7 +34,10 @@ class MeView(APIView):
 class DepartmentListCreateView(generics.ListCreateAPIView):
     queryset = Department.objects.filter(is_active=True)
     serializer_class = DepartmentSerializer
-    permission_classes = [IsAdministrator]
+
+    def get_permissions(self):
+        permission_classes = [IsAuthenticated] if self.request.method == "GET" else [IsAdministrator]
+        return [permission() for permission in permission_classes]
 
 
 class UserListCreateView(generics.ListCreateAPIView):

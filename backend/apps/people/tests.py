@@ -72,3 +72,46 @@ class PeopleApiTests(TestCase):
         self.assertEqual(stages.status_code, 200)
         self.assertEqual(stages.json()[0]["candidates_count"], 1)
         self.assertEqual(summary.json()["employees_total"], 2)
+
+    def test_admin_creates_and_updates_employee_card(self):
+        self.client.force_authenticate(self.admin)
+        created = self.client.post(
+            "/api/v1/employees/",
+            {
+                "email": "new.employee@test.local",
+                "first_name": "Новый",
+                "last_name": "Сотрудник",
+                "employee_number": "SM-200",
+                "department": self.department.pk,
+                "position": self.position.pk,
+                "grade": "Junior",
+                "status": EmployeeProfile.Status.PROBATION,
+                "checklist_score": 20,
+                "development_progress": 15,
+            },
+            format="json",
+        )
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(created.json()["full_name"], "Новый Сотрудник")
+        profile_id = created.json()["id"]
+        updated = self.client.patch(
+            f"/api/v1/employees/{profile_id}/",
+            {"grade": "Middle", "development_progress": 55},
+            format="json",
+        )
+        self.assertEqual(updated.status_code, 200)
+        self.assertEqual(updated.json()["grade"], "Middle")
+        self.assertEqual(updated.json()["development_progress"], 55)
+        self.assertFalse(User.objects.get(email="new.employee@test.local").has_usable_password())
+
+    def test_admin_moves_candidate_to_another_stage(self):
+        next_stage = CandidateStage.objects.create(name="Интервью", position=2)
+        candidate = Candidate.objects.get()
+        self.client.force_authenticate(self.admin)
+        response = self.client.patch(
+            f"/api/v1/candidates/{candidate.pk}/",
+            {"stage": next_stage.pk},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["stage_name"], "Интервью")

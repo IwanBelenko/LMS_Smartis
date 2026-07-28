@@ -6,12 +6,20 @@ from rest_framework.views import APIView
 from apps.identity.models import User
 from .models import AuditEvent, Candidate, CandidateStage, EmployeeProfile, Position
 from .permissions import IsHcmUser, IsRecruiter
-from .serializers import CandidateSerializer, CandidateStageSerializer, EmployeeProfileSerializer, PositionSerializer
+from .serializers import (
+    CandidateSerializer,
+    CandidateStageSerializer,
+    EmployeeProfileSerializer,
+    EmployeeProfileWriteSerializer,
+    PositionSerializer,
+)
 
 
 class EmployeeListCreateView(generics.ListCreateAPIView):
-    serializer_class = EmployeeProfileSerializer
     permission_classes = [IsHcmUser]
+
+    def get_serializer_class(self):
+        return EmployeeProfileWriteSerializer if self.request.method == "POST" else EmployeeProfileSerializer
 
     def get_queryset(self):
         queryset = EmployeeProfile.objects.select_related("user__department", "position")
@@ -34,6 +42,38 @@ class EmployeeListCreateView(generics.ListCreateAPIView):
             actor=self.request.user, entity_type="employee", entity_id=str(profile.pk), action="created"
         )
 
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        return Response(
+            EmployeeProfileSerializer(serializer.instance, context={"request": request}).data,
+            status=201,
+        )
+
+
+class EmployeeDetailView(generics.RetrieveUpdateAPIView):
+    permission_classes = [IsHcmUser]
+
+    def get_queryset(self):
+        queryset = EmployeeProfile.objects.select_related("user__department", "position")
+        if self.request.user.role == User.Role.LEADER and not self.request.user.is_superuser:
+            queryset = queryset.filter(user__department_id=self.request.user.department_id)
+        return queryset
+
+    def get_serializer_class(self):
+        return EmployeeProfileSerializer if self.request.method == "GET" else EmployeeProfileWriteSerializer
+
+    def update(self, request, *args, **kwargs):
+        profile = self.get_object()
+        serializer = self.get_serializer(profile, data=request.data, partial=request.method == "PATCH")
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        AuditEvent.objects.create(
+            actor=request.user, entity_type="employee", entity_id=str(profile.pk), action="updated"
+        )
+        return Response(EmployeeProfileSerializer(profile, context={"request": request}).data)
+
 
 class CandidateListCreateView(generics.ListCreateAPIView):
     serializer_class = CandidateSerializer
@@ -48,6 +88,18 @@ class CandidateListCreateView(generics.ListCreateAPIView):
         candidate = serializer.save(recruiter=self.request.user)
         AuditEvent.objects.create(
             actor=self.request.user, entity_type="candidate", entity_id=str(candidate.pk), action="created"
+        )
+
+
+class CandidateDetailView(generics.RetrieveUpdateAPIView):
+    serializer_class = CandidateSerializer
+    permission_classes = [IsRecruiter]
+    queryset = Candidate.objects.select_related("stage", "department", "recruiter")
+
+    def perform_update(self, serializer):
+        candidate = serializer.save()
+        AuditEvent.objects.create(
+            actor=self.request.user, entity_type="candidate", entity_id=str(candidate.pk), action="updated"
         )
 
 

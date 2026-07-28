@@ -78,35 +78,51 @@ type User = {
   department_name: string | null;
 };
 type Department = { id: number; name: string; code: string; is_active: boolean };
+type Position = { id: number; name: string; is_active: boolean };
 type EmployeeProfile = {
   id: number;
   user: number;
   full_name: string;
+  first_name: string;
+  last_name: string;
   email: string;
   employee_number: string;
   department: number | null;
   department_name: string | null;
+  position: number | null;
   position_name: string | null;
   grade: string;
+  birth_date: string | null;
   age: number | null;
   hire_date: string | null;
   tenure_years: number | null;
+  education: string;
+  competencies: string;
   status: string;
   status_label: string;
   checklist_score: number;
   development_progress: number;
+  salary_base?: string | null;
+  monthly_bonus?: string | null;
+  quarterly_bonus?: string | null;
 };
 type CandidateStage = { id: number; name: string; position: number; is_terminal: boolean; candidates_count: number };
 type Candidate = {
   id: number;
   full_name: string;
+  email: string;
+  phone: string;
+  telegram: string;
   desired_position: string;
   desired_salary: string | null;
+  skills: string;
+  source: string;
   stage: number;
   stage_name: string;
+  department: number | null;
   department_name: string | null;
-  source: string;
   next_action_at: string | null;
+  comment: string;
 };
 type HcmSummary = {
   employees_total: number;
@@ -686,21 +702,99 @@ function HcmMetricCards({ summary }: { summary: HcmSummary | null }) {
   );
 }
 
-function EmployeesView({ token }: { token: string }) {
+const emptyEmployeeForm = {
+  first_name: "", last_name: "", email: "", employee_number: "", department: "", position: "",
+  grade: "", birth_date: "", hire_date: "", education: "", competencies: "", status: "employed",
+  checklist_score: "0", development_progress: "0", salary_base: "", monthly_bonus: "", quarterly_bonus: "",
+};
+
+function EmployeesView({ token, user }: { token: string; user: User }) {
   const [employees, setEmployees] = useState<EmployeeProfile[]>([]);
   const [summary, setSummary] = useState<HcmSummary | null>(null);
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [positions, setPositions] = useState<Position[]>([]);
   const [query, setQuery] = useState("");
   const [error, setError] = useState("");
+  const [editing, setEditing] = useState<EmployeeProfile | null>(null);
+  const [showForm, setShowForm] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState(emptyEmployeeForm);
 
-  useEffect(() => {
-    Promise.all([
+  async function load() {
+    try {
+      const [people, totals, nextDepartments, nextPositions] = await Promise.all([
       apiRequest<EmployeeProfile[]>("/employees/", token),
       apiRequest<HcmSummary>("/hcm/summary/", token),
-    ]).then(([people, totals]) => {
+        apiRequest<Department[]>("/departments/", token),
+        apiRequest<Position[]>("/positions/", token),
+      ]);
       setEmployees(people);
       setSummary(totals);
-    }).catch((reason) => setError(reason instanceof Error ? reason.message : "Не удалось загрузить сотрудников"));
-  }, [token]);
+      setDepartments(nextDepartments);
+      setPositions(nextPositions);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось загрузить сотрудников");
+    }
+  }
+
+  useEffect(() => { void load(); }, [token]);
+
+  function openEmployee(employee?: EmployeeProfile) {
+    setError("");
+    setEditing(employee || null);
+    setForm(employee ? {
+      first_name: employee.first_name,
+      last_name: employee.last_name,
+      email: employee.email,
+      employee_number: employee.employee_number,
+      department: employee.department ? String(employee.department) : "",
+      position: employee.position ? String(employee.position) : "",
+      grade: employee.grade || "",
+      birth_date: employee.birth_date || "",
+      hire_date: employee.hire_date || "",
+      education: employee.education || "",
+      competencies: employee.competencies || "",
+      status: employee.status,
+      checklist_score: String(employee.checklist_score),
+      development_progress: String(employee.development_progress),
+      salary_base: employee.salary_base || "",
+      monthly_bonus: employee.monthly_bonus || "",
+      quarterly_bonus: employee.quarterly_bonus || "",
+    } : emptyEmployeeForm);
+    setShowForm(true);
+  }
+
+  async function saveEmployee(event: FormEvent) {
+    event.preventDefault();
+    setSaving(true);
+    setError("");
+    try {
+      const payload = {
+        ...form,
+        department: form.department ? Number(form.department) : null,
+        position: form.position ? Number(form.position) : null,
+        birth_date: form.birth_date || null,
+        hire_date: form.hire_date || null,
+        checklist_score: Number(form.checklist_score),
+        development_progress: Number(form.development_progress),
+        salary_base: form.salary_base || null,
+        monthly_bonus: form.monthly_bonus || null,
+        quarterly_bonus: form.quarterly_bonus || null,
+      };
+      await apiRequest<EmployeeProfile>(editing ? `/employees/${editing.id}/` : "/employees/", token, {
+        method: editing ? "PATCH" : "POST",
+        body: JSON.stringify(payload),
+      });
+      setShowForm(false);
+      setEditing(null);
+      setForm(emptyEmployeeForm);
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось сохранить сотрудника");
+    } finally {
+      setSaving(false);
+    }
+  }
 
   const visible = employees.filter((employee) =>
     `${employee.full_name} ${employee.email} ${employee.department_name || ""} ${employee.position_name || ""}`
@@ -713,7 +807,11 @@ function EmployeesView({ token }: { token: string }) {
       <PageHeader
         title="Сотрудники"
         subtitle="Единый реестр команды, должностей и развития"
-        action={<button className="primary-button" type="button"><Plus /> Добавить сотрудника</button>}
+        action={user.role !== "leader" ? (
+          <button className="primary-button" type="button" onClick={() => openEmployee()}>
+            <Plus /> Добавить сотрудника
+          </button>
+        ) : undefined}
       />
       <HcmMetricCards summary={summary} />
       <section className="hcm-toolbar">
@@ -727,7 +825,7 @@ function EmployeesView({ token }: { token: string }) {
       <section className="panel table-panel hcm-table">
         <div className="table-wrap">
           <table>
-            <thead><tr><th>Сотрудник</th><th>Должность</th><th>Отдел</th><th>Стаж</th><th>Развитие</th><th>Статус</th></tr></thead>
+            <thead><tr><th>Сотрудник</th><th>Должность</th><th>Отдел</th><th>Стаж</th><th>Развитие</th><th>Статус</th>{user.role !== "leader" && <th aria-label="Действия" />}</tr></thead>
             <tbody>
               {visible.map((employee) => (
                 <tr key={employee.id}>
@@ -740,6 +838,7 @@ function EmployeesView({ token }: { token: string }) {
                   <td>{employee.tenure_years === null ? "—" : `${employee.tenure_years} г.`}</td>
                   <td><div className="mini-progress"><span style={{ width: `${employee.development_progress}%` }} /></div><small>{employee.development_progress}%</small></td>
                   <td><span className={`status status--${employee.status}`}>{employee.status_label}</span></td>
+                  {user.role !== "leader" && <td><button className="icon-button" type="button" onClick={() => openEmployee(employee)} aria-label={`Редактировать ${employee.full_name}`}><Pencil /></button></td>}
                 </tr>
               ))}
             </tbody>
@@ -747,31 +846,135 @@ function EmployeesView({ token }: { token: string }) {
         </div>
         {!visible.length && <div className="hcm-empty"><ContactRound /><p>Сотрудники не найдены</p></div>}
       </section>
+      {showForm && (
+        <div className="hcm-dialog-backdrop" onMouseDown={(event) => {
+          if (event.target === event.currentTarget) setShowForm(false);
+        }}>
+          <section className="hcm-dialog" role="dialog" aria-modal="true" aria-labelledby="employee-dialog-title">
+            <header>
+              <div><h2 id="employee-dialog-title">{editing ? "Карточка сотрудника" : "Новый сотрудник"}</h2><p>{editing ? "Основные данные и развитие" : "Будет создана учётная запись с приглашением"}</p></div>
+              <button className="icon-button" type="button" onClick={() => setShowForm(false)} aria-label="Закрыть"><X /></button>
+            </header>
+            <form className="hcm-form" onSubmit={saveEmployee}>
+              <div className="hcm-form__grid">
+                <label>Имя<input value={form.first_name} onChange={(e) => setForm({ ...form, first_name: e.target.value })} required /></label>
+                <label>Фамилия<input value={form.last_name} onChange={(e) => setForm({ ...form, last_name: e.target.value })} required /></label>
+                <label className="hcm-form__wide">Корпоративная почта<input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required /></label>
+                <label>Табельный номер<input value={form.employee_number} onChange={(e) => setForm({ ...form, employee_number: e.target.value })} required /></label>
+                <label>Дата выхода<input type="date" value={form.hire_date} onChange={(e) => setForm({ ...form, hire_date: e.target.value })} /></label>
+                <label>Отдел<select value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })}><option value="">Без отдела</option>{departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+                <label>Должность<select value={form.position} onChange={(e) => setForm({ ...form, position: e.target.value })}><option value="">Не указана</option>{positions.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+                <label>Грейд<input value={form.grade} onChange={(e) => setForm({ ...form, grade: e.target.value })} placeholder="Junior, Middle, Senior" /></label>
+                <label>Статус<select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}><option value="employed">Работает</option><option value="probation">Испытательный срок</option><option value="dismissed">Уволен</option></select></label>
+                <label>План развития, %<input type="number" min="0" max="100" value={form.development_progress} onChange={(e) => setForm({ ...form, development_progress: e.target.value })} /></label>
+                <label>Чек-лист, %<input type="number" min="0" max="100" value={form.checklist_score} onChange={(e) => setForm({ ...form, checklist_score: e.target.value })} /></label>
+                <label className="hcm-form__wide">Компетенции<textarea value={form.competencies} onChange={(e) => setForm({ ...form, competencies: e.target.value })} placeholder="Ключевые навыки сотрудника" /></label>
+              </div>
+              {error && <p className="form-error">{error}</p>}
+              <footer><button className="secondary-button" type="button" onClick={() => setShowForm(false)}>Отмена</button><button className="primary-button" type="submit" disabled={saving}>{saving ? "Сохраняем…" : "Сохранить"}</button></footer>
+            </form>
+          </section>
+        </div>
+      )}
     </>
   );
 }
 
+const emptyCandidateForm = {
+  full_name: "", email: "", phone: "", telegram: "", desired_position: "", desired_salary: "",
+  skills: "", source: "", stage: "", department: "", comment: "",
+};
+
 function RecruitmentView({ token }: { token: string }) {
   const [stages, setStages] = useState<CandidateStage[]>([]);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
   const [error, setError] = useState("");
+  const [editing, setEditing] = useState<Candidate | null>(null);
+  const [showForm, setShowForm] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState(emptyCandidateForm);
 
-  useEffect(() => {
-    Promise.all([
-      apiRequest<CandidateStage[]>("/candidate-stages/", token),
-      apiRequest<Candidate[]>("/candidates/", token),
-    ]).then(([nextStages, nextCandidates]) => {
+  async function load() {
+    try {
+      const [nextStages, nextCandidates, nextDepartments] = await Promise.all([
+        apiRequest<CandidateStage[]>("/candidate-stages/", token),
+        apiRequest<Candidate[]>("/candidates/", token),
+        apiRequest<Department[]>("/departments/", token),
+      ]);
       setStages(nextStages);
       setCandidates(nextCandidates);
-    }).catch((reason) => setError(reason instanceof Error ? reason.message : "Не удалось загрузить подбор"));
-  }, [token]);
+      setDepartments(nextDepartments);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось загрузить подбор");
+    }
+  }
+
+  useEffect(() => { void load(); }, [token]);
+
+  function openCandidate(candidate?: Candidate) {
+    setError("");
+    setEditing(candidate || null);
+    setForm(candidate ? {
+      full_name: candidate.full_name,
+      email: candidate.email || "",
+      phone: candidate.phone || "",
+      telegram: candidate.telegram || "",
+      desired_position: candidate.desired_position,
+      desired_salary: candidate.desired_salary || "",
+      skills: candidate.skills || "",
+      source: candidate.source || "",
+      stage: String(candidate.stage),
+      department: candidate.department ? String(candidate.department) : "",
+      comment: candidate.comment || "",
+    } : { ...emptyCandidateForm, stage: stages[0] ? String(stages[0].id) : "" });
+    setShowForm(true);
+  }
+
+  async function saveCandidate(event: FormEvent) {
+    event.preventDefault();
+    setSaving(true);
+    setError("");
+    try {
+      await apiRequest<Candidate>(editing ? `/candidates/${editing.id}/` : "/candidates/", token, {
+        method: editing ? "PATCH" : "POST",
+        body: JSON.stringify({
+          ...form,
+          stage: Number(form.stage),
+          department: form.department ? Number(form.department) : null,
+          desired_salary: form.desired_salary || null,
+        }),
+      });
+      setShowForm(false);
+      setEditing(null);
+      setForm(emptyCandidateForm);
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось сохранить кандидата");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function changeCandidateStage(candidate: Candidate, stage: string) {
+    setError("");
+    try {
+      await apiRequest<Candidate>(`/candidates/${candidate.id}/`, token, {
+        method: "PATCH",
+        body: JSON.stringify({ stage: Number(stage) }),
+      });
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось сменить этап");
+    }
+  }
 
   return (
     <>
       <PageHeader
         title="Подбор"
         subtitle="Кандидаты и этапы найма в одном рабочем пространстве"
-        action={<button className="primary-button" type="button"><Plus /> Добавить кандидата</button>}
+        action={<button className="primary-button" type="button" onClick={() => openCandidate()}><Plus /> Добавить кандидата</button>}
       />
       {error && <p className="form-error">{error}</p>}
       <section className="recruitment-board">
@@ -781,8 +984,9 @@ function RecruitmentView({ token }: { token: string }) {
             <div>
               {candidates.filter((item) => item.stage === stage.id).map((candidate) => (
                 <article className="candidate-card" key={candidate.id}>
-                  <strong>{candidate.full_name}</strong>
+                  <header><strong>{candidate.full_name}</strong><button className="candidate-card__edit" type="button" onClick={() => openCandidate(candidate)} aria-label={`Редактировать ${candidate.full_name}`}><Pencil /></button></header>
                   <p>{candidate.desired_position}</p>
+                  <label>Этап<select value={candidate.stage} onChange={(event) => void changeCandidateStage(candidate, event.target.value)}>{stages.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
                   <footer><span>{candidate.department_name || "Без отдела"}</span><small>{candidate.source || "Источник не указан"}</small></footer>
                 </article>
               ))}
@@ -791,6 +995,35 @@ function RecruitmentView({ token }: { token: string }) {
           </div>
         ))}
       </section>
+      {showForm && (
+        <div className="hcm-dialog-backdrop" onMouseDown={(event) => {
+          if (event.target === event.currentTarget) setShowForm(false);
+        }}>
+          <section className="hcm-dialog" role="dialog" aria-modal="true" aria-labelledby="candidate-dialog-title">
+            <header>
+              <div><h2 id="candidate-dialog-title">{editing ? "Карточка кандидата" : "Новый кандидат"}</h2><p>Контакты, вакансия и текущий этап</p></div>
+              <button className="icon-button" type="button" onClick={() => setShowForm(false)} aria-label="Закрыть"><X /></button>
+            </header>
+            <form className="hcm-form" onSubmit={saveCandidate}>
+              <div className="hcm-form__grid">
+                <label className="hcm-form__wide">ФИО<input value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} required /></label>
+                <label>Email<input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></label>
+                <label>Телефон<input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></label>
+                <label>Telegram<input value={form.telegram} onChange={(e) => setForm({ ...form, telegram: e.target.value })} placeholder="@username" /></label>
+                <label>Источник<input value={form.source} onChange={(e) => setForm({ ...form, source: e.target.value })} placeholder="Рекомендация, hh.ru" /></label>
+                <label className="hcm-form__wide">Желаемая позиция<input value={form.desired_position} onChange={(e) => setForm({ ...form, desired_position: e.target.value })} required /></label>
+                <label>Этап<select value={form.stage} onChange={(e) => setForm({ ...form, stage: e.target.value })} required><option value="" disabled>Выберите этап</option>{stages.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+                <label>Отдел<select value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })}><option value="">Без отдела</option>{departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+                <label>Ожидания по зарплате<input type="number" min="0" value={form.desired_salary} onChange={(e) => setForm({ ...form, desired_salary: e.target.value })} /></label>
+                <label className="hcm-form__wide">Навыки<textarea value={form.skills} onChange={(e) => setForm({ ...form, skills: e.target.value })} /></label>
+                <label className="hcm-form__wide">Комментарий<textarea value={form.comment} onChange={(e) => setForm({ ...form, comment: e.target.value })} /></label>
+              </div>
+              {error && <p className="form-error">{error}</p>}
+              <footer><button className="secondary-button" type="button" onClick={() => setShowForm(false)}>Отмена</button><button className="primary-button" type="submit" disabled={saving}>{saving ? "Сохраняем…" : "Сохранить"}</button></footer>
+            </form>
+          </section>
+        </div>
+      )}
     </>
   );
 }
@@ -2404,7 +2637,7 @@ function App() {
         ) : active === "users" ? (
           <UsersView token={token} />
         ) : active === "employees" ? (
-          <EmployeesView token={token} />
+          <EmployeesView token={token} user={user} />
         ) : active === "recruitment" ? (
           <RecruitmentView token={token} />
         ) : active === "hrAnalytics" ? (
