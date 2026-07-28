@@ -1,4 +1,5 @@
 from datetime import date, timedelta
+from html import escape
 import mimetypes
 
 from django.http import FileResponse
@@ -14,7 +15,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.identity.models import Department, User
-from apps.learning.models import LearningPath
+from apps.learning.models import Course, LearningPath, Lesson
 from .models import (
     AbsenceRequest,
     AuditEvent,
@@ -35,6 +36,7 @@ from .models import (
     PerformanceCycle,
     PerformanceReview,
     PerformanceScore,
+    ProductUpdate,
 )
 from .permissions import IsHcmUser, IsRecruiter
 from .serializers import (
@@ -59,8 +61,106 @@ from .serializers import (
     PerformanceCycleSerializer,
     PerformanceReviewSerializer,
     PerformanceSubmissionSerializer,
+    ProductUpdateSerializer,
 )
-from .services import analyze_daily_transcript, assign_onboarding
+from .services import analyze_daily_transcript, analyze_product_update, assign_onboarding
+
+
+def is_product_update_admin(user):
+    return user.is_superuser or user.role == User.Role.ADMIN
+
+
+class ProductUpdateListCreateView(generics.ListCreateAPIView):
+    serializer_class = ProductUpdateSerializer
+    permission_classes = [IsAuthenticated]
+    queryset = ProductUpdate.objects.select_related("created_by")
+
+    def get_queryset(self):
+        if not is_product_update_admin(self.request.user):
+            raise PermissionDenied("Управление обновлениями доступно только администраторам")
+        return super().get_queryset()
+
+    def perform_create(self, serializer):
+        if not is_product_update_admin(self.request.user):
+            raise PermissionDenied("Управление обновлениями доступно только администраторам")
+        analysis = analyze_product_update(
+            serializer.validated_data["title"],
+            serializer.validated_data["description"],
+        )
+        update = serializer.save(created_by=self.request.user, analysis=analysis)
+        AuditEvent.objects.create(
+            actor=self.request.user, entity_type="product_update", entity_id=str(update.pk), action="analyzed"
+        )
+
+
+class ProductUpdateDetailView(generics.RetrieveAPIView):
+    serializer_class = ProductUpdateSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        if not is_product_update_admin(self.request.user):
+            raise PermissionDenied("Управление обновлениями доступно только администраторам")
+        return ProductUpdate.objects.select_related("created_by")
+
+
+class ProductUpdateApplyView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, pk):
+        if not is_product_update_admin(request.user):
+            raise PermissionDenied("Применять обновления могут только администраторы")
+        update = get_object_or_404(ProductUpdate, pk=pk)
+        if update.status == ProductUpdate.Status.APPLIED:
+            raise ValidationError("Обновление уже применено")
+        selections = request.data.get("targets", [])
+        if not isinstance(selections, list) or not selections:
+            raise ValidationError({"targets": "Выберите хотя бы один урок"})
+        allowed_courses = {
+            item["course_id"] for item in update.analysis.get("targets", [])
+            if item.get("course_id")
+        }
+        applied = []
+        changed_courses = set()
+        marker = f'data-product-update-id="{update.pk}"'
+        safe_title = escape(update.title)
+        safe_description = "<br>".join(escape(update.description).splitlines())
+        block = (
+            f'<section {marker} class="product-update-note">'
+            f"<h3>Обновление: {safe_title}</h3><p>{safe_description}</p>"
+            f"<p><small>Действует с {update.effective_date:%d.%m.%Y}</small></p></section>"
+        )
+        for selection in selections:
+            course_id = selection.get("course_id")
+            lesson_id = selection.get("lesson_id")
+            if course_id not in allowed_courses:
+                raise ValidationError("Выбранный курс отсутствует в результатах анализа")
+            lesson = get_object_or_404(Lesson.objects.select_related("course"), pk=lesson_id, course_id=course_id)
+            if marker not in lesson.content:
+                lesson.content = f"{lesson.content}\n{block}".strip()
+                lesson.save(update_fields=["content", "updated_at"])
+            changed_courses.add(course_id)
+            applied.append({
+                "course_id": course_id,
+                "course_title": lesson.course.title,
+                "lesson_id": lesson.pk,
+                "lesson_title": lesson.title,
+            })
+        for course in Course.objects.filter(pk__in=changed_courses):
+            course.version += 1
+            course.save(update_fields=["version", "updated_at"])
+        update.status = ProductUpdate.Status.APPLIED
+        update.applied_targets = applied
+        update.applied_at = timezone.now()
+        update.save(update_fields=["status", "applied_targets", "applied_at", "updated_at"])
+        AuditEvent.objects.create(
+            actor=request.user,
+            entity_type="product_update",
+            entity_id=str(update.pk),
+            action="applied",
+            changes={"targets": applied},
+        )
+        return Response(ProductUpdateSerializer(update, context={"request": request}).data)
 
 
 class DailyTranscriptListCreateView(generics.ListCreateAPIView):

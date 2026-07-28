@@ -25,6 +25,7 @@ from .models import (
     OnboardingTemplate,
     PerformanceCycle,
     PerformanceReview,
+    ProductUpdate,
 )
 
 
@@ -783,3 +784,71 @@ class PeopleApiTests(TestCase):
             format="multipart",
         )
         self.assertEqual(response.status_code, 403)
+
+    def test_admin_finds_and_applies_product_update_to_course(self):
+        course = Course.objects.create(
+            title="Настройка атрибуции",
+            description="Рекламные каналы и конверсии",
+            author=self.admin,
+            status=Course.Status.PUBLISHED,
+            version=3,
+        )
+        lesson = Lesson.objects.create(
+            course=course,
+            title="Модель атрибуции",
+            content="<p>Настройте атрибуцию рекламного канала.</p>",
+        )
+        self.client.force_authenticate(self.admin)
+        created = self.client.post(
+            "/api/v1/product-updates/",
+            {
+                "title": "Новая модель атрибуции",
+                "description": "Изменились настройки атрибуции рекламных каналов.",
+                "effective_date": "2026-08-01",
+            },
+            format="json",
+        )
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(created.json()["affected_courses"], 1)
+        target = created.json()["analysis"]["targets"][0]
+        self.assertEqual(target["suggested_lesson_id"], lesson.pk)
+        applied = self.client.post(
+            f"/api/v1/product-updates/{created.json()['id']}/apply/",
+            {"targets": [{"course_id": course.pk, "lesson_id": lesson.pk}]},
+            format="json",
+        )
+        self.assertEqual(applied.status_code, 200)
+        self.assertEqual(applied.json()["status"], ProductUpdate.Status.APPLIED)
+        course.refresh_from_db()
+        lesson.refresh_from_db()
+        self.assertEqual(course.version, 4)
+        self.assertIn(f'data-product-update-id="{created.json()["id"]}"', lesson.content)
+
+    def test_product_update_cannot_be_applied_twice(self):
+        course = Course.objects.create(title="Аналитика", author=self.admin)
+        lesson = Lesson.objects.create(course=course, title="Аналитика", content="Данные аналитики")
+        update = ProductUpdate.objects.create(
+            title="Аналитика",
+            description="Обновление аналитики",
+            effective_date=date.today(),
+            created_by=self.admin,
+            analysis={"targets": [{"course_id": course.pk}]},
+        )
+        self.client.force_authenticate(self.admin)
+        payload = {"targets": [{"course_id": course.pk, "lesson_id": lesson.pk}]}
+        self.assertEqual(self.client.post(f"/api/v1/product-updates/{update.pk}/apply/", payload, format="json").status_code, 200)
+        self.assertEqual(self.client.post(f"/api/v1/product-updates/{update.pk}/apply/", payload, format="json").status_code, 400)
+        course.refresh_from_db()
+        self.assertEqual(course.version, 2)
+
+    def test_non_admin_cannot_manage_product_updates(self):
+        self.client.force_authenticate(self.hr)
+        self.assertEqual(self.client.get("/api/v1/product-updates/").status_code, 403)
+        self.assertEqual(
+            self.client.post(
+                "/api/v1/product-updates/",
+                {"title": "Изменение", "description": "Описание", "effective_date": "2026-08-01"},
+                format="json",
+            ).status_code,
+            403,
+        )

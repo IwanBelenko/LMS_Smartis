@@ -358,6 +358,36 @@ class DailyTranscript(models.Model):
         return self.title
 
 
+class ProductUpdate(models.Model):
+    class Status(models.TextChoices):
+        ANALYZED = "analyzed", "Готово к проверке"
+        APPLIED = "applied", "Применено"
+
+    title = models.CharField("Название обновления", max_length=220)
+    description = models.TextField("Описание изменения")
+    effective_date = models.DateField("Дата вступления в силу")
+    status = models.CharField("Статус", max_length=20, choices=Status.choices, default=Status.ANALYZED)
+    analysis = models.JSONField("Затронутые материалы", default=dict, blank=True)
+    applied_targets = models.JSONField("Обновлённые материалы", default=list, blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="product_updates",
+        null=True,
+        on_delete=models.SET_NULL,
+    )
+    applied_at = models.DateTimeField("Применено", null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-effective_date", "-created_at"]
+        verbose_name = "Обновление продукта"
+        verbose_name_plural = "Обновления продукта"
+
+    def __str__(self):
+        return self.title
+
+
 class OnboardingTemplate(models.Model):
     name = models.CharField("Название", max_length=180)
     department = models.ForeignKey(

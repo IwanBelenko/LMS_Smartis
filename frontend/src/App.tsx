@@ -34,6 +34,7 @@ import {
   Plus,
   Route,
   Rows3,
+  RefreshCw,
   Save,
   Search,
   Settings,
@@ -67,7 +68,7 @@ function Brand({ login = false }: { login?: boolean }) {
 type ViewId =
   | "home" | "tasks" | "trajectory" | "ranking" | "analytics" | "absences" | "documents" | "performance"
   | "organization" | "employees" | "recruitment" | "hrAnalytics"
-  | "users" | "courses" | "settings";
+  | "users" | "courses" | "updates" | "settings";
 type User = {
   id: number;
   email: string;
@@ -289,6 +290,20 @@ type DailyTranscript = {
     gaps: string[];
     coverage_percent: number;
   };
+};
+type ProductUpdateTarget = {
+  course_id: number; course_title: string; course_version: number; course_status: string;
+  confidence: number; matched_terms: string[]; suggested_lesson_id: number | null;
+  suggested_lesson_title: string;
+  lesson_candidates: Array<{ lesson_id: number; lesson_title: string; matched_terms: string[] }>;
+};
+type ProductUpdate = {
+  id: number; title: string; description: string; effective_date: string;
+  status: "analyzed" | "applied"; status_label: string;
+  analysis: { keywords: string[]; targets: ProductUpdateTarget[] };
+  affected_courses: number;
+  applied_targets: Array<{ course_id: number; course_title: string; lesson_id: number; lesson_title: string }>;
+  created_by_name: string; applied_at: string | null; created_at: string;
 };
 type OnboardingPlan = {
   id: number;
@@ -543,6 +558,7 @@ const hcmNav = [
 const adminNav = [
   { id: "users" as const, label: "Пользователи", icon: Users },
   { id: "courses" as const, label: "Курсы", icon: BookOpen },
+  { id: "updates" as const, label: "Обновления", icon: RefreshCw },
   { id: "settings" as const, label: "Настройки", icon: Settings },
 ];
 
@@ -3614,6 +3630,125 @@ function CoursesView({ token, user }: { token: string; user: User }) {
   );
 }
 
+function ProductUpdatesView({ token }: { token: string }) {
+  const [items, setItems] = useState<ProductUpdate[]>([]);
+  const [selected, setSelected] = useState<ProductUpdate | null>(null);
+  const [selections, setSelections] = useState<Record<number, number>>({});
+  const [showCreate, setShowCreate] = useState(false);
+  const [form, setForm] = useState({
+    title: "", description: "", effective_date: localDateKey(new Date()),
+  });
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  function selectUpdate(update: ProductUpdate | null) {
+    setSelected(update);
+    setSelections(Object.fromEntries(
+      (update?.analysis.targets || [])
+        .filter((target) => target.suggested_lesson_id)
+        .map((target) => [target.course_id, target.suggested_lesson_id as number]),
+    ));
+  }
+
+  async function load(preferredId?: number) {
+    try {
+      const updates = await apiRequest<ProductUpdate[]>("/product-updates/", token);
+      setItems(updates);
+      selectUpdate(updates.find((item) => item.id === preferredId) || updates[0] || null);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось загрузить обновления");
+    }
+  }
+
+  useEffect(() => { void load(); }, [token]);
+
+  async function createUpdate(event: FormEvent) {
+    event.preventDefault();
+    setSaving(true);
+    setError("");
+    try {
+      const created = await apiRequest<ProductUpdate>("/product-updates/", token, {
+        method: "POST",
+        body: JSON.stringify(form),
+      });
+      setShowCreate(false);
+      setForm({ title: "", description: "", effective_date: localDateKey(new Date()) });
+      await load(created.id);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось проанализировать обновление");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function applyUpdate() {
+    if (!selected) return;
+    const targets = Object.entries(selections)
+      .filter(([, lessonId]) => lessonId)
+      .map(([courseId, lessonId]) => ({ course_id: Number(courseId), lesson_id: lessonId }));
+    if (!targets.length) {
+      setError("Выберите хотя бы один урок");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      await apiRequest(`/product-updates/${selected.id}/apply/`, token, {
+        method: "POST",
+        body: JSON.stringify({ targets }),
+      });
+      await load(selected.id);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось применить обновление");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const awaiting = items.filter((item) => item.status === "analyzed").length;
+  const affected = items.reduce((sum, item) => sum + item.affected_courses, 0);
+
+  return (
+    <>
+      <PageHeader title="Обновления продукта" subtitle="Единая точка изменений для всех курсов" action={<button className="primary-button" type="button" onClick={() => setShowCreate(true)}><Plus />Новое обновление</button>} />
+      {error && <div className="form-error">{error}</div>}
+      <section className="update-metrics">
+        <article><span>Всего обновлений</span><strong>{items.length}</strong></article>
+        <article className={awaiting ? "update-metric--attention" : ""}><span>Ждут проверки</span><strong>{awaiting}</strong></article>
+        <article><span>Затронуто курсов</span><strong>{affected}</strong></article>
+        <article><span>Применено</span><strong>{items.filter((item) => item.status === "applied").length}</strong></article>
+      </section>
+      <div className="update-layout">
+        <aside className="panel update-history">
+          <header><span className="eyebrow">Журнал</span><h2>Изменения продукта</h2></header>
+          <div>{items.map((item) => <button className={selected?.id === item.id ? "update-history__item update-history__item--active" : "update-history__item"} type="button" onClick={() => selectUpdate(item)} key={item.id}><strong>{item.title}</strong><span>с {displayDate(item.effective_date)}</span><small className={`update-status update-status--${item.status}`}>{item.status_label}</small></button>)}{!items.length && <div className="update-history__empty">Обновлений пока нет.</div>}</div>
+        </aside>
+        <section className="update-detail">
+          {selected ? <>
+            <section className="panel update-summary">
+              <div><span className="eyebrow">Действует с {displayDate(selected.effective_date)}</span><h2>{selected.title}</h2><p>{selected.description}</p></div>
+              <span className={`update-status update-status--${selected.status}`}>{selected.status_label}</span>
+              <div className="update-keywords">{selected.analysis.keywords.map((term) => <span key={term}>{term}</span>)}</div>
+            </section>
+            <section className="panel update-targets">
+              <header><div><span className="eyebrow">Результат анализа</span><h2>Затронутые материалы</h2></div>{selected.status === "analyzed" && <button className="primary-button" type="button" onClick={() => void applyUpdate()} disabled={saving}>{saving ? "Применяем…" : "Применить выбранное"}</button>}</header>
+              <div>
+                {selected.analysis.targets.map((target) => {
+                  const checked = Boolean(selections[target.course_id]);
+                  const candidates = target.lesson_candidates.length ? target.lesson_candidates : target.suggested_lesson_id ? [{ lesson_id: target.suggested_lesson_id, lesson_title: target.suggested_lesson_title, matched_terms: target.matched_terms }] : [];
+                  return <article key={target.course_id}><label className="update-target__check"><input type="checkbox" disabled={selected.status === "applied" || !candidates.length} checked={checked} onChange={(event) => setSelections({ ...selections, [target.course_id]: event.target.checked ? (target.suggested_lesson_id || candidates[0]?.lesson_id || 0) : 0 })} /><span /></label><div className="update-target__course"><strong>{target.course_title}</strong><span>Версия {target.course_version} · совпадения: {target.matched_terms.join(", ")}</span></div><div className="update-confidence"><span><i style={{ width: `${target.confidence}%` }} /></span><strong>{target.confidence}%</strong></div>{selected.status === "analyzed" ? <label>Разместить в уроке<select value={selections[target.course_id] || ""} disabled={!checked || !candidates.length} onChange={(event) => setSelections({ ...selections, [target.course_id]: Number(event.target.value) })}>{!candidates.length && <option value="">Нет уроков</option>}{candidates.map((lesson) => <option value={lesson.lesson_id} key={lesson.lesson_id}>{lesson.lesson_title}</option>)}</select></label> : <span className="update-target__applied">{selected.applied_targets.some((item) => item.course_id === target.course_id) ? "Обновлено" : "Не выбрано"}</span>}</article>;
+                })}
+                {!selected.analysis.targets.length && <div className="update-empty">Совпадений не найдено. Уточните описание обновления или добавьте нужный курс вручную в следующей версии.</div>}
+              </div>
+            </section>
+          </> : <section className="panel update-welcome"><RefreshCw /><h2>Добавьте изменение продукта</h2><p>Система определит, в какие курсы и уроки следует добавить новую информацию.</p></section>}
+        </section>
+      </div>
+      {showCreate && <div className="hcm-dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setShowCreate(false); }}><section className="hcm-dialog update-dialog" role="dialog" aria-modal="true"><header><div><span className="eyebrow">Единая точка обновления</span><h2>Новое изменение продукта</h2></div><button className="icon-button" type="button" aria-label="Закрыть" onClick={() => setShowCreate(false)}><X /></button></header><form className="hcm-form" onSubmit={createUpdate}><div className="hcm-form__grid"><label className="hcm-form__wide">Название<input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} placeholder="Коротко опишите изменение" required /></label><label>Действует с<input type="date" value={form.effective_date} onChange={(event) => setForm({ ...form, effective_date: event.target.value })} required /></label><span /><label className="hcm-form__wide">Что изменилось<textarea className="update-description-input" value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} placeholder="Подробности, новые правила и значения…" required /></label></div><footer><button className="secondary-button" type="button" onClick={() => setShowCreate(false)}>Отмена</button><button className="primary-button" type="submit" disabled={saving}>{saving ? "Ищем материалы…" : "Найти затронутые курсы"}</button></footer></form></section></div>}
+    </>
+  );
+}
+
 function DailyAnalyticsView({ token, user }: { token: string; user: User }) {
   const canAnalyze = ["admin", "hr", "author"].includes(user.role);
   const canChooseDepartment = user.role === "admin" || user.role === "hr";
@@ -4466,7 +4601,7 @@ function Placeholder({ active }: { active: ViewId }) {
     absences: "Отпуска и отсутствия",
     documents: "Документы",
     performance: "Оценка и развитие",
-    courses: "Курсы", settings: "Настройки", employees: "Сотрудники",
+    courses: "Курсы", updates: "Обновления продукта", settings: "Настройки", employees: "Сотрудники",
     organization: "Оргструктура", recruitment: "Подбор", hrAnalytics: "HR-аналитика",
   };
   return (
@@ -4572,6 +4707,8 @@ function App() {
           <HrAnalyticsView token={token} />
         ) : active === "courses" ? (
           <CoursesView token={token} user={user} />
+        ) : active === "updates" ? (
+          <ProductUpdatesView token={token} />
         ) : (
           <Placeholder active={active} />
         )}

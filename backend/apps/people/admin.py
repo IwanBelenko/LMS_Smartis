@@ -20,10 +20,12 @@ from .models import (
     PerformanceCycle,
     PerformanceReview,
     PerformanceScore,
+    ProductUpdate,
 )
 
 admin.site.register([
     Position, StaffPosition, EmployeeProfile, EmployeeGoal, EmploymentEvent, EmployeeLearning,
-    EmployeeDocument, AbsenceRequest, PerformanceCycle, Competency, PerformanceReview, PerformanceScore, DailyTranscript,
+    EmployeeDocument, AbsenceRequest, PerformanceCycle, Competency, PerformanceReview, PerformanceScore,
+    DailyTranscript, ProductUpdate,
     OnboardingTemplate, OnboardingPlan, CandidateStage, Vacancy, Candidate, AuditEvent,
 ])

@@ -28,6 +28,7 @@ from .models import (
     PerformanceCycle,
     PerformanceReview,
     PerformanceScore,
+    ProductUpdate,
 )
 
 
@@ -582,6 +583,27 @@ class DailyTranscriptSerializer(serializers.ModelSerializer):
     def get_text_preview(self, obj):
         compact = " ".join(obj.raw_text.split())
         return compact[:220] + ("…" if len(compact) > 220 else "")
+
+
+class ProductUpdateSerializer(serializers.ModelSerializer):
+    status_label = serializers.CharField(source="get_status_display", read_only=True)
+    created_by_name = serializers.CharField(source="created_by.get_full_name", read_only=True)
+    affected_courses = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ProductUpdate
+        fields = [
+            "id", "title", "description", "effective_date", "status", "status_label",
+            "analysis", "affected_courses", "applied_targets", "created_by",
+            "created_by_name", "applied_at", "created_at", "updated_at",
+        ]
+        read_only_fields = [
+            "id", "status", "analysis", "applied_targets", "created_by",
+            "applied_at", "created_at", "updated_at",
+        ]
+
+    def get_affected_courses(self, obj):
+        return len(obj.analysis.get("targets", [])) if isinstance(obj.analysis, dict) else 0
 
 
 class OnboardingTemplateSerializer(serializers.ModelSerializer):

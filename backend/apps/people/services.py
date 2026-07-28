@@ -80,6 +80,52 @@ def analyze_daily_transcript(text):
     }
 
 
+def analyze_product_update(title, description):
+    update_terms = list(dict.fromkeys(extract_terms(f"{title} {description}")))[:16]
+    targets = []
+    courses = Course.objects.exclude(status=Course.Status.ARCHIVED).prefetch_related("lessons")
+    for course in courses:
+        course_terms = {normalize_term(term) for term in extract_terms(f"{course.title} {course.description}")}
+        course_matches = [term for term in update_terms if normalize_term(term) in course_terms]
+        lesson_candidates = []
+        for lesson in course.lessons.all():
+            lesson_terms = {normalize_term(term) for term in extract_terms(f"{lesson.title} {lesson.content}")}
+            matched = [term for term in update_terms if normalize_term(term) in lesson_terms]
+            if matched:
+                lesson_candidates.append({
+                    "lesson_id": lesson.pk,
+                    "lesson_title": lesson.title,
+                    "matched_terms": matched,
+                })
+        if not course_matches and not lesson_candidates:
+            continue
+        lesson_candidates.sort(key=lambda item: (-len(item["matched_terms"]), item["lesson_title"]))
+        suggested = lesson_candidates[0] if lesson_candidates else (
+            {
+                "lesson_id": course.lessons.first().pk,
+                "lesson_title": course.lessons.first().title,
+                "matched_terms": course_matches,
+            }
+            if course.lessons.exists() else None
+        )
+        combined = list(dict.fromkeys(course_matches + [
+            term for candidate in lesson_candidates for term in candidate["matched_terms"]
+        ]))
+        targets.append({
+            "course_id": course.pk,
+            "course_title": course.title,
+            "course_version": course.version,
+            "course_status": course.status,
+            "confidence": round(len(combined) / max(len(update_terms), 1) * 100),
+            "matched_terms": combined[:10],
+            "suggested_lesson_id": suggested["lesson_id"] if suggested else None,
+            "suggested_lesson_title": suggested["lesson_title"] if suggested else "",
+            "lesson_candidates": lesson_candidates[:6],
+        })
+    targets.sort(key=lambda item: (-item["confidence"], item["course_title"]))
+    return {"keywords": update_terms, "targets": targets}
+
+
 def normalize_checklist(items):
     return [
         {

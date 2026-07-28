@@ -45,9 +45,15 @@ from .views import (
     PerformanceReviewDetailView,
     PerformanceReviewListView,
     PerformanceSelfSubmitView,
+    ProductUpdateApplyView,
+    ProductUpdateDetailView,
+    ProductUpdateListCreateView,
 )
 
 urlpatterns = [
+    path("product-updates/", ProductUpdateListCreateView.as_view(), name="product-updates"),
+    path("product-updates/<int:pk>/", ProductUpdateDetailView.as_view(), name="product-update-detail"),
+    path("product-updates/<int:pk>/apply/", ProductUpdateApplyView.as_view(), name="product-update-apply"),
     path("daily-transcripts/", DailyTranscriptListCreateView.as_view(), name="daily-transcripts"),
     path("daily-transcripts/<int:pk>/", DailyTranscriptDetailView.as_view(), name="daily-transcript-detail"),
     path("inbox/", InboxView.as_view(), name="inbox"),
