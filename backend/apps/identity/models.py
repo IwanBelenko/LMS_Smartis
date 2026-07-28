@@ -44,6 +44,7 @@ class UserManager(BaseUserManager):
 class User(AbstractUser):
     class Role(models.TextChoices):
         ADMIN = "admin", "Администратор"
+        HR = "hr", "HR-менеджер"
         AUTHOR = "author", "Автор"
         LEADER = "leader", "Руководитель"
         EMPLOYEE = "employee", "Сотрудник"

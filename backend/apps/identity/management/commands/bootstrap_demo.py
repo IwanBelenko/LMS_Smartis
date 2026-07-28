@@ -1,6 +1,9 @@
 import os
+from datetime import date, timedelta
+
 from django.core.management.base import BaseCommand
 from apps.identity.models import Department, User
+from apps.people.models import Candidate, CandidateStage, EmployeeProfile, Position
 
 
 class Command(BaseCommand):
@@ -31,3 +34,74 @@ class Command(BaseCommand):
             self.stdout.write(self.style.SUCCESS(f"Создан администратор {email}"))
         else:
             self.stdout.write(f"Администратор {email} уже существует")
+
+        product_department, _ = Department.objects.get_or_create(
+            code="product",
+            defaults={"name": "Продукт"},
+        )
+        support_department, _ = Department.objects.get_or_create(
+            code="support",
+            defaults={"name": "Поддержка"},
+        )
+        analyst_position, _ = Position.objects.get_or_create(name="Аналитик")
+        manager_position, _ = Position.objects.get_or_create(name="Менеджер проектов")
+        support_position, _ = Position.objects.get_or_create(name="Специалист поддержки")
+
+        demo_people = [
+            ("anna@smartis.local", "Анна", "Соколова", department, analyst_position, "Middle", 82),
+            ("maxim@smartis.local", "Максим", "Волков", product_department, manager_position, "Senior", 64),
+            ("olga@smartis.local", "Ольга", "Миронова", support_department, support_position, "Junior", 38),
+        ]
+        for index, (person_email, first_name, last_name, person_department, position, grade, progress) in enumerate(
+            demo_people, start=1
+        ):
+            person, _ = User.objects.get_or_create(
+                email=person_email,
+                defaults={
+                    "first_name": first_name,
+                    "last_name": last_name,
+                    "department": person_department,
+                    "role": User.Role.EMPLOYEE,
+                    "status": User.Status.ACTIVE,
+                },
+            )
+            EmployeeProfile.objects.get_or_create(
+                user=person,
+                defaults={
+                    "employee_number": f"SM-{100 + index}",
+                    "position": position,
+                    "grade": grade,
+                    "hire_date": date.today() - timedelta(days=365 * (index + 1)),
+                    "status": EmployeeProfile.Status.PROBATION if index == 3 else EmployeeProfile.Status.EMPLOYED,
+                    "checklist_score": min(progress + 8, 100),
+                    "development_progress": progress,
+                    "salary_base": 120000 + index * 20000,
+                },
+            )
+
+        stages = []
+        for stage_position, stage_name in enumerate(
+            ["Новые", "Скрининг", "Интервью", "Оффер"],
+            start=1,
+        ):
+            stage, _ = CandidateStage.objects.get_or_create(
+                name=stage_name,
+                defaults={"position": stage_position},
+            )
+            stages.append(stage)
+        for candidate_name, desired_position, stage in [
+            ("Мария Котова", "Продуктовый аналитик", stages[0]),
+            ("Дмитрий Орлов", "Менеджер проектов", stages[1]),
+            ("Елена Фомина", "Специалист поддержки", stages[2]),
+        ]:
+            Candidate.objects.get_or_create(
+                full_name=candidate_name,
+                desired_position=desired_position,
+                defaults={
+                    "stage": stage,
+                    "department": department,
+                    "recruiter": user,
+                    "source": "Рекомендация",
+                },
+            )
+        self.stdout.write(self.style.SUCCESS("Демонстрационные данные HCM готовы"))

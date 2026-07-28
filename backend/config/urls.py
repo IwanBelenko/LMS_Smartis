@@ -10,6 +10,7 @@ urlpatterns = [
     path("scorm-content/<int:course_id>/<str:token>/<path:asset_path>", scorm_content),
     path("api/v1/", include("apps.core.urls")),
     path("api/v1/", include("apps.identity.urls")),
+    path("api/v1/", include("apps.people.urls")),
     path("api/v1/", include("apps.learning.urls")),
 ]
 

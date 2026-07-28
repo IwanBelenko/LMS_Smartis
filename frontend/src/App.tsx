@@ -3,10 +3,13 @@ import {
   ArrowUp,
   BarChart3,
   BookOpen,
+  BriefcaseBusiness,
+  ChartNoAxesCombined,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
   CircleUserRound,
+  ContactRound,
   Clock3,
   Copy,
   Download,
@@ -29,6 +32,7 @@ import {
   Route,
   Rows3,
   Save,
+  Search,
   Settings,
   Settings2,
   Trash2,
@@ -52,12 +56,15 @@ function Brand({ login = false }: { login?: boolean }) {
     <div className={login ? "brand brand--login" : "brand"}>
       <img className="brand__wordmark brand__wordmark--light" src={smartisWordmarkLight} alt="Smartis" />
       <img className="brand__wordmark brand__wordmark--dark" src={smartisWordmarkDark} alt="" aria-hidden="true" />
-      {login ? <span className="brand__product-label">LMS</span> : <span className="visually-hidden">Smartis LMS</span>}
+      {login ? <span className="brand__product-label">HCM / LMS</span> : <span className="visually-hidden">HCM / LMS Smartis</span>}
     </div>
   );
 }
 
-type ViewId = "home" | "trajectory" | "ranking" | "analytics" | "users" | "courses" | "settings";
+type ViewId =
+  | "home" | "trajectory" | "ranking" | "analytics"
+  | "employees" | "recruitment" | "hrAnalytics"
+  | "users" | "courses" | "settings";
 type User = {
   id: number;
   email: string;
@@ -71,6 +78,43 @@ type User = {
   department_name: string | null;
 };
 type Department = { id: number; name: string; code: string; is_active: boolean };
+type EmployeeProfile = {
+  id: number;
+  user: number;
+  full_name: string;
+  email: string;
+  employee_number: string;
+  department: number | null;
+  department_name: string | null;
+  position_name: string | null;
+  grade: string;
+  age: number | null;
+  hire_date: string | null;
+  tenure_years: number | null;
+  status: string;
+  status_label: string;
+  checklist_score: number;
+  development_progress: number;
+};
+type CandidateStage = { id: number; name: string; position: number; is_terminal: boolean; candidates_count: number };
+type Candidate = {
+  id: number;
+  full_name: string;
+  desired_position: string;
+  desired_salary: string | null;
+  stage: number;
+  stage_name: string;
+  department_name: string | null;
+  source: string;
+  next_action_at: string | null;
+};
+type HcmSummary = {
+  employees_total: number;
+  on_probation: number;
+  average_development_progress: number;
+  candidates_total: number;
+  open_positions: number;
+};
 type QuizOption = { text: string; correct: boolean };
 type QuizQuestion = { prompt: string; options: QuizOption[] };
 type QuizData = { passing_score: number; questions: QuizQuestion[] };
@@ -252,8 +296,8 @@ function LoginPage({ onLogin }: { onLogin: (token: string, user: User) => void }
       <section className="login-card">
         <Brand login />
         <div className="login-intro">
-          <h1>Корпоративная система обучения</h1>
-          <p>Отдельный LMS-сервис для обучения сотрудников Smartis</p>
+          <h1>Управление и обучение персонала</h1>
+          <p>Единая корпоративная система HCM / LMS Smartis</p>
         </div>
         <form onSubmit={submit}>
           <label>
@@ -286,11 +330,21 @@ const nav = [
   { id: "ranking" as const, label: "Рейтинг", icon: Trophy },
   { id: "analytics" as const, label: "Аналитика", icon: BarChart3 },
 ];
+const hcmNav = [
+  { id: "employees" as const, label: "Сотрудники", icon: ContactRound },
+  { id: "recruitment" as const, label: "Подбор", icon: BriefcaseBusiness },
+  { id: "hrAnalytics" as const, label: "HR-аналитика", icon: ChartNoAxesCombined },
+];
 const adminNav = [
   { id: "users" as const, label: "Пользователи", icon: Users },
   { id: "courses" as const, label: "Курсы", icon: BookOpen },
   { id: "settings" as const, label: "Настройки", icon: Settings },
 ];
+
+function visibleHcmNav(user: User) {
+  if (user.role === "admin" || user.role === "hr") return hcmNav;
+  return user.role === "leader" ? hcmNav.filter((item) => item.id !== "recruitment") : [];
+}
 
 function visibleAdminNav(user: User) {
   return user.role === "admin"
@@ -317,8 +371,9 @@ function Sidebar({
   onTheme: () => void;
   onLogout: () => void;
 }) {
+  const availableHcmNav = visibleHcmNav(user);
   const availableAdminNav = visibleAdminNav(user);
-  const group = (items: typeof nav | typeof adminNav) =>
+  const group = (items: typeof nav | typeof hcmNav | typeof adminNav) =>
     items.map(({ id, label }) => (
       <button
         type="button"
@@ -338,6 +393,12 @@ function Sidebar({
         <p>Обучение</p>
         {group(nav)}
       </nav>
+      {availableHcmNav.length > 0 && (
+        <nav className="nav-group" aria-label="Персонал">
+          <p>Персонал</p>
+          {group(availableHcmNav)}
+        </nav>
+      )}
       {availableAdminNav.length > 0 && (
         <nav className="nav-group" aria-label="Администрирование">
           <p>Администрирование</p>
@@ -375,8 +436,9 @@ function IconRail({
   onNavigate: (view: ViewId) => void;
   onOpen: () => void;
 }) {
+  const availableHcmNav = visibleHcmNav(user);
   const availableAdminNav = visibleAdminNav(user);
-  const railGroup = (items: typeof nav | typeof adminNav) => items.map(({ id, label, icon: Icon }) => (
+  const railGroup = (items: typeof nav | typeof hcmNav | typeof adminNav) => items.map(({ id, label, icon: Icon }) => (
     <button
       className={active === id ? "icon-rail__item icon-rail__item--active" : "icon-rail__item"}
       type="button"
@@ -401,6 +463,12 @@ function IconRail({
         <CurtainToggleIcon open={open} />
       </button>
       <nav className="icon-rail__group" aria-label="Обучение">{railGroup(nav)}</nav>
+      {availableHcmNav.length > 0 && (
+        <>
+          <span className="icon-rail__divider" aria-hidden="true" />
+          <nav className="icon-rail__group" aria-label="Персонал">{railGroup(availableHcmNav)}</nav>
+        </>
+      )}
       {availableAdminNav.length > 0 && (
         <>
           <span className="icon-rail__divider" aria-hidden="true" />
@@ -562,7 +630,8 @@ function UsersView({ token }: { token: string }) {
             <label>Email<input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required /></label>
             <label>Роль<select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
               <option value="employee">Сотрудник</option><option value="author">Автор</option>
-              <option value="leader">Руководитель</option><option value="admin">Администратор</option>
+              <option value="hr">HR-менеджер</option><option value="leader">Руководитель</option>
+              <option value="admin">Администратор</option>
             </select></label>
             <label>Отдел<select value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })}>
               <option value="">Без отдела</option>{departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
@@ -594,6 +663,182 @@ function UsersView({ token }: { token: string }) {
             </tbody>
           </table>
         </div>
+      </section>
+    </>
+  );
+}
+
+function HcmMetricCards({ summary }: { summary: HcmSummary | null }) {
+  const metrics = [
+    ["Сотрудники", summary?.employees_total ?? "—", "Активные карточки"],
+    ["Испытательный срок", summary?.on_probation ?? "—", "Требуют внимания"],
+    ["План развития", summary ? `${summary.average_development_progress}%` : "—", "Средний прогресс"],
+    ["Кандидаты", summary?.candidates_total ?? "—", `${summary?.open_positions ?? "—"} открытых позиций`],
+  ];
+  return (
+    <section className="hcm-metrics">
+      {metrics.map(([label, value, note]) => (
+        <article className="hcm-metric" key={label}>
+          <span>{label}</span><strong>{value}</strong><small>{note}</small>
+        </article>
+      ))}
+    </section>
+  );
+}
+
+function EmployeesView({ token }: { token: string }) {
+  const [employees, setEmployees] = useState<EmployeeProfile[]>([]);
+  const [summary, setSummary] = useState<HcmSummary | null>(null);
+  const [query, setQuery] = useState("");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    Promise.all([
+      apiRequest<EmployeeProfile[]>("/employees/", token),
+      apiRequest<HcmSummary>("/hcm/summary/", token),
+    ]).then(([people, totals]) => {
+      setEmployees(people);
+      setSummary(totals);
+    }).catch((reason) => setError(reason instanceof Error ? reason.message : "Не удалось загрузить сотрудников"));
+  }, [token]);
+
+  const visible = employees.filter((employee) =>
+    `${employee.full_name} ${employee.email} ${employee.department_name || ""} ${employee.position_name || ""}`
+      .toLowerCase()
+      .includes(query.toLowerCase()),
+  );
+
+  return (
+    <>
+      <PageHeader
+        title="Сотрудники"
+        subtitle="Единый реестр команды, должностей и развития"
+        action={<button className="primary-button" type="button"><Plus /> Добавить сотрудника</button>}
+      />
+      <HcmMetricCards summary={summary} />
+      <section className="hcm-toolbar">
+        <label className="hcm-search">
+          <Search aria-hidden="true" />
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Найти сотрудника, отдел или должность" />
+        </label>
+        <button className="secondary-button" type="button">Фильтры</button>
+      </section>
+      {error && <p className="form-error">{error}</p>}
+      <section className="panel table-panel hcm-table">
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>Сотрудник</th><th>Должность</th><th>Отдел</th><th>Стаж</th><th>Развитие</th><th>Статус</th></tr></thead>
+            <tbody>
+              {visible.map((employee) => (
+                <tr key={employee.id}>
+                  <td>
+                    <strong>{employee.full_name || employee.email}</strong>
+                    <span>{employee.employee_number} · {employee.email}</span>
+                  </td>
+                  <td>{employee.position_name || "Не указана"}{employee.grade && <span>{employee.grade}</span>}</td>
+                  <td>{employee.department_name || "Без отдела"}</td>
+                  <td>{employee.tenure_years === null ? "—" : `${employee.tenure_years} г.`}</td>
+                  <td><div className="mini-progress"><span style={{ width: `${employee.development_progress}%` }} /></div><small>{employee.development_progress}%</small></td>
+                  <td><span className={`status status--${employee.status}`}>{employee.status_label}</span></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {!visible.length && <div className="hcm-empty"><ContactRound /><p>Сотрудники не найдены</p></div>}
+      </section>
+    </>
+  );
+}
+
+function RecruitmentView({ token }: { token: string }) {
+  const [stages, setStages] = useState<CandidateStage[]>([]);
+  const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    Promise.all([
+      apiRequest<CandidateStage[]>("/candidate-stages/", token),
+      apiRequest<Candidate[]>("/candidates/", token),
+    ]).then(([nextStages, nextCandidates]) => {
+      setStages(nextStages);
+      setCandidates(nextCandidates);
+    }).catch((reason) => setError(reason instanceof Error ? reason.message : "Не удалось загрузить подбор"));
+  }, [token]);
+
+  return (
+    <>
+      <PageHeader
+        title="Подбор"
+        subtitle="Кандидаты и этапы найма в одном рабочем пространстве"
+        action={<button className="primary-button" type="button"><Plus /> Добавить кандидата</button>}
+      />
+      {error && <p className="form-error">{error}</p>}
+      <section className="recruitment-board">
+        {stages.map((stage) => (
+          <div className="recruitment-column" key={stage.id}>
+            <header><span>{stage.name}</span><small>{candidates.filter((item) => item.stage === stage.id).length}</small></header>
+            <div>
+              {candidates.filter((item) => item.stage === stage.id).map((candidate) => (
+                <article className="candidate-card" key={candidate.id}>
+                  <strong>{candidate.full_name}</strong>
+                  <p>{candidate.desired_position}</p>
+                  <footer><span>{candidate.department_name || "Без отдела"}</span><small>{candidate.source || "Источник не указан"}</small></footer>
+                </article>
+              ))}
+              {!candidates.some((item) => item.stage === stage.id) && <p className="recruitment-empty">Нет кандидатов</p>}
+            </div>
+          </div>
+        ))}
+      </section>
+    </>
+  );
+}
+
+function HrAnalyticsView({ token }: { token: string }) {
+  const [employees, setEmployees] = useState<EmployeeProfile[]>([]);
+  const [summary, setSummary] = useState<HcmSummary | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    Promise.all([
+      apiRequest<EmployeeProfile[]>("/employees/", token),
+      apiRequest<HcmSummary>("/hcm/summary/", token),
+    ]).then(([people, totals]) => {
+      setEmployees(people);
+      setSummary(totals);
+    }).catch((reason) => setError(reason instanceof Error ? reason.message : "Не удалось загрузить аналитику"));
+  }, [token]);
+
+  const departments = Array.from(new Set(employees.map((item) => item.department_name || "Без отдела")))
+    .map((name) => ({ name, count: employees.filter((item) => (item.department_name || "Без отдела") === name).length }));
+  const maxDepartment = Math.max(...departments.map((item) => item.count), 1);
+
+  return (
+    <>
+      <PageHeader title="HR-аналитика" subtitle="Состояние команды, найма и развития сотрудников" />
+      <HcmMetricCards summary={summary} />
+      {error && <p className="form-error">{error}</p>}
+      <section className="hcm-analytics-grid">
+        <article className="panel hcm-chart">
+          <div className="section-heading"><div><h2>Команда по отделам</h2><p>Распределение активных сотрудников</p></div></div>
+          <div className="hcm-bars">
+            {departments.map((department) => (
+              <div key={department.name}>
+                <span>{department.name}</span>
+                <div><i style={{ width: `${department.count / maxDepartment * 100}%` }} /></div>
+                <strong>{department.count}</strong>
+              </div>
+            ))}
+          </div>
+        </article>
+        <article className="panel hcm-chart">
+          <div className="section-heading"><div><h2>Развитие команды</h2><p>Среднее выполнение индивидуальных планов</p></div></div>
+          <div className="hcm-ring" style={{ "--progress": `${summary?.average_development_progress ?? 0}%` } as React.CSSProperties}>
+            <strong>{summary?.average_development_progress ?? 0}%</strong>
+            <span>выполнено</span>
+          </div>
+        </article>
       </section>
     </>
   );
@@ -2076,7 +2321,8 @@ function CoursesView({ token, user }: { token: string; user: User }) {
 function Placeholder({ active }: { active: ViewId }) {
   const labels: Record<string, string> = {
     trajectory: "Траектория обучения", ranking: "Рейтинг", analytics: "Аналитика дэйликов",
-    courses: "Курсы", settings: "Настройки",
+    courses: "Курсы", settings: "Настройки", employees: "Сотрудники",
+    recruitment: "Подбор", hrAnalytics: "HR-аналитика",
   };
   return (
     <>
@@ -2157,6 +2403,12 @@ function App() {
           <HomeView user={user} />
         ) : active === "users" ? (
           <UsersView token={token} />
+        ) : active === "employees" ? (
+          <EmployeesView token={token} />
+        ) : active === "recruitment" ? (
+          <RecruitmentView token={token} />
+        ) : active === "hrAnalytics" ? (
+          <HrAnalyticsView token={token} />
         ) : active === "courses" ? (
           <CoursesView token={token} user={user} />
         ) : (
