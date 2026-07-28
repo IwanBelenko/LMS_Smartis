@@ -1,16 +1,31 @@
 from django.db.models import Count, Q
+from django.shortcuts import get_object_or_404
 from rest_framework import generics
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.identity.models import User
-from .models import AuditEvent, Candidate, CandidateStage, EmployeeProfile, Position
+from .models import (
+    AuditEvent,
+    Candidate,
+    CandidateStage,
+    EmployeeDocument,
+    EmployeeGoal,
+    EmployeeLearning,
+    EmployeeProfile,
+    EmploymentEvent,
+    Position,
+)
 from .permissions import IsHcmUser, IsRecruiter
 from .serializers import (
     CandidateSerializer,
     CandidateStageSerializer,
+    EmployeeDocumentSerializer,
+    EmployeeGoalSerializer,
+    EmployeeLearningSerializer,
     EmployeeProfileSerializer,
     EmployeeProfileWriteSerializer,
+    EmploymentEventSerializer,
     PositionSerializer,
 )
 
@@ -73,6 +88,82 @@ class EmployeeDetailView(generics.RetrieveUpdateAPIView):
             actor=request.user, entity_type="employee", entity_id=str(profile.pk), action="updated"
         )
         return Response(EmployeeProfileSerializer(profile, context={"request": request}).data)
+
+
+class EmployeeScopedMixin:
+    permission_classes = [IsHcmUser]
+
+    def get_employee(self):
+        queryset = EmployeeProfile.objects.select_related("user__department")
+        if self.request.user.role == User.Role.LEADER and not self.request.user.is_superuser:
+            queryset = queryset.filter(user__department_id=self.request.user.department_id)
+        return get_object_or_404(queryset, pk=self.kwargs["employee_id"])
+
+
+class EmployeeGoalListCreateView(EmployeeScopedMixin, generics.ListCreateAPIView):
+    serializer_class = EmployeeGoalSerializer
+
+    def get_queryset(self):
+        return EmployeeGoal.objects.filter(employee=self.get_employee())
+
+    def perform_create(self, serializer):
+        goal = serializer.save(employee=self.get_employee())
+        AuditEvent.objects.create(actor=self.request.user, entity_type="employee_goal", entity_id=str(goal.pk), action="created")
+
+
+class EmploymentEventListCreateView(EmployeeScopedMixin, generics.ListCreateAPIView):
+    serializer_class = EmploymentEventSerializer
+
+    def get_queryset(self):
+        return EmploymentEvent.objects.filter(employee=self.get_employee()).select_related("created_by")
+
+    def perform_create(self, serializer):
+        event = serializer.save(employee=self.get_employee(), created_by=self.request.user)
+        AuditEvent.objects.create(actor=self.request.user, entity_type="employment_event", entity_id=str(event.pk), action="created")
+
+
+class EmployeeLearningListCreateView(EmployeeScopedMixin, generics.ListCreateAPIView):
+    serializer_class = EmployeeLearningSerializer
+
+    def get_queryset(self):
+        return EmployeeLearning.objects.filter(employee=self.get_employee()).select_related("course")
+
+    def perform_create(self, serializer):
+        assignment = serializer.save(employee=self.get_employee())
+        AuditEvent.objects.create(actor=self.request.user, entity_type="employee_learning", entity_id=str(assignment.pk), action="created")
+
+
+class EmployeeDocumentListCreateView(EmployeeScopedMixin, generics.ListCreateAPIView):
+    serializer_class = EmployeeDocumentSerializer
+
+    def get_queryset(self):
+        return EmployeeDocument.objects.filter(employee=self.get_employee())
+
+    def perform_create(self, serializer):
+        document = serializer.save(employee=self.get_employee())
+        AuditEvent.objects.create(actor=self.request.user, entity_type="employee_document", entity_id=str(document.pk), action="created")
+
+
+class EmployeeGoalDetailView(generics.RetrieveUpdateAPIView):
+    serializer_class = EmployeeGoalSerializer
+    permission_classes = [IsHcmUser]
+
+    def get_queryset(self):
+        queryset = EmployeeGoal.objects.select_related("employee__user")
+        if self.request.user.role == User.Role.LEADER and not self.request.user.is_superuser:
+            queryset = queryset.filter(employee__user__department_id=self.request.user.department_id)
+        return queryset
+
+
+class EmployeeLearningDetailView(generics.RetrieveUpdateAPIView):
+    serializer_class = EmployeeLearningSerializer
+    permission_classes = [IsHcmUser]
+
+    def get_queryset(self):
+        queryset = EmployeeLearning.objects.select_related("employee__user", "course")
+        if self.request.user.role == User.Role.LEADER and not self.request.user.is_superuser:
+            queryset = queryset.filter(employee__user__department_id=self.request.user.department_id)
+        return queryset
 
 
 class CandidateListCreateView(generics.ListCreateAPIView):

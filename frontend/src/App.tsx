@@ -131,6 +131,23 @@ type HcmSummary = {
   candidates_total: number;
   open_positions: number;
 };
+type EmployeeGoal = {
+  id: number; title: string; description: string; due_date: string | null; progress: number;
+  status: "planned" | "in_progress" | "completed"; status_label: string;
+};
+type EmploymentEvent = {
+  id: number; event_type: string; event_type_label: string; title: string; note: string;
+  effective_date: string; created_by_name: string;
+};
+type EmployeeLearning = {
+  id: number; course: number; course_title: string; course_minutes: number; course_version: number;
+  status: "assigned" | "in_progress" | "completed"; status_label: string;
+  progress: number; score: number | null; assigned_at: string; completed_at: string | null;
+};
+type EmployeeDocument = {
+  id: number; title: string; document_type: string; number: string;
+  issue_date: string | null; expires_at: string | null;
+};
 type QuizOption = { text: string; correct: boolean };
 type QuizQuestion = { prompt: string; options: QuizOption[] };
 type QuizData = { passing_score: number; questions: QuizQuestion[] };
@@ -702,6 +719,221 @@ function HcmMetricCards({ summary }: { summary: HcmSummary | null }) {
   );
 }
 
+type EmployeeProfileTab = "overview" | "learning" | "history" | "goals" | "documents";
+
+function displayDate(value: string | null) {
+  return value ? new Intl.DateTimeFormat("ru-RU").format(new Date(`${value}T00:00:00`)) : "—";
+}
+
+function EmployeeProfileView({
+  employee,
+  token,
+  canManage,
+  onBack,
+  onEdit,
+}: {
+  employee: EmployeeProfile;
+  token: string;
+  canManage: boolean;
+  onBack: () => void;
+  onEdit: () => void;
+}) {
+  const [tab, setTab] = useState<EmployeeProfileTab>("overview");
+  const [goals, setGoals] = useState<EmployeeGoal[]>([]);
+  const [history, setHistory] = useState<EmploymentEvent[]>([]);
+  const [learning, setLearning] = useState<EmployeeLearning[]>([]);
+  const [documents, setDocuments] = useState<EmployeeDocument[]>([]);
+  const [courses, setCourses] = useState<Course[]>([]);
+  const [showAdd, setShowAdd] = useState(false);
+  const [error, setError] = useState("");
+  const [goalForm, setGoalForm] = useState({ title: "", description: "", due_date: "", progress: "0", status: "planned" });
+  const [historyForm, setHistoryForm] = useState({ event_type: "other", title: "", note: "", effective_date: "" });
+  const [learningForm, setLearningForm] = useState({ course: "", status: "assigned", progress: "0" });
+  const [documentForm, setDocumentForm] = useState({ title: "", document_type: "", number: "", issue_date: "", expires_at: "" });
+
+  useEffect(() => { window.scrollTo({ top: 0 }); }, [employee.id]);
+
+  async function loadProfile() {
+    try {
+      const [nextGoals, nextHistory, nextLearning, nextDocuments, nextCourses] = await Promise.all([
+        apiRequest<EmployeeGoal[]>(`/employees/${employee.id}/goals/`, token),
+        apiRequest<EmploymentEvent[]>(`/employees/${employee.id}/history/`, token),
+        apiRequest<EmployeeLearning[]>(`/employees/${employee.id}/learning/`, token),
+        apiRequest<EmployeeDocument[]>(`/employees/${employee.id}/documents/`, token),
+        apiRequest<Course[]>("/courses/", token),
+      ]);
+      setGoals(nextGoals);
+      setHistory(nextHistory);
+      setLearning(nextLearning);
+      setDocuments(nextDocuments);
+      setCourses(nextCourses);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось загрузить карточку");
+    }
+  }
+
+  useEffect(() => { void loadProfile(); }, [employee.id, token]);
+  useEffect(() => { setShowAdd(false); setError(""); }, [tab]);
+
+  async function createGoal(event: FormEvent) {
+    event.preventDefault();
+    try {
+      await apiRequest(`/employees/${employee.id}/goals/`, token, {
+        method: "POST",
+        body: JSON.stringify({ ...goalForm, due_date: goalForm.due_date || null, progress: Number(goalForm.progress) }),
+      });
+      setGoalForm({ title: "", description: "", due_date: "", progress: "0", status: "planned" });
+      setShowAdd(false);
+      await loadProfile();
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Не удалось добавить цель"); }
+  }
+
+  async function completeGoal(goal: EmployeeGoal) {
+    try {
+      await apiRequest(`/employee-goals/${goal.id}/`, token, {
+        method: "PATCH", body: JSON.stringify({ status: "completed", progress: 100 }),
+      });
+      await loadProfile();
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Не удалось обновить цель"); }
+  }
+
+  async function createHistoryEvent(event: FormEvent) {
+    event.preventDefault();
+    try {
+      await apiRequest(`/employees/${employee.id}/history/`, token, {
+        method: "POST", body: JSON.stringify(historyForm),
+      });
+      setHistoryForm({ event_type: "other", title: "", note: "", effective_date: "" });
+      setShowAdd(false);
+      await loadProfile();
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Не удалось добавить событие"); }
+  }
+
+  async function assignCourse(event: FormEvent) {
+    event.preventDefault();
+    try {
+      await apiRequest(`/employees/${employee.id}/learning/`, token, {
+        method: "POST",
+        body: JSON.stringify({ course: Number(learningForm.course), status: learningForm.status, progress: Number(learningForm.progress) }),
+      });
+      setLearningForm({ course: "", status: "assigned", progress: "0" });
+      setShowAdd(false);
+      await loadProfile();
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Не удалось назначить курс"); }
+  }
+
+  async function changeLearningStatus(item: EmployeeLearning, status: string) {
+    const progress = status === "completed" ? 100 : status === "in_progress" ? Math.max(item.progress, 10) : item.progress;
+    try {
+      await apiRequest(`/employee-learning/${item.id}/`, token, {
+        method: "PATCH", body: JSON.stringify({ status, progress }),
+      });
+      await loadProfile();
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Не удалось обновить обучение"); }
+  }
+
+  async function createDocument(event: FormEvent) {
+    event.preventDefault();
+    try {
+      await apiRequest(`/employees/${employee.id}/documents/`, token, {
+        method: "POST",
+        body: JSON.stringify({
+          ...documentForm,
+          issue_date: documentForm.issue_date || null,
+          expires_at: documentForm.expires_at || null,
+        }),
+      });
+      setDocumentForm({ title: "", document_type: "", number: "", issue_date: "", expires_at: "" });
+      setShowAdd(false);
+      await loadProfile();
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Не удалось добавить документ"); }
+  }
+
+  const availableCourses = courses.filter((course) => !learning.some((item) => item.course === course.id));
+  const tabs: { id: EmployeeProfileTab; label: string }[] = [
+    { id: "overview", label: "Обзор" }, { id: "learning", label: "Обучение" },
+    { id: "history", label: "История" }, { id: "goals", label: "Цели" }, { id: "documents", label: "Документы" },
+  ];
+  const addLabels: Partial<Record<EmployeeProfileTab, string>> = {
+    learning: "Назначить курс", history: "Добавить событие", goals: "Добавить цель", documents: "Добавить документ",
+  };
+
+  return (
+    <div className="employee-profile-page">
+      <header className="employee-profile-header">
+        <button className="secondary-button" type="button" onClick={onBack}><ChevronLeft /> Сотрудники</button>
+        <div className="employee-profile-person">
+          <span>{employee.first_name.slice(0, 1)}{employee.last_name.slice(0, 1)}</span>
+          <div><h1>{employee.full_name}</h1><p>{employee.position_name || "Должность не указана"} · {employee.department_name || "Без отдела"}</p></div>
+        </div>
+        {canManage && <button className="secondary-button" type="button" onClick={onEdit}><Pencil /> Редактировать</button>}
+      </header>
+      <nav className="employee-profile-tabs" aria-label="Карточка сотрудника">
+        {tabs.map((item) => <button key={item.id} type="button" className={tab === item.id ? "employee-profile-tab employee-profile-tab--active" : "employee-profile-tab"} onClick={() => setTab(item.id)}>{item.label}</button>)}
+      </nav>
+      {error && <p className="form-error">{error}</p>}
+
+      {tab === "overview" && (
+        <div className="employee-overview">
+          <section className="panel employee-overview__main">
+            <div className="section-heading"><div><h2>Основная информация</h2><p>Актуальные данные сотрудника</p></div></div>
+            <dl className="employee-details">
+              <div><dt>Корпоративная почта</dt><dd>{employee.email}</dd></div>
+              <div><dt>Табельный номер</dt><dd>{employee.employee_number}</dd></div>
+              <div><dt>Отдел</dt><dd>{employee.department_name || "—"}</dd></div>
+              <div><dt>Должность</dt><dd>{employee.position_name || "—"}</dd></div>
+              <div><dt>Грейд</dt><dd>{employee.grade || "—"}</dd></div>
+              <div><dt>Дата выхода</dt><dd>{displayDate(employee.hire_date)}</dd></div>
+              <div><dt>Стаж</dt><dd>{employee.tenure_years === null ? "—" : `${employee.tenure_years} г.`}</dd></div>
+              <div><dt>Статус</dt><dd><span className={`status status--${employee.status}`}>{employee.status_label}</span></dd></div>
+            </dl>
+          </section>
+          <aside className="panel employee-development">
+            <h2>Развитие</h2>
+            <div><span>Индивидуальный план</span><strong>{employee.development_progress}%</strong><div className="mini-progress"><i style={{ width: `${employee.development_progress}%` }} /></div></div>
+            <div><span>Чек-лист</span><strong>{employee.checklist_score}%</strong><div className="mini-progress"><i style={{ width: `${employee.checklist_score}%` }} /></div></div>
+            <div><span>Активные цели</span><strong>{goals.filter((goal) => goal.status !== "completed").length}</strong></div>
+          </aside>
+          <section className="panel employee-competencies">
+            <div className="section-heading"><div><h2>Компетенции</h2><p>Ключевые навыки и зоны экспертизы</p></div></div>
+            <div>{employee.competencies ? employee.competencies.split(/[,;\n]/).filter(Boolean).map((item) => <span key={item.trim()}>{item.trim()}</span>) : <p>Компетенции пока не заполнены</p>}</div>
+          </section>
+        </div>
+      )}
+
+      {tab !== "overview" && (
+        <section className="employee-profile-section">
+          <header><div><h2>{tabs.find((item) => item.id === tab)?.label}</h2><p>{tab === "learning" ? "Назначенные курсы и результаты" : tab === "history" ? "Хронология кадровых изменений" : tab === "goals" ? "Индивидуальный план развития" : "Реестр документов сотрудника"}</p></div>{canManage && addLabels[tab] && <button className="primary-button" type="button" onClick={() => setShowAdd((value) => !value)}><Plus /> {addLabels[tab]}</button>}</header>
+
+          {tab === "learning" && <>
+            {showAdd && <form className="panel employee-inline-form" onSubmit={assignCourse}><label>Курс<select value={learningForm.course} onChange={(e) => setLearningForm({ ...learningForm, course: e.target.value })} required><option value="">Выберите курс</option>{availableCourses.map((course) => <option key={course.id} value={course.id}>{course.title}</option>)}</select></label><label>Статус<select value={learningForm.status} onChange={(e) => setLearningForm({ ...learningForm, status: e.target.value })}><option value="assigned">Назначен</option><option value="in_progress">Проходит</option><option value="completed">Завершён</option></select></label><button className="primary-button" type="submit">Назначить</button></form>}
+            <div className="employee-learning-list">{learning.map((item) => <article className="panel employee-learning-card" key={item.id}><BookOpen /><div><strong>{item.course_title}</strong><span>Версия {item.course_version} · {item.course_minutes} мин · {item.status_label}</span><div className="mini-progress"><i style={{ width: `${item.progress}%` }} /></div></div>{canManage ? <select aria-label={`Статус курса ${item.course_title}`} value={item.status} onChange={(e) => void changeLearningStatus(item, e.target.value)}><option value="assigned">Назначен</option><option value="in_progress">Проходит</option><option value="completed">Завершён</option></select> : <strong>{item.progress}%</strong>}</article>)}</div>
+            {!learning.length && <div className="hcm-empty"><BookOpen /><p>Обучение ещё не назначено</p></div>}
+          </>}
+
+          {tab === "history" && <>
+            {showAdd && <form className="panel employee-inline-form employee-inline-form--wide" onSubmit={createHistoryEvent}><label>Тип<select value={historyForm.event_type} onChange={(e) => setHistoryForm({ ...historyForm, event_type: e.target.value })}><option value="hired">Приём</option><option value="transfer">Перевод</option><option value="promotion">Повышение</option><option value="review">Оценка</option><option value="other">Другое</option></select></label><label>Дата<input type="date" value={historyForm.effective_date} onChange={(e) => setHistoryForm({ ...historyForm, effective_date: e.target.value })} required /></label><label className="employee-inline-form__wide">Событие<input value={historyForm.title} onChange={(e) => setHistoryForm({ ...historyForm, title: e.target.value })} required /></label><button className="primary-button" type="submit">Добавить</button></form>}
+            <div className="employee-timeline">{history.map((item) => <article key={item.id}><i /><time>{displayDate(item.effective_date)}</time><div><span>{item.event_type_label}</span><strong>{item.title}</strong>{item.note && <p>{item.note}</p>}</div></article>)}</div>
+            {!history.length && <div className="hcm-empty"><Workflow /><p>Кадровых событий пока нет</p></div>}
+          </>}
+
+          {tab === "goals" && <>
+            {showAdd && <form className="panel employee-inline-form employee-inline-form--wide" onSubmit={createGoal}><label className="employee-inline-form__wide">Цель<input value={goalForm.title} onChange={(e) => setGoalForm({ ...goalForm, title: e.target.value })} required /></label><label>Срок<input type="date" value={goalForm.due_date} onChange={(e) => setGoalForm({ ...goalForm, due_date: e.target.value })} /></label><label>Статус<select value={goalForm.status} onChange={(e) => setGoalForm({ ...goalForm, status: e.target.value })}><option value="planned">Запланирована</option><option value="in_progress">В работе</option><option value="completed">Выполнена</option></select></label><button className="primary-button" type="submit">Добавить</button></form>}
+            <div className="employee-goal-grid">{goals.map((goal) => <article className="panel employee-goal-card" key={goal.id}><header><span className={`status status--${goal.status}`}>{goal.status_label}</span><time>{displayDate(goal.due_date)}</time></header><h3>{goal.title}</h3>{goal.description && <p>{goal.description}</p>}<div><div className="mini-progress"><i style={{ width: `${goal.progress}%` }} /></div><strong>{goal.progress}%</strong></div>{canManage && goal.status !== "completed" && <button className="secondary-button" type="button" onClick={() => void completeGoal(goal)}>Отметить выполненной</button>}</article>)}</div>
+            {!goals.length && <div className="hcm-empty"><Trophy /><p>Цели развития ещё не добавлены</p></div>}
+          </>}
+
+          {tab === "documents" && <>
+            {showAdd && <form className="panel employee-inline-form employee-inline-form--wide" onSubmit={createDocument}><label className="employee-inline-form__wide">Название<input value={documentForm.title} onChange={(e) => setDocumentForm({ ...documentForm, title: e.target.value })} required /></label><label>Тип<input value={documentForm.document_type} onChange={(e) => setDocumentForm({ ...documentForm, document_type: e.target.value })} /></label><label>Номер<input value={documentForm.number} onChange={(e) => setDocumentForm({ ...documentForm, number: e.target.value })} /></label><label>Дата выдачи<input type="date" value={documentForm.issue_date} onChange={(e) => setDocumentForm({ ...documentForm, issue_date: e.target.value })} /></label><label>Действует до<input type="date" value={documentForm.expires_at} onChange={(e) => setDocumentForm({ ...documentForm, expires_at: e.target.value })} /></label><button className="primary-button" type="submit">Добавить</button></form>}
+            <div className="employee-document-list">{documents.map((item) => <article className="panel" key={item.id}><FileText /><div><strong>{item.title}</strong><span>{item.document_type || "Документ"}{item.number ? ` · № ${item.number}` : ""}</span></div><time>{item.expires_at ? `до ${displayDate(item.expires_at)}` : displayDate(item.issue_date)}</time></article>)}</div>
+            {!documents.length && <div className="hcm-empty"><FileText /><p>Документы ещё не добавлены</p></div>}
+          </>}
+        </section>
+      )}
+    </div>
+  );
+}
+
 const emptyEmployeeForm = {
   first_name: "", last_name: "", email: "", employee_number: "", department: "", position: "",
   grade: "", birth_date: "", hire_date: "", education: "", competencies: "", status: "employed",
@@ -716,6 +948,7 @@ function EmployeesView({ token, user }: { token: string; user: User }) {
   const [query, setQuery] = useState("");
   const [error, setError] = useState("");
   const [editing, setEditing] = useState<EmployeeProfile | null>(null);
+  const [selectedProfile, setSelectedProfile] = useState<EmployeeProfile | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(emptyEmployeeForm);
@@ -802,6 +1035,21 @@ function EmployeesView({ token, user }: { token: string; user: User }) {
       .includes(query.toLowerCase()),
   );
 
+  if (selectedProfile) {
+    return (
+      <EmployeeProfileView
+        employee={selectedProfile}
+        token={token}
+        canManage={user.role !== "leader"}
+        onBack={() => setSelectedProfile(null)}
+        onEdit={() => {
+          setSelectedProfile(null);
+          openEmployee(selectedProfile);
+        }}
+      />
+    );
+  }
+
   return (
     <>
       <PageHeader
@@ -830,7 +1078,7 @@ function EmployeesView({ token, user }: { token: string; user: User }) {
               {visible.map((employee) => (
                 <tr key={employee.id}>
                   <td>
-                    <strong>{employee.full_name || employee.email}</strong>
+                    <button className="employee-name-button" type="button" onClick={() => setSelectedProfile(employee)}>{employee.full_name || employee.email}</button>
                     <span>{employee.employee_number} · {employee.email}</span>
                   </td>
                   <td>{employee.position_name || "Не указана"}{employee.grade && <span>{employee.grade}</span>}</td>

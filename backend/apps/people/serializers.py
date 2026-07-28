@@ -4,7 +4,16 @@ from django.db import transaction
 from rest_framework import serializers
 
 from apps.identity.models import Department, Invitation, User
-from .models import Candidate, CandidateStage, EmployeeProfile, Position
+from .models import (
+    Candidate,
+    CandidateStage,
+    EmployeeDocument,
+    EmployeeGoal,
+    EmployeeLearning,
+    EmployeeProfile,
+    EmploymentEvent,
+    Position,
+)
 
 
 def years_between(start, end):
@@ -109,6 +118,50 @@ class EmployeeProfileWriteSerializer(serializers.ModelSerializer):
         if user_data:
             instance.user.save(update_fields=list(user_data))
         return super().update(instance, validated_data)
+
+
+class EmployeeGoalSerializer(serializers.ModelSerializer):
+    status_label = serializers.CharField(source="get_status_display", read_only=True)
+    progress = serializers.IntegerField(min_value=0, max_value=100)
+
+    class Meta:
+        model = EmployeeGoal
+        fields = ["id", "employee", "title", "description", "due_date", "progress", "status", "status_label", "created_at", "updated_at"]
+        read_only_fields = ["id", "employee", "created_at", "updated_at"]
+
+
+class EmploymentEventSerializer(serializers.ModelSerializer):
+    event_type_label = serializers.CharField(source="get_event_type_display", read_only=True)
+    created_by_name = serializers.CharField(source="created_by.get_full_name", read_only=True)
+
+    class Meta:
+        model = EmploymentEvent
+        fields = ["id", "employee", "event_type", "event_type_label", "title", "note", "effective_date", "created_by", "created_by_name", "created_at"]
+        read_only_fields = ["id", "employee", "created_by", "created_at"]
+
+
+class EmployeeLearningSerializer(serializers.ModelSerializer):
+    course_title = serializers.CharField(source="course.title", read_only=True)
+    course_minutes = serializers.IntegerField(source="course.estimated_minutes", read_only=True)
+    course_version = serializers.IntegerField(source="course.version", read_only=True)
+    status_label = serializers.CharField(source="get_status_display", read_only=True)
+    progress = serializers.IntegerField(min_value=0, max_value=100)
+    score = serializers.IntegerField(min_value=0, max_value=100, allow_null=True, required=False)
+
+    class Meta:
+        model = EmployeeLearning
+        fields = [
+            "id", "employee", "course", "course_title", "course_minutes", "course_version", "status", "status_label",
+            "progress", "score", "assigned_at", "completed_at",
+        ]
+        read_only_fields = ["id", "employee", "assigned_at"]
+
+
+class EmployeeDocumentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = EmployeeDocument
+        fields = ["id", "employee", "title", "document_type", "number", "issue_date", "expires_at", "created_at"]
+        read_only_fields = ["id", "employee", "created_at"]
 
 
 class CandidateStageSerializer(serializers.ModelSerializer):

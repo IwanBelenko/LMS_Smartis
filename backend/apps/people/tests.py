@@ -4,7 +4,17 @@ from django.test import TestCase
 from rest_framework.test import APIClient
 
 from apps.identity.models import Department, User
-from .models import Candidate, CandidateStage, EmployeeProfile, Position
+from apps.learning.models import Course
+from .models import (
+    Candidate,
+    CandidateStage,
+    EmployeeDocument,
+    EmployeeGoal,
+    EmployeeLearning,
+    EmployeeProfile,
+    EmploymentEvent,
+    Position,
+)
 
 
 class PeopleApiTests(TestCase):
@@ -115,3 +125,49 @@ class PeopleApiTests(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["stage_name"], "Интервью")
+
+    def test_admin_manages_employee_development_profile(self):
+        course = Course.objects.create(title="Основы аналитики", author=self.admin)
+        self.client.force_authenticate(self.admin)
+        goal = self.client.post(
+            f"/api/v1/employees/{self.profile.pk}/goals/",
+            {"title": "Освоить SQL", "progress": 30, "status": EmployeeGoal.Status.IN_PROGRESS},
+            format="json",
+        )
+        history = self.client.post(
+            f"/api/v1/employees/{self.profile.pk}/history/",
+            {
+                "event_type": EmploymentEvent.Type.REVIEW,
+                "title": "Квартальная оценка",
+                "effective_date": "2026-07-01",
+            },
+            format="json",
+        )
+        learning = self.client.post(
+            f"/api/v1/employees/{self.profile.pk}/learning/",
+            {"course": course.pk, "status": EmployeeLearning.Status.ASSIGNED, "progress": 0},
+            format="json",
+        )
+        document = self.client.post(
+            f"/api/v1/employees/{self.profile.pk}/documents/",
+            {"title": "Согласие", "document_type": "Кадровый документ"},
+            format="json",
+        )
+        self.assertEqual(goal.status_code, 201)
+        self.assertEqual(history.status_code, 201)
+        self.assertEqual(learning.status_code, 201)
+        self.assertEqual(document.status_code, 201)
+        self.assertTrue(EmployeeDocument.objects.filter(employee=self.profile).exists())
+
+    def test_leader_reads_profile_of_own_department_but_cannot_change_it(self):
+        EmployeeGoal.objects.create(employee=self.profile, title="Цель отдела")
+        self.client.force_authenticate(self.leader)
+        response = self.client.get(f"/api/v1/employees/{self.profile.pk}/goals/")
+        forbidden = self.client.post(
+            f"/api/v1/employees/{self.profile.pk}/goals/",
+            {"title": "Новая цель", "progress": 0},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json()), 1)
+        self.assertEqual(forbidden.status_code, 403)

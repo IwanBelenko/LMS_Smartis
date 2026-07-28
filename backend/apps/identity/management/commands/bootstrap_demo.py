@@ -3,7 +3,17 @@ from datetime import date, timedelta
 
 from django.core.management.base import BaseCommand
 from apps.identity.models import Department, User
-from apps.people.models import Candidate, CandidateStage, EmployeeProfile, Position
+from apps.learning.models import Course
+from apps.people.models import (
+    Candidate,
+    CandidateStage,
+    EmployeeDocument,
+    EmployeeGoal,
+    EmployeeLearning,
+    EmployeeProfile,
+    EmploymentEvent,
+    Position,
+)
 
 
 class Command(BaseCommand):
@@ -65,7 +75,7 @@ class Command(BaseCommand):
                     "status": User.Status.ACTIVE,
                 },
             )
-            EmployeeProfile.objects.get_or_create(
+            profile, _ = EmployeeProfile.objects.get_or_create(
                 user=person,
                 defaults={
                     "employee_number": f"SM-{100 + index}",
@@ -78,6 +88,41 @@ class Command(BaseCommand):
                     "salary_base": 120000 + index * 20000,
                 },
             )
+            EmploymentEvent.objects.get_or_create(
+                employee=profile,
+                event_type=EmploymentEvent.Type.HIRED,
+                title=f"Принят на должность «{position.name}»",
+                effective_date=profile.hire_date or date.today(),
+                defaults={"created_by": user},
+            )
+            EmployeeGoal.objects.get_or_create(
+                employee=profile,
+                title="Развить ключевые профессиональные компетенции",
+                defaults={
+                    "description": "Цель индивидуального плана развития",
+                    "due_date": date.today() + timedelta(days=90),
+                    "progress": progress,
+                    "status": EmployeeGoal.Status.IN_PROGRESS,
+                },
+            )
+            if index == 1:
+                EmployeeDocument.objects.get_or_create(
+                    employee=profile,
+                    title="Согласие на обработку персональных данных",
+                    defaults={"document_type": "Кадровый документ", "issue_date": profile.hire_date},
+                )
+
+        first_profile = EmployeeProfile.objects.order_by("id").first()
+        if first_profile:
+            for course_index, course in enumerate(Course.objects.order_by("id")[:2]):
+                EmployeeLearning.objects.get_or_create(
+                    employee=first_profile,
+                    course=course,
+                    defaults={
+                        "status": EmployeeLearning.Status.IN_PROGRESS if course_index == 0 else EmployeeLearning.Status.ASSIGNED,
+                        "progress": 54 if course_index == 0 else 0,
+                    },
+                )
 
         stages = []
         for stage_position, stage_name in enumerate(

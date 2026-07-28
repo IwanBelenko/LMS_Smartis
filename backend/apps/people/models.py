@@ -50,6 +50,92 @@ class EmployeeProfile(models.Model):
         return str(self.user)
 
 
+class EmployeeGoal(models.Model):
+    class Status(models.TextChoices):
+        PLANNED = "planned", "Запланирована"
+        IN_PROGRESS = "in_progress", "В работе"
+        COMPLETED = "completed", "Выполнена"
+
+    employee = models.ForeignKey(EmployeeProfile, related_name="goals", on_delete=models.CASCADE)
+    title = models.CharField("Цель", max_length=220)
+    description = models.TextField("Описание", blank=True)
+    due_date = models.DateField("Срок", null=True, blank=True)
+    progress = models.PositiveSmallIntegerField("Прогресс, %", default=0)
+    status = models.CharField("Статус", max_length=20, choices=Status.choices, default=Status.PLANNED)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["status", "due_date", "-created_at"]
+        verbose_name = "Цель развития"
+        verbose_name_plural = "Цели развития"
+
+
+class EmploymentEvent(models.Model):
+    class Type(models.TextChoices):
+        HIRED = "hired", "Приём"
+        TRANSFER = "transfer", "Перевод"
+        PROMOTION = "promotion", "Повышение"
+        REVIEW = "review", "Оценка"
+        OTHER = "other", "Другое"
+
+    employee = models.ForeignKey(EmployeeProfile, related_name="employment_events", on_delete=models.CASCADE)
+    event_type = models.CharField("Тип", max_length=20, choices=Type.choices, default=Type.OTHER)
+    title = models.CharField("Событие", max_length=220)
+    note = models.TextField("Комментарий", blank=True)
+    effective_date = models.DateField("Дата")
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="created_employment_events",
+        null=True,
+        on_delete=models.SET_NULL,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-effective_date", "-created_at"]
+        verbose_name = "Кадровое событие"
+        verbose_name_plural = "Кадровые события"
+
+
+class EmployeeLearning(models.Model):
+    class Status(models.TextChoices):
+        ASSIGNED = "assigned", "Назначен"
+        IN_PROGRESS = "in_progress", "Проходит"
+        COMPLETED = "completed", "Завершён"
+
+    employee = models.ForeignKey(EmployeeProfile, related_name="learning_assignments", on_delete=models.CASCADE)
+    course = models.ForeignKey("learning.Course", related_name="employee_assignments", on_delete=models.CASCADE)
+    status = models.CharField("Статус", max_length=20, choices=Status.choices, default=Status.ASSIGNED)
+    progress = models.PositiveSmallIntegerField("Прогресс, %", default=0)
+    score = models.PositiveSmallIntegerField("Результат, %", null=True, blank=True)
+    assigned_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["status", "-assigned_at"]
+        constraints = [
+            models.UniqueConstraint(fields=["employee", "course"], name="unique_employee_course_assignment"),
+        ]
+        verbose_name = "Назначение обучения"
+        verbose_name_plural = "Назначения обучения"
+
+
+class EmployeeDocument(models.Model):
+    employee = models.ForeignKey(EmployeeProfile, related_name="documents", on_delete=models.CASCADE)
+    title = models.CharField("Документ", max_length=220)
+    document_type = models.CharField("Тип", max_length=120, blank=True)
+    number = models.CharField("Номер", max_length=120, blank=True)
+    issue_date = models.DateField("Дата выдачи", null=True, blank=True)
+    expires_at = models.DateField("Действует до", null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-issue_date", "-created_at"]
+        verbose_name = "Документ сотрудника"
+        verbose_name_plural = "Документы сотрудников"
+
+
 class CandidateStage(models.Model):
     name = models.CharField("Этап", max_length=120, unique=True)
     position = models.PositiveSmallIntegerField("Порядок", default=0)
