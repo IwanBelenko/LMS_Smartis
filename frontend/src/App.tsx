@@ -99,6 +99,7 @@ type StaffPosition = {
   headcount: number;
   filled_count: number;
   vacancies: number;
+  open_vacancy_count: number;
   note: string;
   is_active: boolean;
 };
@@ -138,6 +139,8 @@ type Candidate = {
   telegram: string;
   desired_position: string;
   desired_salary: string | null;
+  vacancy: number | null;
+  vacancy_title: string | null;
   skills: string;
   source: string;
   stage: number;
@@ -146,6 +149,24 @@ type Candidate = {
   department_name: string | null;
   next_action_at: string | null;
   comment: string;
+};
+type Vacancy = {
+  id: number;
+  title: string;
+  staff_position: number | null;
+  department: number;
+  department_name: string;
+  position: number;
+  position_name: string;
+  openings: number;
+  status: "open" | "paused" | "closed";
+  status_label: string;
+  description: string;
+  requirements: string;
+  deadline: string | null;
+  recruiter_name: string;
+  candidates_count: number;
+  hired_count: number;
 };
 type HcmSummary = {
   employees_total: number;
@@ -990,6 +1011,7 @@ function OrganizationView({ token }: { token: string }) {
   const [departmentForm, setDepartmentForm] = useState({ name: "", code: "", parent: "", manager: "" });
   const [staffForm, setStaffForm] = useState({ position: "", headcount: "1", note: "" });
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
 
   async function load() {
     try {
@@ -1092,6 +1114,27 @@ function OrganizationView({ token }: { token: string }) {
     }
   }
 
+  async function createVacancyFromStaff(item: StaffPosition) {
+    setError("");
+    setNotice("");
+    try {
+      await apiRequest<Vacancy>("/vacancies/", token, {
+        method: "POST",
+        body: JSON.stringify({
+          title: item.position_name,
+          staff_position: item.id,
+          department: item.department,
+          position: item.position,
+          openings: Math.max(item.vacancies, 1),
+        }),
+      });
+      setNotice(`Вакансия «${item.position_name}» создана в разделе «Подбор»`);
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось открыть вакансию");
+    }
+  }
+
   return (
     <>
       <PageHeader
@@ -1106,6 +1149,7 @@ function OrganizationView({ token }: { token: string }) {
         <article><span>Открытых вакансий</span><strong>{totals.vacancies}</strong></article>
       </section>
       {error && <p className="form-error">{error}</p>}
+      {notice && <p className="form-notice"><CheckCircle2 />{notice}</p>}
       <div className="organization-layout">
         <section className="panel organization-tree">
           <header><div><h2>Структура компании</h2><p>Выберите подразделение для просмотра штата</p></div></header>
@@ -1148,10 +1192,14 @@ function OrganizationView({ token }: { token: string }) {
               </div>
               <div className="organization-staff-list">
                 {visibleStaff.map((item) => (
-                  <button key={item.id} type="button" onClick={() => openStaff(item)}>
-                    <span><strong>{item.position_name}</strong><small>{item.note || "Без комментария"}</small></span>
-                    <span><b>{item.filled_count} / {item.headcount}</b><small>{item.vacancies ? `${item.vacancies} вак.` : "Укомплектовано"}</small></span>
-                  </button>
+                  <article key={item.id}>
+                    <button className="organization-staff-list__main" type="button" onClick={() => openStaff(item)}>
+                      <span><strong>{item.position_name}</strong><small>{item.note || "Без комментария"}</small></span>
+                      <span><b>{item.filled_count} / {item.headcount}</b><small>{item.vacancies ? `${item.vacancies} вак.` : "Укомплектовано"}</small></span>
+                    </button>
+                    {item.vacancies > 0 && item.open_vacancy_count === 0 && <button className="organization-staff-list__vacancy" type="button" onClick={() => void createVacancyFromStaff(item)}>Открыть вакансию</button>}
+                    {item.open_vacancy_count > 0 && <span className="organization-staff-list__opened">В подборе</span>}
+                  </article>
                 ))}
                 {!visibleStaff.length && <div className="hcm-empty"><BriefcaseBusiness /><p>Штатные позиции ещё не добавлены</p></div>}
               </div>
@@ -1391,29 +1439,45 @@ function EmployeesView({ token, user }: { token: string; user: User }) {
 
 const emptyCandidateForm = {
   full_name: "", email: "", phone: "", telegram: "", desired_position: "", desired_salary: "",
-  skills: "", source: "", stage: "", department: "", comment: "",
+  skills: "", source: "", stage: "", department: "", vacancy: "", comment: "",
+};
+const emptyVacancyForm = {
+  title: "", staff_position: "", department: "", position: "", openings: "1",
+  status: "open", deadline: "", description: "", requirements: "",
 };
 
 function RecruitmentView({ token }: { token: string }) {
   const [stages, setStages] = useState<CandidateStage[]>([]);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
-  const [departments, setDepartments] = useState<Department[]>([]);
+  const [departments, setDepartments] = useState<OrgDepartment[]>([]);
+  const [positions, setPositions] = useState<Position[]>([]);
+  const [staff, setStaff] = useState<StaffPosition[]>([]);
+  const [vacancies, setVacancies] = useState<Vacancy[]>([]);
+  const [selectedVacancy, setSelectedVacancy] = useState<number | "all">("all");
   const [error, setError] = useState("");
   const [editing, setEditing] = useState<Candidate | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [vacancyDialog, setVacancyDialog] = useState<Vacancy | "new" | null>(null);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(emptyCandidateForm);
+  const [vacancyForm, setVacancyForm] = useState(emptyVacancyForm);
 
   async function load() {
     try {
-      const [nextStages, nextCandidates, nextDepartments] = await Promise.all([
+      const [nextStages, nextCandidates, nextDepartments, nextPositions, nextStaff, nextVacancies] = await Promise.all([
         apiRequest<CandidateStage[]>("/candidate-stages/", token),
         apiRequest<Candidate[]>("/candidates/", token),
-        apiRequest<Department[]>("/departments/", token),
+        apiRequest<OrgDepartment[]>("/org/departments/", token),
+        apiRequest<Position[]>("/positions/", token),
+        apiRequest<StaffPosition[]>("/org/staff-positions/", token),
+        apiRequest<Vacancy[]>("/vacancies/", token),
       ]);
       setStages(nextStages);
       setCandidates(nextCandidates);
       setDepartments(nextDepartments);
+      setPositions(nextPositions);
+      setStaff(nextStaff);
+      setVacancies(nextVacancies);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Не удалось загрузить подбор");
     }
@@ -1435,9 +1499,26 @@ function RecruitmentView({ token }: { token: string }) {
       source: candidate.source || "",
       stage: String(candidate.stage),
       department: candidate.department ? String(candidate.department) : "",
+      vacancy: candidate.vacancy ? String(candidate.vacancy) : "",
       comment: candidate.comment || "",
-    } : { ...emptyCandidateForm, stage: stages[0] ? String(stages[0].id) : "" });
+    } : {
+      ...emptyCandidateForm,
+      stage: stages[0] ? String(stages[0].id) : "",
+      vacancy: selectedVacancy === "all" ? "" : String(selectedVacancy),
+      desired_position: selectedVacancy === "all" ? "" : vacancies.find((item) => item.id === selectedVacancy)?.position_name || "",
+      department: selectedVacancy === "all" ? "" : String(vacancies.find((item) => item.id === selectedVacancy)?.department || ""),
+    });
     setShowForm(true);
+  }
+
+  function selectCandidateVacancy(value: string) {
+    const vacancy = vacancies.find((item) => item.id === Number(value));
+    setForm({
+      ...form,
+      vacancy: value,
+      desired_position: vacancy?.position_name || form.desired_position,
+      department: vacancy ? String(vacancy.department) : form.department,
+    });
   }
 
   async function saveCandidate(event: FormEvent) {
@@ -1451,6 +1532,7 @@ function RecruitmentView({ token }: { token: string }) {
           ...form,
           stage: Number(form.stage),
           department: form.department ? Number(form.department) : null,
+          vacancy: form.vacancy ? Number(form.vacancy) : null,
           desired_salary: form.desired_salary || null,
         }),
       });
@@ -1478,28 +1560,106 @@ function RecruitmentView({ token }: { token: string }) {
     }
   }
 
+  function openVacancy(vacancy?: Vacancy) {
+    setError("");
+    setVacancyDialog(vacancy || "new");
+    setVacancyForm(vacancy ? {
+      title: vacancy.title,
+      staff_position: vacancy.staff_position ? String(vacancy.staff_position) : "",
+      department: String(vacancy.department),
+      position: String(vacancy.position),
+      openings: String(vacancy.openings),
+      status: vacancy.status,
+      deadline: vacancy.deadline || "",
+      description: vacancy.description,
+      requirements: vacancy.requirements,
+    } : emptyVacancyForm);
+  }
+
+  function selectStaffPosition(value: string) {
+    const row = staff.find((item) => item.id === Number(value));
+    setVacancyForm({
+      ...vacancyForm,
+      staff_position: value,
+      department: row ? String(row.department) : "",
+      position: row ? String(row.position) : "",
+      title: row?.position_name || vacancyForm.title,
+      openings: row ? String(Math.max(row.vacancies, 1)) : vacancyForm.openings,
+    });
+  }
+
+  async function saveVacancy(event: FormEvent) {
+    event.preventDefault();
+    setSaving(true);
+    setError("");
+    const editingVacancy = vacancyDialog !== "new" && vacancyDialog;
+    try {
+      await apiRequest<Vacancy>(editingVacancy ? `/vacancies/${editingVacancy.id}/` : "/vacancies/", token, {
+        method: editingVacancy ? "PATCH" : "POST",
+        body: JSON.stringify({
+          ...vacancyForm,
+          staff_position: vacancyForm.staff_position ? Number(vacancyForm.staff_position) : null,
+          department: Number(vacancyForm.department),
+          position: Number(vacancyForm.position),
+          openings: Number(vacancyForm.openings),
+          deadline: vacancyForm.deadline || null,
+        }),
+      });
+      setVacancyDialog(null);
+      setVacancyForm(emptyVacancyForm);
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось сохранить вакансию");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const visibleCandidates = selectedVacancy === "all"
+    ? candidates
+    : candidates.filter((item) => item.vacancy === selectedVacancy);
+  const openVacancies = vacancies.filter((item) => item.status === "open");
+
   return (
     <>
       <PageHeader
         title="Подбор"
-        subtitle="Кандидаты и этапы найма в одном рабочем пространстве"
-        action={<button className="primary-button" type="button" onClick={() => openCandidate()}><Plus /> Добавить кандидата</button>}
+        subtitle="Вакансии из штатного расписания и воронка кандидатов"
+        action={<div className="page-actions"><button className="secondary-button" type="button" onClick={() => openVacancy()}><BriefcaseBusiness /> Новая вакансия</button><button className="primary-button" type="button" onClick={() => openCandidate()}><Plus /> Кандидат</button></div>}
       />
       {error && <p className="form-error">{error}</p>}
+      <section className="vacancy-strip">
+        <button type="button" className={selectedVacancy === "all" ? "vacancy-card vacancy-card--active" : "vacancy-card"} onClick={() => setSelectedVacancy("all")}>
+          <span>Все вакансии</span><strong>{candidates.length}</strong><small>кандидатов в работе</small>
+        </button>
+        {openVacancies.map((vacancy) => (
+          <article key={vacancy.id} className={selectedVacancy === vacancy.id ? "vacancy-card vacancy-card--active" : "vacancy-card"}>
+            <button className="vacancy-card__main" type="button" onClick={() => setSelectedVacancy(vacancy.id)}>
+              <span>{vacancy.department_name}</span><strong>{vacancy.title}</strong><small>{vacancy.candidates_count} в воронке · мест: {vacancy.openings}</small>
+            </button>
+            <button className="vacancy-card__edit" type="button" aria-label={`Редактировать вакансию ${vacancy.title}`} onClick={() => openVacancy(vacancy)}><Pencil /></button>
+          </article>
+        ))}
+        {!openVacancies.length && <div className="vacancy-strip__empty"><BriefcaseBusiness /><span>Открытых вакансий нет</span></div>}
+      </section>
+      <div className="recruitment-filter-note">
+        <span>{selectedVacancy === "all" ? "Все кандидаты" : vacancies.find((item) => item.id === selectedVacancy)?.title}</span>
+        <small>{visibleCandidates.length} в воронке</small>
+      </div>
       <section className="recruitment-board">
         {stages.map((stage) => (
           <div className="recruitment-column" key={stage.id}>
-            <header><span>{stage.name}</span><small>{candidates.filter((item) => item.stage === stage.id).length}</small></header>
+            <header><span>{stage.name}</span><small>{visibleCandidates.filter((item) => item.stage === stage.id).length}</small></header>
             <div>
-              {candidates.filter((item) => item.stage === stage.id).map((candidate) => (
+              {visibleCandidates.filter((item) => item.stage === stage.id).map((candidate) => (
                 <article className="candidate-card" key={candidate.id}>
                   <header><strong>{candidate.full_name}</strong><button className="candidate-card__edit" type="button" onClick={() => openCandidate(candidate)} aria-label={`Редактировать ${candidate.full_name}`}><Pencil /></button></header>
-                  <p>{candidate.desired_position}</p>
+                  <p>{candidate.vacancy_title || candidate.desired_position}</p>
                   <label>Этап<select value={candidate.stage} onChange={(event) => void changeCandidateStage(candidate, event.target.value)}>{stages.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
                   <footer><span>{candidate.department_name || "Без отдела"}</span><small>{candidate.source || "Источник не указан"}</small></footer>
                 </article>
               ))}
-              {!candidates.some((item) => item.stage === stage.id) && <p className="recruitment-empty">Нет кандидатов</p>}
+              {!visibleCandidates.some((item) => item.stage === stage.id) && <p className="recruitment-empty">Нет кандидатов</p>}
             </div>
           </div>
         ))}
@@ -1520,6 +1680,7 @@ function RecruitmentView({ token }: { token: string }) {
                 <label>Телефон<input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></label>
                 <label>Telegram<input value={form.telegram} onChange={(e) => setForm({ ...form, telegram: e.target.value })} placeholder="@username" /></label>
                 <label>Источник<input value={form.source} onChange={(e) => setForm({ ...form, source: e.target.value })} placeholder="Рекомендация, hh.ru" /></label>
+                <label className="hcm-form__wide">Вакансия<select value={form.vacancy} onChange={(e) => selectCandidateVacancy(e.target.value)}><option value="">Без привязки</option>{vacancies.map((item) => <option key={item.id} value={item.id}>{item.title} · {item.department_name}</option>)}</select></label>
                 <label className="hcm-form__wide">Желаемая позиция<input value={form.desired_position} onChange={(e) => setForm({ ...form, desired_position: e.target.value })} required /></label>
                 <label>Этап<select value={form.stage} onChange={(e) => setForm({ ...form, stage: e.target.value })} required><option value="" disabled>Выберите этап</option>{stages.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
                 <label>Отдел<select value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })}><option value="">Без отдела</option>{departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
@@ -1529,6 +1690,28 @@ function RecruitmentView({ token }: { token: string }) {
               </div>
               {error && <p className="form-error">{error}</p>}
               <footer><button className="secondary-button" type="button" onClick={() => setShowForm(false)}>Отмена</button><button className="primary-button" type="submit" disabled={saving}>{saving ? "Сохраняем…" : "Сохранить"}</button></footer>
+            </form>
+          </section>
+        </div>
+      )}
+      {vacancyDialog && (
+        <div className="hcm-dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setVacancyDialog(null); }}>
+          <section className="hcm-dialog" role="dialog" aria-modal="true" aria-labelledby="vacancy-dialog-title">
+            <header><div><h2 id="vacancy-dialog-title">{vacancyDialog === "new" ? "Новая вакансия" : "Карточка вакансии"}</h2><p>Свяжите подбор со штатной потребностью</p></div><button className="icon-button" type="button" onClick={() => setVacancyDialog(null)} aria-label="Закрыть"><X /></button></header>
+            <form className="hcm-form" onSubmit={saveVacancy}>
+              <div className="hcm-form__grid">
+                <label className="hcm-form__wide">Штатная позиция<select value={vacancyForm.staff_position} onChange={(event) => selectStaffPosition(event.target.value)}><option value="">Без привязки</option>{staff.filter((item) => (item.vacancies > 0 && item.open_vacancy_count === 0) || Number(vacancyForm.staff_position) === item.id).map((item) => <option key={item.id} value={item.id}>{item.department_name} · {item.position_name} · свободно {item.vacancies}</option>)}</select></label>
+                <label className="hcm-form__wide">Название<input value={vacancyForm.title} onChange={(event) => setVacancyForm({ ...vacancyForm, title: event.target.value })} required /></label>
+                <label>Отдел<select value={vacancyForm.department} onChange={(event) => setVacancyForm({ ...vacancyForm, department: event.target.value })} required><option value="">Выберите отдел</option>{departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+                <label>Должность<select value={vacancyForm.position} onChange={(event) => setVacancyForm({ ...vacancyForm, position: event.target.value })} required><option value="">Выберите должность</option>{positions.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+                <label>Количество мест<input type="number" min="1" value={vacancyForm.openings} onChange={(event) => setVacancyForm({ ...vacancyForm, openings: event.target.value })} required /></label>
+                <label>Статус<select value={vacancyForm.status} onChange={(event) => setVacancyForm({ ...vacancyForm, status: event.target.value })}><option value="open">Открыта</option><option value="paused">Приостановлена</option><option value="closed">Закрыта</option></select></label>
+                <label>Плановая дата закрытия<input type="date" value={vacancyForm.deadline} onChange={(event) => setVacancyForm({ ...vacancyForm, deadline: event.target.value })} /></label>
+                <label className="hcm-form__wide">Описание<textarea value={vacancyForm.description} onChange={(event) => setVacancyForm({ ...vacancyForm, description: event.target.value })} /></label>
+                <label className="hcm-form__wide">Требования<textarea value={vacancyForm.requirements} onChange={(event) => setVacancyForm({ ...vacancyForm, requirements: event.target.value })} /></label>
+              </div>
+              {error && <p className="form-error">{error}</p>}
+              <footer><button className="secondary-button" type="button" onClick={() => setVacancyDialog(null)}>Отмена</button><button className="primary-button" type="submit" disabled={saving}>{saving ? "Сохраняем…" : "Сохранить вакансию"}</button></footer>
             </form>
           </section>
         </div>

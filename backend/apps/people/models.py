@@ -169,6 +169,46 @@ class CandidateStage(models.Model):
         return self.name
 
 
+class Vacancy(models.Model):
+    class Status(models.TextChoices):
+        OPEN = "open", "Открыта"
+        PAUSED = "paused", "Приостановлена"
+        CLOSED = "closed", "Закрыта"
+
+    title = models.CharField("Название", max_length=180)
+    staff_position = models.ForeignKey(
+        StaffPosition,
+        related_name="vacancies",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    department = models.ForeignKey(Department, related_name="vacancies", on_delete=models.PROTECT)
+    position = models.ForeignKey(Position, related_name="vacancies", on_delete=models.PROTECT)
+    openings = models.PositiveIntegerField("Количество мест", default=1)
+    status = models.CharField("Статус", max_length=20, choices=Status.choices, default=Status.OPEN)
+    description = models.TextField("Описание", blank=True)
+    requirements = models.TextField("Требования", blank=True)
+    deadline = models.DateField("Плановая дата закрытия", null=True, blank=True)
+    recruiter = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="managed_vacancies",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["status", "-updated_at"]
+        verbose_name = "Вакансия"
+        verbose_name_plural = "Вакансии"
+
+    def __str__(self):
+        return self.title
+
+
 class Candidate(models.Model):
     full_name = models.CharField("ФИО", max_length=240)
     email = models.EmailField("Email", blank=True)
@@ -176,6 +216,13 @@ class Candidate(models.Model):
     telegram = models.CharField("Telegram", max_length=100, blank=True)
     desired_position = models.CharField("Позиция", max_length=180)
     desired_salary = models.DecimalField("Ожидания по зарплате", max_digits=12, decimal_places=2, null=True, blank=True)
+    vacancy = models.ForeignKey(
+        Vacancy,
+        related_name="candidates",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
     skills = models.TextField("Навыки", blank=True)
     source = models.CharField("Источник", max_length=120, blank=True)
     stage = models.ForeignKey(CandidateStage, related_name="candidates", on_delete=models.PROTECT)

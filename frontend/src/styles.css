@@ -1276,6 +1276,45 @@ th { font-size: 0.72rem; text-transform: none; letter-spacing: 0.02em; }
 .status--probation { color: var(--warning); background: color-mix(in srgb, var(--warning) 13%, var(--surface)); }
 .hcm-empty { min-height: 180px; display: grid; place-items: center; align-content: center; gap: 8px; color: var(--muted); }
 .hcm-empty svg { color: var(--brand); }
+.page-actions { display: flex; align-items: center; gap: 8px; }
+
+.vacancy-strip {
+  min-width: 0; padding-bottom: 4px; display: flex; gap: 8px; overflow-x: auto;
+  scrollbar-width: thin;
+}
+.vacancy-card {
+  width: 210px; min-width: 210px; min-height: 94px; padding: 0; position: relative;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--surface);
+  color: var(--foreground); text-align: left;
+}
+button.vacancy-card { padding: 13px; display: grid; align-content: center; gap: 5px; cursor: pointer; }
+.vacancy-card:hover { border-color: color-mix(in srgb, var(--brand) 50%, var(--border)); }
+.vacancy-card--active { border-color: var(--brand); background: color-mix(in srgb, var(--brand) 10%, var(--surface)); }
+.vacancy-card__main {
+  width: 100%; min-height: 92px; padding: 13px 42px 13px 13px; border: 0;
+  display: grid; align-content: center; gap: 5px; background: transparent; color: inherit;
+  text-align: left; cursor: pointer;
+}
+.vacancy-card span { color: var(--brand-hover); font-size: .67rem; font-weight: 700; text-transform: uppercase; }
+.vacancy-card strong { overflow: hidden; font-size: .85rem; text-overflow: ellipsis; white-space: nowrap; }
+.vacancy-card small { color: var(--muted); font-size: .69rem; }
+.vacancy-card__edit {
+  width: 28px; height: 28px; padding: 0; position: absolute; top: 9px; right: 9px;
+  border: 0; border-radius: 5px; display: grid; place-items: center;
+  background: transparent; color: var(--muted); cursor: pointer;
+}
+.vacancy-card__edit:hover { background: var(--surface-soft); color: var(--foreground); }
+.vacancy-card__edit svg { width: 14px; height: 14px; }
+.vacancy-strip__empty {
+  min-width: 210px; min-height: 94px; border: 1px dashed var(--border); border-radius: 8px;
+  display: grid; place-items: center; align-content: center; gap: 7px; color: var(--muted); font-size: .74rem;
+}
+.vacancy-strip__empty svg { width: 19px; color: var(--brand); }
+.recruitment-filter-note {
+  min-height: 30px; display: flex; align-items: baseline; gap: 8px;
+}
+.recruitment-filter-note span { font-size: .82rem; font-weight: 700; }
+.recruitment-filter-note small { color: var(--muted); font-size: .7rem; }
 
 .recruitment-board {
   min-width: 0;
@@ -1482,15 +1521,28 @@ th { font-size: 0.72rem; text-transform: none; letter-spacing: 0.02em; }
 .organization-details__summary strong { margin-right: 4px; color: var(--foreground); font-size: .95rem; }
 .organization-staff-heading { margin-bottom: 8px; }
 .organization-staff-list { display: grid; }
-.organization-staff-list > button {
-  min-height: 62px; padding: 10px 8px; border: 0; border-top: 1px solid var(--border);
+.organization-staff-list > article {
+  min-height: 62px; padding: 0 8px; border-top: 1px solid var(--border);
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 9px;
+}
+.organization-staff-list > article:hover { background: var(--surface-soft); }
+.organization-staff-list__main {
+  min-width: 0; min-height: 61px; padding: 9px 0; border: 0;
   display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 14px;
   background: transparent; color: var(--foreground); text-align: left; cursor: pointer;
 }
-.organization-staff-list > button:hover { background: var(--surface-soft); }
-.organization-staff-list > button > span { min-width: 0; display: grid; gap: 4px; }
-.organization-staff-list > button > span:last-child { text-align: right; }
+.organization-staff-list__main > span { min-width: 0; display: grid; gap: 4px; }
+.organization-staff-list__main > span:last-child { text-align: right; }
 .organization-staff-list small { color: var(--muted); font-size: .7rem; }
+.organization-staff-list__vacancy {
+  padding: 6px 8px; border: 1px solid var(--border); border-radius: 5px;
+  background: var(--surface); color: var(--foreground); font-size: .69rem; font-weight: 650; cursor: pointer;
+}
+.organization-staff-list__vacancy:hover { border-color: var(--brand); color: var(--brand-hover); }
+.organization-staff-list__opened {
+  padding: 5px 7px; border-radius: 5px; background: color-mix(in srgb, var(--brand) 14%, var(--surface));
+  color: var(--brand-hover); font-size: .67rem; font-weight: 700;
+}
 .organization-dialog { width: min(620px, 100%); }
 
 @media (max-width: 980px) {
@@ -1515,6 +1567,8 @@ th { font-size: 0.72rem; text-transform: none; letter-spacing: 0.02em; }
   .hcm-metric, .hcm-metric:nth-child(3), .hcm-metric:nth-child(4) { border-left: 0; border-top: 1px solid var(--border); }
   .hcm-metric:first-child { border-top: 0; }
   .hcm-toolbar { align-items: stretch; flex-direction: column; }
+  .page-actions { width: 100%; align-items: stretch; flex-direction: column; }
+  .page-actions button { width: 100%; }
   .hcm-dialog-backdrop { padding: 8px; }
   .hcm-dialog { max-height: calc(100vh - 16px); padding: 16px; }
   .hcm-form__grid { grid-template-columns: 1fr; }

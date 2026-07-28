@@ -15,6 +15,7 @@ from .models import (
     EmploymentEvent,
     Position,
     StaffPosition,
+    Vacancy,
 )
 
 
@@ -105,12 +106,13 @@ class StaffPositionSerializer(serializers.ModelSerializer):
     position_name = serializers.CharField(source="position.name", read_only=True)
     filled_count = serializers.SerializerMethodField()
     vacancies = serializers.SerializerMethodField()
+    open_vacancy_count = serializers.SerializerMethodField()
 
     class Meta:
         model = StaffPosition
         fields = [
             "id", "department", "department_name", "position", "position_name",
-            "headcount", "filled_count", "vacancies", "note", "is_active",
+            "headcount", "filled_count", "vacancies", "open_vacancy_count", "note", "is_active",
         ]
         read_only_fields = ["id"]
 
@@ -123,6 +125,9 @@ class StaffPositionSerializer(serializers.ModelSerializer):
 
     def get_vacancies(self, obj):
         return max(obj.headcount - self.get_filled_count(obj), 0)
+
+    def get_open_vacancy_count(self, obj):
+        return obj.vacancies.filter(status=Vacancy.Status.OPEN).count()
 
 
 class EmployeeProfileSerializer(serializers.ModelSerializer):
@@ -291,16 +296,66 @@ class CandidateStageSerializer(serializers.ModelSerializer):
         fields = ["id", "name", "position", "is_terminal", "candidates_count"]
 
 
+class VacancySerializer(serializers.ModelSerializer):
+    status_label = serializers.CharField(source="get_status_display", read_only=True)
+    department_name = serializers.CharField(source="department.name", read_only=True)
+    position_name = serializers.CharField(source="position.name", read_only=True)
+    recruiter_name = serializers.CharField(source="recruiter.get_full_name", read_only=True)
+    candidates_count = serializers.IntegerField(source="candidates.count", read_only=True)
+    hired_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Vacancy
+        fields = [
+            "id", "title", "staff_position", "department", "department_name", "position",
+            "position_name", "openings", "status", "status_label", "description",
+            "requirements", "deadline", "recruiter", "recruiter_name", "candidates_count",
+            "hired_count", "created_at", "updated_at",
+        ]
+        read_only_fields = ["id", "recruiter", "created_at", "updated_at"]
+
+    def validate(self, attrs):
+        staff_position = attrs.get("staff_position", getattr(self.instance, "staff_position", None))
+        department = attrs.get("department", getattr(self.instance, "department", None))
+        position = attrs.get("position", getattr(self.instance, "position", None))
+        if staff_position and (
+            staff_position.department_id != getattr(department, "pk", None)
+            or staff_position.position_id != getattr(position, "pk", None)
+        ):
+            raise serializers.ValidationError("Вакансия должна соответствовать выбранной штатной позиции")
+        status = attrs.get("status", getattr(self.instance, "status", Vacancy.Status.OPEN))
+        if staff_position and status == Vacancy.Status.OPEN:
+            existing = Vacancy.objects.filter(staff_position=staff_position, status=Vacancy.Status.OPEN)
+            if self.instance:
+                existing = existing.exclude(pk=self.instance.pk)
+            if existing.exists():
+                raise serializers.ValidationError("Для этой штатной позиции уже открыта вакансия")
+        return attrs
+
+    def get_hired_count(self, obj):
+        terminal_stages = CandidateStage.objects.filter(is_terminal=True)
+        return obj.candidates.filter(stage__in=terminal_stages).count()
+
+
 class CandidateSerializer(serializers.ModelSerializer):
     stage_name = serializers.CharField(source="stage.name", read_only=True)
     department_name = serializers.CharField(source="department.name", read_only=True)
     recruiter_name = serializers.CharField(source="recruiter.get_full_name", read_only=True)
+    vacancy_title = serializers.CharField(source="vacancy.title", read_only=True)
 
     class Meta:
         model = Candidate
         fields = [
             "id", "full_name", "email", "phone", "telegram", "desired_position", "desired_salary",
+            "vacancy", "vacancy_title",
             "skills", "source", "stage", "stage_name", "department", "department_name",
             "recruiter", "recruiter_name", "next_action_at", "comment", "created_at", "updated_at",
         ]
         read_only_fields = ["id", "created_at", "updated_at", "recruiter"]
+
+    def validate(self, attrs):
+        vacancy = attrs.get("vacancy", getattr(self.instance, "vacancy", None))
+        if vacancy:
+            attrs["department"] = vacancy.department
+            attrs["desired_position"] = vacancy.position.name
+        return attrs

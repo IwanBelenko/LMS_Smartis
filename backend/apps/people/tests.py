@@ -15,6 +15,7 @@ from .models import (
     EmploymentEvent,
     Position,
     StaffPosition,
+    Vacancy,
 )
 
 
@@ -220,6 +221,7 @@ class PeopleApiTests(TestCase):
         for user in (self.employee, self.author, self.leader):
             self.client.force_authenticate(user)
             self.assertEqual(self.client.get("/api/v1/org/departments/").status_code, 403)
+            self.assertEqual(self.client.get("/api/v1/vacancies/").status_code, 403)
 
     def test_department_cannot_be_placed_inside_itself(self):
         self.client.force_authenticate(self.admin)
@@ -242,3 +244,52 @@ class PeopleApiTests(TestCase):
         events = EmploymentEvent.objects.filter(employee=self.profile)
         self.assertEqual(events.filter(event_type=EmploymentEvent.Type.TRANSFER).count(), 1)
         self.assertEqual(events.filter(event_type=EmploymentEvent.Type.PROMOTION).count(), 1)
+
+    def test_hr_creates_vacancy_from_staff_position_and_assigns_candidate(self):
+        staff = StaffPosition.objects.create(
+            department=self.department,
+            position=self.position,
+            headcount=3,
+        )
+        self.client.force_authenticate(self.hr)
+        vacancy = self.client.post(
+            "/api/v1/vacancies/",
+            {
+                "title": "Аналитик данных",
+                "staff_position": staff.pk,
+                "department": self.department.pk,
+                "position": self.position.pk,
+                "openings": 2,
+            },
+            format="json",
+        )
+        self.assertEqual(vacancy.status_code, 201)
+        self.assertEqual(vacancy.json()["status"], Vacancy.Status.OPEN)
+        candidate = Candidate.objects.get(full_name="Мария Тестова")
+        assigned = self.client.patch(
+            f"/api/v1/candidates/{candidate.pk}/",
+            {"vacancy": vacancy.json()["id"]},
+            format="json",
+        )
+        self.assertEqual(assigned.status_code, 200)
+        self.assertEqual(assigned.json()["vacancy_title"], "Аналитик данных")
+
+    def test_vacancy_must_match_staff_position(self):
+        staff = StaffPosition.objects.create(
+            department=self.department,
+            position=self.position,
+            headcount=2,
+        )
+        other_position = Position.objects.create(name="Разработчик")
+        self.client.force_authenticate(self.admin)
+        response = self.client.post(
+            "/api/v1/vacancies/",
+            {
+                "title": "Разработчик",
+                "staff_position": staff.pk,
+                "department": self.other_department.pk,
+                "position": other_position.pk,
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400)

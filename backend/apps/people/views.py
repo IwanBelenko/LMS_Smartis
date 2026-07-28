@@ -16,6 +16,7 @@ from .models import (
     EmploymentEvent,
     Position,
     StaffPosition,
+    Vacancy,
 )
 from .permissions import IsHcmUser, IsRecruiter
 from .serializers import (
@@ -30,6 +31,7 @@ from .serializers import (
     PositionSerializer,
     OrganizationDepartmentSerializer,
     StaffPositionSerializer,
+    VacancySerializer,
 )
 
 
@@ -161,9 +163,14 @@ class CandidateListCreateView(generics.ListCreateAPIView):
     permission_classes = [IsRecruiter]
 
     def get_queryset(self):
-        queryset = Candidate.objects.select_related("stage", "department", "recruiter")
+        queryset = Candidate.objects.select_related("stage", "department", "recruiter", "vacancy")
         stage = self.request.query_params.get("stage")
-        return queryset.filter(stage_id=stage) if stage else queryset
+        vacancy = self.request.query_params.get("vacancy")
+        if stage:
+            queryset = queryset.filter(stage_id=stage)
+        if vacancy:
+            queryset = queryset.filter(vacancy_id=vacancy)
+        return queryset
 
     def perform_create(self, serializer):
         candidate = serializer.save(recruiter=self.request.user)
@@ -175,7 +182,7 @@ class CandidateListCreateView(generics.ListCreateAPIView):
 class CandidateDetailView(generics.RetrieveUpdateAPIView):
     serializer_class = CandidateSerializer
     permission_classes = [IsRecruiter]
-    queryset = Candidate.objects.select_related("stage", "department", "recruiter")
+    queryset = Candidate.objects.select_related("stage", "department", "recruiter", "vacancy")
 
     def perform_update(self, serializer):
         candidate = serializer.save()
@@ -188,6 +195,38 @@ class CandidateStageListView(generics.ListAPIView):
     serializer_class = CandidateStageSerializer
     permission_classes = [IsRecruiter]
     queryset = CandidateStage.objects.annotate(candidates_count=Count("candidates")).order_by("position", "id")
+
+
+class VacancyListCreateView(generics.ListCreateAPIView):
+    serializer_class = VacancySerializer
+    permission_classes = [IsRecruiter]
+
+    def get_queryset(self):
+        queryset = Vacancy.objects.select_related(
+            "staff_position", "department", "position", "recruiter"
+        ).prefetch_related("candidates")
+        status = self.request.query_params.get("status")
+        return queryset.filter(status=status) if status else queryset
+
+    def perform_create(self, serializer):
+        vacancy = serializer.save(recruiter=self.request.user)
+        AuditEvent.objects.create(
+            actor=self.request.user, entity_type="vacancy", entity_id=str(vacancy.pk), action="created"
+        )
+
+
+class VacancyDetailView(generics.RetrieveUpdateAPIView):
+    serializer_class = VacancySerializer
+    permission_classes = [IsRecruiter]
+    queryset = Vacancy.objects.select_related(
+        "staff_position", "department", "position", "recruiter"
+    ).prefetch_related("candidates")
+
+    def perform_update(self, serializer):
+        vacancy = serializer.save()
+        AuditEvent.objects.create(
+            actor=self.request.user, entity_type="vacancy", entity_id=str(vacancy.pk), action="updated"
+        )
 
 
 class PositionListView(generics.ListAPIView):
@@ -238,6 +277,6 @@ class HcmSummaryView(APIView):
                     sum(employees.values_list("development_progress", flat=True)) / max(employees.count(), 1)
                 ),
                 "candidates_total": candidates.count(),
-                "open_positions": candidates.values("desired_position").distinct().count(),
+                "open_positions": Vacancy.objects.filter(status=Vacancy.Status.OPEN).count(),
             }
         )

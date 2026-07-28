@@ -18,6 +18,8 @@ from .views import (
     OrganizationDepartmentListCreateView,
     StaffPositionDetailView,
     StaffPositionListCreateView,
+    VacancyDetailView,
+    VacancyListCreateView,
 )
 
 urlpatterns = [
@@ -37,5 +39,7 @@ urlpatterns = [
     path("candidates/", CandidateListCreateView.as_view(), name="candidates"),
     path("candidates/<int:pk>/", CandidateDetailView.as_view(), name="candidate-detail"),
     path("candidate-stages/", CandidateStageListView.as_view(), name="candidate-stages"),
+    path("vacancies/", VacancyListCreateView.as_view(), name="vacancies"),
+    path("vacancies/<int:pk>/", VacancyDetailView.as_view(), name="vacancy-detail"),
     path("hcm/summary/", HcmSummaryView.as_view(), name="hcm-summary"),
 ]

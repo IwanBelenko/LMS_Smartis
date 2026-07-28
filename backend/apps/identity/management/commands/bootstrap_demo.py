@@ -14,6 +14,7 @@ from apps.people.models import (
     EmploymentEvent,
     Position,
     StaffPosition,
+    Vacancy,
 )
 
 
@@ -137,6 +138,25 @@ class Command(BaseCommand):
                 position=staff_position,
                 defaults={"headcount": headcount, "is_active": True},
             )
+        demo_vacancies = {}
+        for vacancy_title, staff_department, staff_position, openings in [
+            ("Продуктовый аналитик", department, analyst_position, 1),
+            ("Менеджер проектов", product_department, manager_position, 1),
+            ("Специалист поддержки", support_department, support_position, 2),
+        ]:
+            staff_row = StaffPosition.objects.get(department=staff_department, position=staff_position)
+            vacancy, _ = Vacancy.objects.update_or_create(
+                title=vacancy_title,
+                department=staff_department,
+                defaults={
+                    "staff_position": staff_row,
+                    "position": staff_position,
+                    "openings": openings,
+                    "status": Vacancy.Status.OPEN,
+                    "recruiter": user,
+                },
+            )
+            demo_vacancies[vacancy_title] = vacancy
 
         first_profile = EmployeeProfile.objects.order_by("id").first()
         if first_profile:
@@ -165,14 +185,19 @@ class Command(BaseCommand):
             ("Дмитрий Орлов", "Менеджер проектов", stages[1]),
             ("Елена Фомина", "Специалист поддержки", stages[2]),
         ]:
-            Candidate.objects.get_or_create(
+            candidate, _ = Candidate.objects.get_or_create(
                 full_name=candidate_name,
                 desired_position=desired_position,
                 defaults={
                     "stage": stage,
                     "department": department,
+                    "vacancy": demo_vacancies.get(desired_position),
                     "recruiter": user,
                     "source": "Рекомендация",
                 },
             )
+            if candidate.vacancy_id is None and desired_position in demo_vacancies:
+                candidate.vacancy = demo_vacancies[desired_position]
+                candidate.department = demo_vacancies[desired_position].department
+                candidate.save(update_fields=["vacancy", "department"])
         self.stdout.write(self.style.SUCCESS("Демонстрационные данные HCM готовы"))
