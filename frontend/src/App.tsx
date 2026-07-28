@@ -511,14 +511,14 @@ function LoginPage({ onLogin }: { onLogin: (token: string, user: User) => void }
 
 const nav = [
   { id: "home" as const, label: "Главная", icon: Home },
-  { id: "tasks" as const, label: "Задачи", icon: Bell },
   { id: "trajectory" as const, label: "Траектория", icon: Route },
   { id: "ranking" as const, label: "Рейтинг", icon: Trophy },
   { id: "analytics" as const, label: "Аналитика", icon: BarChart3 },
-  { id: "documents" as const, label: "Документы", icon: FileText },
   { id: "performance" as const, label: "Оценка", icon: CheckCircle2 },
 ];
 const hcmNav = [
+  { id: "tasks" as const, label: "Задачи", icon: Bell },
+  { id: "documents" as const, label: "Документы", icon: FileText },
   { id: "absences" as const, label: "Отпуска и отсутствия", icon: CalendarDays },
   { id: "organization" as const, label: "Оргструктура", icon: Building2 },
   { id: "employees" as const, label: "Сотрудники", icon: ContactRound },
@@ -532,7 +532,9 @@ const adminNav = [
 ];
 
 function visibleHcmNav(user: User) {
-  return user.role === "admin" || user.role === "hr" ? hcmNav : [];
+  return user.role === "admin" || user.role === "hr"
+    ? hcmNav
+    : hcmNav.filter((item) => item.id === "tasks" || item.id === "documents");
 }
 
 function visibleAdminNav(user: User) {
@@ -591,8 +593,8 @@ function Sidebar({
       {availableHcmNav.length > 0 && (
         <>
           <span className="sidebar__divider" aria-hidden="true" />
-          <nav className="nav-group" aria-label="Персонал">
-            <p>Персонал</p>
+          <nav className="nav-group" aria-label="HR">
+            <p>HR</p>
             {group(availableHcmNav)}
           </nav>
         </>
@@ -667,7 +669,7 @@ function IconRail({
       {availableHcmNav.length > 0 && (
         <>
           <span className="icon-rail__divider" aria-hidden="true" />
-          <nav className="icon-rail__group" aria-label="Персонал">{railGroup(availableHcmNav)}</nav>
+          <nav className="icon-rail__group" aria-label="HR">{railGroup(availableHcmNav)}</nav>
         </>
       )}
       {availableAdminNav.length > 0 && (

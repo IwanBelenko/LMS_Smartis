@@ -1007,16 +1007,6 @@ th { font-size: 0.72rem; text-transform: none; letter-spacing: 0.02em; }
 .icon-rail__user { margin-top: auto; color: var(--muted); }
 .icon-rail__user svg { width: 29px; height: 29px; stroke-width: 1.7; }
 
-@media (max-height: 780px) {
-  .icon-rail { padding-top: 4px; padding-bottom: 4px; gap: 2px; }
-  .icon-rail__toggle, .icon-rail__item, .icon-rail__user { width: 38px; height: 26px; border-radius: 6px; }
-  .icon-rail__toggle { margin-bottom: 0; }
-  .icon-rail__group { gap: 0; }
-  .icon-rail__item svg { width: 17px; height: 17px; }
-  .icon-rail__user { display: none; }
-  .icon-rail__divider { width: 30px; margin: 1px 0; }
-}
-
 .sidebar { left: calc(var(--icon-rail-width) + 8px); }
 .app-shell--sidebar-closed .sidebar { transform: translateX(calc(-100% - var(--icon-rail-width) - 20px)); }
 .sidebar-backdrop { left: var(--icon-rail-width); }
@@ -2017,4 +2007,16 @@ button.vacancy-card { padding: 13px; display: grid; align-content: center; gap: 
 @media (min-width: 621px) and (max-width: 760px) {
   .employee-profile-header { grid-template-columns: 1fr; }
   .employee-profile-header > .secondary-button { justify-self: start; }
+}
+
+@media (max-height: 780px) {
+  .icon-rail { padding-top: 5px; padding-bottom: 5px; gap: 3px; }
+  .icon-rail__toggle, .icon-rail__item, .icon-rail__user {
+    width: 40px; height: 34px; border-radius: 6px;
+  }
+  .icon-rail__toggle { margin-bottom: 1px; }
+  .icon-rail__group { gap: 1px; }
+  .icon-rail__item svg { width: 21px; height: 21px; }
+  .icon-rail__user svg { width: 24px; height: 24px; }
+  .icon-rail__divider { width: 32px; margin: 2px 0; }
 }
