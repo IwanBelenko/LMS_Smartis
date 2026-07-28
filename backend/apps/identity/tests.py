@@ -62,3 +62,19 @@ class IdentityApiTests(TestCase):
         self.client.force_authenticate(employee)
         response = self.client.get("/api/v1/users/")
         self.assertEqual(response.status_code, 403)
+
+    def test_administrator_assigns_hr_role(self):
+        self.authenticate()
+        response = self.client.post(
+            "/api/v1/users/",
+            {
+                "email": "hr@test.local",
+                "first_name": "Анна",
+                "last_name": "HR",
+                "role": User.Role.HR,
+                "department": self.department.pk,
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["role"], User.Role.HR)

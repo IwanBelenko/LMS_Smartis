@@ -4,7 +4,6 @@ from rest_framework import generics
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.identity.models import User
 from .models import (
     AuditEvent,
     Candidate,
@@ -38,8 +37,6 @@ class EmployeeListCreateView(generics.ListCreateAPIView):
 
     def get_queryset(self):
         queryset = EmployeeProfile.objects.select_related("user__department", "position")
-        if self.request.user.role == User.Role.LEADER and not self.request.user.is_superuser:
-            queryset = queryset.filter(user__department_id=self.request.user.department_id)
         query = self.request.query_params.get("q", "").strip()
         if query:
             queryset = queryset.filter(
@@ -71,10 +68,7 @@ class EmployeeDetailView(generics.RetrieveUpdateAPIView):
     permission_classes = [IsHcmUser]
 
     def get_queryset(self):
-        queryset = EmployeeProfile.objects.select_related("user__department", "position")
-        if self.request.user.role == User.Role.LEADER and not self.request.user.is_superuser:
-            queryset = queryset.filter(user__department_id=self.request.user.department_id)
-        return queryset
+        return EmployeeProfile.objects.select_related("user__department", "position")
 
     def get_serializer_class(self):
         return EmployeeProfileSerializer if self.request.method == "GET" else EmployeeProfileWriteSerializer
@@ -95,8 +89,6 @@ class EmployeeScopedMixin:
 
     def get_employee(self):
         queryset = EmployeeProfile.objects.select_related("user__department")
-        if self.request.user.role == User.Role.LEADER and not self.request.user.is_superuser:
-            queryset = queryset.filter(user__department_id=self.request.user.department_id)
         return get_object_or_404(queryset, pk=self.kwargs["employee_id"])
 
 
@@ -149,10 +141,7 @@ class EmployeeGoalDetailView(generics.RetrieveUpdateAPIView):
     permission_classes = [IsHcmUser]
 
     def get_queryset(self):
-        queryset = EmployeeGoal.objects.select_related("employee__user")
-        if self.request.user.role == User.Role.LEADER and not self.request.user.is_superuser:
-            queryset = queryset.filter(employee__user__department_id=self.request.user.department_id)
-        return queryset
+        return EmployeeGoal.objects.select_related("employee__user")
 
 
 class EmployeeLearningDetailView(generics.RetrieveUpdateAPIView):
@@ -160,10 +149,7 @@ class EmployeeLearningDetailView(generics.RetrieveUpdateAPIView):
     permission_classes = [IsHcmUser]
 
     def get_queryset(self):
-        queryset = EmployeeLearning.objects.select_related("employee__user", "course")
-        if self.request.user.role == User.Role.LEADER and not self.request.user.is_superuser:
-            queryset = queryset.filter(employee__user__department_id=self.request.user.department_id)
-        return queryset
+        return EmployeeLearning.objects.select_related("employee__user", "course")
 
 
 class CandidateListCreateView(generics.ListCreateAPIView):
@@ -211,8 +197,6 @@ class HcmSummaryView(APIView):
 
     def get(self, request):
         employees = EmployeeProfile.objects.all()
-        if request.user.role == User.Role.LEADER and not request.user.is_superuser:
-            employees = employees.filter(user__department_id=request.user.department_id)
         candidates = Candidate.objects.all()
         return Response(
             {
@@ -221,9 +205,7 @@ class HcmSummaryView(APIView):
                 "average_development_progress": round(
                     sum(employees.values_list("development_progress", flat=True)) / max(employees.count(), 1)
                 ),
-                "candidates_total": candidates.count() if request.user.role != User.Role.LEADER else 0,
-                "open_positions": candidates.values("desired_position").distinct().count()
-                if request.user.role != User.Role.LEADER
-                else 0,
+                "candidates_total": candidates.count(),
+                "open_positions": candidates.values("desired_position").distinct().count(),
             }
         )

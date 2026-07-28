@@ -23,6 +23,18 @@ class PeopleApiTests(TestCase):
         self.other_department = Department.objects.create(name="Продукт", code="product")
         self.position = Position.objects.create(name="Аналитик")
         self.admin = User.objects.create_superuser(email="admin@test.local", password="Password123!")
+        self.hr = User.objects.create_user(
+            email="hr@test.local",
+            password="Password123!",
+            role=User.Role.HR,
+            status=User.Status.ACTIVE,
+        )
+        self.author = User.objects.create_user(
+            email="author@test.local",
+            password="Password123!",
+            role=User.Role.AUTHOR,
+            status=User.Status.ACTIVE,
+        )
         self.leader = User.objects.create_user(
             email="leader@test.local",
             password="Password123!",
@@ -64,16 +76,30 @@ class PeopleApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("salary_base", response.json()[0])
 
-    def test_leader_sees_only_department_without_compensation(self):
+    def test_leader_cannot_open_hcm_registry(self):
         self.client.force_authenticate(self.leader)
         response = self.client.get("/api/v1/employees/")
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.json()), 1)
-        self.assertNotIn("salary_base", response.json()[0])
+        self.assertEqual(response.status_code, 403)
 
     def test_employee_cannot_open_hcm_registry(self):
         self.client.force_authenticate(self.employee)
         self.assertEqual(self.client.get("/api/v1/employees/").status_code, 403)
+
+    def test_course_author_cannot_open_hcm_sections(self):
+        self.client.force_authenticate(self.author)
+        self.assertEqual(self.client.get("/api/v1/employees/").status_code, 403)
+        self.assertEqual(self.client.get("/api/v1/candidates/").status_code, 403)
+        self.assertEqual(self.client.get("/api/v1/hcm/summary/").status_code, 403)
+
+    def test_hr_has_hcm_access_and_sees_compensation(self):
+        self.client.force_authenticate(self.hr)
+        employees = self.client.get("/api/v1/employees/")
+        candidates = self.client.get("/api/v1/candidates/")
+        analytics = self.client.get("/api/v1/hcm/summary/")
+        self.assertEqual(employees.status_code, 200)
+        self.assertEqual(candidates.status_code, 200)
+        self.assertEqual(analytics.status_code, 200)
+        self.assertIn("salary_base", employees.json()[0])
 
     def test_admin_sees_recruitment_board_and_summary(self):
         self.client.force_authenticate(self.admin)
@@ -159,7 +185,7 @@ class PeopleApiTests(TestCase):
         self.assertEqual(document.status_code, 201)
         self.assertTrue(EmployeeDocument.objects.filter(employee=self.profile).exists())
 
-    def test_leader_reads_profile_of_own_department_but_cannot_change_it(self):
+    def test_leader_cannot_read_or_change_employee_profile(self):
         EmployeeGoal.objects.create(employee=self.profile, title="Цель отдела")
         self.client.force_authenticate(self.leader)
         response = self.client.get(f"/api/v1/employees/{self.profile.pk}/goals/")
@@ -168,6 +194,5 @@ class PeopleApiTests(TestCase):
             {"title": "Новая цель", "progress": 0},
             format="json",
         )
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.json()), 1)
+        self.assertEqual(response.status_code, 403)
         self.assertEqual(forbidden.status_code, 403)

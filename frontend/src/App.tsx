@@ -375,8 +375,7 @@ const adminNav = [
 ];
 
 function visibleHcmNav(user: User) {
-  if (user.role === "admin" || user.role === "hr") return hcmNav;
-  return user.role === "leader" ? hcmNav.filter((item) => item.id !== "recruitment") : [];
+  return user.role === "admin" || user.role === "hr" ? hcmNav : [];
 }
 
 function visibleAdminNav(user: User) {
@@ -385,6 +384,12 @@ function visibleAdminNav(user: User) {
     : user.role === "author"
       ? adminNav.filter((item) => item.id === "courses")
       : [];
+}
+
+function canAccessView(user: User, view: ViewId) {
+  return nav.some((item) => item.id === view)
+    || visibleHcmNav(user).some((item) => item.id === view)
+    || visibleAdminNav(user).some((item) => item.id === view);
 }
 
 function Sidebar({
@@ -578,6 +583,14 @@ function HomeView({ user }: { user: User }) {
   );
 }
 
+const roleAccessCards = [
+  { role: "employee", title: "Сотрудник", access: "Проходит курсы, траектории и тесты. Не видит данные персонала." },
+  { role: "author", title: "Автор курсов", access: "Создаёт и редактирует свои курсы и проекты обучения." },
+  { role: "hr", title: "HR-менеджер", access: "Работает с сотрудниками, подбором и HR-аналитикой." },
+  { role: "admin", title: "Администратор", access: "Полный доступ, пользователи, роли, HCM и все курсы." },
+  { role: "leader", title: "Руководитель", access: "Проходит обучение как сотрудник; управленческие отчёты добавим отдельно." },
+];
+
 function UsersView({ token }: { token: string }) {
   const [users, setUsers] = useState<User[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -644,17 +657,25 @@ function UsersView({ token }: { token: string }) {
     <>
       <PageHeader
         title="Пользователи"
-        subtitle="Сотрудники, роли, отделы и приглашения"
+        subtitle="Учётные записи, роли, отделы и приглашения"
         action={
           <button className="primary-button" type="button" onClick={() => setShowForm(true)}>
-            <Plus /> Добавить сотрудника
+            <Plus /> Добавить пользователя
           </button>
         }
       />
+      <section className="role-access-grid" aria-label="Права ролей">
+        {roleAccessCards.map((item) => (
+          <article className="role-access-card" key={item.role}>
+            <span className={`role-access-card__badge role-access-card__badge--${item.role}`}>{item.title}</span>
+            <p>{item.access}</p>
+          </article>
+        ))}
+      </section>
       {showForm && (
         <section className="panel form-panel">
           <div className="section-heading">
-            <div><h2>Новый сотрудник</h2><p>На почту будет подготовлено приглашение</p></div>
+            <div><h2>Новый пользователь</h2><p>Выберите роль — доступы применятся автоматически</p></div>
             <button className="icon-button" type="button" onClick={() => setShowForm(false)} aria-label="Закрыть"><X /></button>
           </div>
           <form className="user-form" onSubmit={createUser}>
@@ -662,9 +683,9 @@ function UsersView({ token }: { token: string }) {
             <label>Фамилия<input value={form.last_name} onChange={(e) => setForm({ ...form, last_name: e.target.value })} required /></label>
             <label>Email<input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required /></label>
             <label>Роль<select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
-              <option value="employee">Сотрудник</option><option value="author">Автор</option>
-              <option value="hr">HR-менеджер</option><option value="leader">Руководитель</option>
-              <option value="admin">Администратор</option>
+              <option value="employee">Сотрудник</option><option value="hr">HR-менеджер</option>
+              <option value="admin">Администратор</option><option value="author">Автор курсов</option>
+              <option value="leader">Руководитель</option>
             </select></label>
             <label>Отдел<select value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })}>
               <option value="">Без отдела</option>{departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
@@ -2849,8 +2870,12 @@ function App() {
   }
 
   function navigate(view: ViewId) {
-    setActive(view);
+    if (user && canAccessView(user, view)) setActive(view);
   }
+
+  useEffect(() => {
+    if (user && !canAccessView(user, active)) setActive("home");
+  }, [user, active]);
 
   if (!token || !user) return <LoginPage onLogin={login} />;
 
