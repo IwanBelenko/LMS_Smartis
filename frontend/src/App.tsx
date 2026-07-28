@@ -332,7 +332,7 @@ type OnboardingTemplateConfig = {
 type LearningPathOption = { id: number; title: string; status: string };
 type QuizOption = { text: string; correct: boolean };
 type QuizQuestion = { prompt: string; options: QuizOption[] };
-type QuizData = { passing_score: number; questions: QuizQuestion[] };
+type QuizData = { passing_score: number; max_attempts: number; questions: QuizQuestion[] };
 type Lesson = {
   id?: number;
   client_key: string;
@@ -415,6 +415,44 @@ type LearningPath = {
   course_ids: number[];
   course_count: number;
   updated_at: string;
+};
+type LearningLesson = Omit<Lesson, "client_key" | "quiz_data"> & {
+  quiz_data: QuizData;
+  completed: boolean;
+  best_score: number | null;
+  attempts_count: number;
+};
+type CourseEnrollment = {
+  id: number;
+  course: number;
+  course_title: string;
+  course_description: string;
+  course_minutes: number;
+  course_cover_url: string;
+  learning_path: number | null;
+  learning_path_title: string;
+  position: number;
+  status: "locked" | "available" | "in_progress" | "completed";
+  status_label: string;
+  progress: number;
+  score: number | null;
+  started_at: string | null;
+  completed_at: string | null;
+  lessons: LearningLesson[];
+};
+type LearningPathProgress = {
+  id: number;
+  title: string;
+  description: string;
+  progress: number;
+  completed_courses: number;
+  course_count: number;
+  status: "in_progress" | "completed";
+  courses: CourseEnrollment[];
+};
+type MyLearning = {
+  paths: LearningPathProgress[];
+  standalone: CourseEnrollment[];
 };
 
 const API = "/api/v1";
@@ -742,26 +780,34 @@ function Spider({ progress }: { progress: number }) {
   );
 }
 
-function HomeView({ user }: { user: User }) {
+function HomeView({ user, token, onNavigate }: { user: User; token: string; onNavigate: (view: ViewId) => void }) {
+  const [learning, setLearning] = useState<MyLearning>({ paths: [], standalone: [] });
+  useEffect(() => {
+    apiRequest<MyLearning>("/my-learning/", token).then(setLearning).catch(() => undefined);
+  }, [token]);
+  const allCourses = [...learning.paths.flatMap((path) => path.courses), ...learning.standalone];
+  const current = allCourses.find((item) => item.status === "in_progress")
+    || allCourses.find((item) => item.status === "available");
+  const completed = allCourses.filter((item) => item.status === "completed").length;
   const ranking = [
     ["Анна", 82], ["Вы", 54], ["Максим", 41], ["Ольга", 28],
   ] as const;
   return (
     <>
-      <PageHeader title={"Добрый день, " + (user.first_name || user.email)} subtitle="Траектория «Аналитик Smartis»" />
+      <PageHeader title={"Добрый день, " + (user.first_name || user.email)} subtitle={learning.paths[0] ? `Траектория «${learning.paths[0].title}»` : "Ваше обучение"} />
       <section className="stats">
         {[
-          ["Ближайший срок", "4 дня", "Модели атрибуции"],
-          ["Курсы", "7 / 16", "Пройдено"],
-          ["Проверка", "1", "Задание отправлено"],
+          ["Текущий курс", current ? `${current.progress}%` : "—", current?.course_title || "Нет назначений"],
+          ["Курсы", `${completed} / ${allCourses.length}`, "Пройдено"],
+          ["Траектории", String(learning.paths.length), learning.paths.some((path) => path.status === "completed") ? "Есть завершённые" : "В процессе"],
         ].map(([label, value, note]) => (
           <article className="stat-card" key={label}><span>{label}</span><strong>{value}</strong><small>{note}</small></article>
         ))}
       </section>
       <section className="panel current-course">
-        <div><span className="eyebrow">Текущий курс</span><h2>Модели атрибуции</h2><p>Урок 4 из 7 · срок 24 июля</p></div>
-        <button className="primary-button" type="button">Продолжить <ChevronRight /></button>
-        <div className="progress"><span style={{ width: "54%" }} /></div>
+        <div><span className="eyebrow">Текущий курс</span><h2>{current?.course_title || "Обучение пока не назначено"}</h2><p>{current ? `${current.lessons.filter((lesson) => lesson.completed).length} из ${current.lessons.length} уроков · ${current.course_minutes} мин` : "Новые курсы появятся здесь после назначения"}</p></div>
+        <button className="primary-button" type="button" onClick={() => onNavigate("trajectory")}>{current ? "Продолжить" : "Открыть обучение"} <ChevronRight /></button>
+        <div className="progress"><span style={{ width: `${current?.progress || 0}%` }} /></div>
       </section>
       <section className="panel">
         <div className="section-heading"><div><h2>Рейтинг</h2><p>Участники курса внутри вашего отдела</p></div><Trophy /></div>
@@ -2168,6 +2214,7 @@ const lessonTypeLabels: Record<Lesson["lesson_type"], string> = {
 function emptyQuiz(): QuizData {
   return {
     passing_score: 80,
+    max_attempts: 3,
     questions: [{
       prompt: "",
       options: [{ text: "", correct: true }, { text: "", correct: false }],
@@ -2326,9 +2373,14 @@ function QuizEditor({ value, onChange }: { value: QuizData; onChange: (value: Qu
     <div className="quiz-editor">
       <div className="quiz-editor__heading">
         <div><h2>Вопросы теста</h2><p>Один вариант ответа на каждый вопрос</p></div>
-        <label>Проходной балл
-          <span className="quiz-editor__score"><input type="number" min="0" max="100" value={quiz.passing_score} onChange={(event) => onChange({ ...quiz, passing_score: Number(event.target.value) })} /><b>%</b></span>
-        </label>
+        <div className="quiz-editor__rules">
+          <label>Проходной балл
+            <span className="quiz-editor__score"><input type="number" min="0" max="100" value={quiz.passing_score} onChange={(event) => onChange({ ...quiz, passing_score: Number(event.target.value) })} /><b>%</b></span>
+          </label>
+          <label>Попыток
+            <span className="quiz-editor__score"><input type="number" min="1" max="20" value={quiz.max_attempts ?? 3} onChange={(event) => onChange({ ...quiz, max_attempts: Number(event.target.value) })} /></span>
+          </label>
+        </div>
       </div>
       {quiz.questions.map((question, questionIndex) => (
         <fieldset className="quiz-editor__question" key={questionIndex}>
@@ -2481,6 +2533,292 @@ function CoursePreviewModal({
         )}
       </section>
     </div>
+  );
+}
+
+function LearningCourseModal({
+  enrollment,
+  token,
+  onClose,
+  onUpdated,
+}: {
+  enrollment: CourseEnrollment;
+  token: string;
+  onClose: () => void;
+  onUpdated: () => Promise<void>;
+}) {
+  const [current, setCurrent] = useState(enrollment);
+  const [lessonIndex, setLessonIndex] = useState(() => {
+    const index = enrollment.lessons.findIndex((lesson) => !lesson.completed);
+    return index < 0 ? Math.max(enrollment.lessons.length - 1, 0) : index;
+  });
+  const [questionIndex, setQuestionIndex] = useState(0);
+  const [answers, setAnswers] = useState<Record<number, number>>({});
+  const [quizResult, setQuizResult] = useState<{ score: number; passed: boolean; attempts_left: number } | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const lesson = current.lessons[lessonIndex];
+  const questions = lesson?.quiz_data?.questions || [];
+  const selectedAnswer = answers[questionIndex];
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    void apiRequest<CourseEnrollment>(`/my-learning/${enrollment.id}/start/`, token, { method: "POST" })
+      .then(setCurrent)
+      .catch((reason) => setError(reason instanceof Error ? reason.message : "Не удалось начать курс"));
+    return () => { document.body.style.overflow = previousOverflow; };
+  }, [enrollment.id, token]);
+
+  function moveForward(next: CourseEnrollment) {
+    setCurrent(next);
+    const nextIndex = next.lessons.findIndex((item, index) => index > lessonIndex && !item.completed);
+    if (nextIndex >= 0) setLessonIndex(nextIndex);
+    setQuestionIndex(0);
+    setAnswers({});
+    setQuizResult(null);
+  }
+
+  async function completeLesson() {
+    if (!lesson) return;
+    if (lesson.completed) {
+      const nextIndex = current.lessons.findIndex((item, index) => index > lessonIndex && !item.completed);
+      if (nextIndex >= 0) setLessonIndex(nextIndex);
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      const next = await apiRequest<CourseEnrollment>(
+        `/my-learning/${current.id}/lessons/${lesson.id}/complete/`,
+        token,
+        { method: "POST" },
+      );
+      moveForward(next);
+      await onUpdated();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось сохранить прогресс");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function submitQuiz() {
+    if (!lesson || Object.keys(answers).length !== questions.length) return;
+    setSaving(true);
+    setError("");
+    try {
+      const result = await apiRequest<{
+        score: number;
+        passed: boolean;
+        attempts_left: number;
+        enrollment: CourseEnrollment;
+      }>(`/my-learning/${current.id}/lessons/${lesson.id}/submit-quiz/`, token, {
+        method: "POST",
+        body: JSON.stringify({ answers: questions.map((_, index) => answers[index]) }),
+      });
+      setCurrent(result.enrollment);
+      setQuizResult(result);
+      await onUpdated();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось отправить тест");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function restartQuiz() {
+    setAnswers({});
+    setQuestionIndex(0);
+    setQuizResult(null);
+  }
+
+  if (!lesson && current.status !== "completed") {
+    return <div className="course-preview-overlay"><section className="course-preview-modal learning-player"><div className="update-empty">В курсе пока нет уроков.</div></section></div>;
+  }
+
+  return (
+    <div className="course-preview-overlay" role="dialog" aria-modal="true" aria-label={`Прохождение курса ${current.course_title}`}>
+      <section className="course-preview-modal learning-player">
+        <header className="course-preview-header">
+          <div><span>{current.learning_path_title || "Назначенный курс"}</span><strong>{current.course_title}</strong></div>
+          <div className="learning-player__header-progress"><span>{current.progress}%</span><i><b style={{ width: `${current.progress}%` }} /></i></div>
+          <button className="icon-button" type="button" onClick={onClose} aria-label="Закрыть курс"><X /></button>
+        </header>
+        <div className="learning-player__body">
+          <aside className="learning-player__outline">
+            <span className="eyebrow">Содержание</span>
+            {current.lessons.map((item, index) => (
+              <button
+                className={index === lessonIndex ? "learning-player__lesson learning-player__lesson--active" : "learning-player__lesson"}
+                type="button"
+                disabled={!item.completed && index > lessonIndex}
+                onClick={() => { if (item.completed || index <= lessonIndex) setLessonIndex(index); }}
+                key={item.id}
+              >
+                <span>{item.completed ? <CheckCircle2 /> : index + 1}</span>
+                <div><strong>{item.title}</strong><small>{item.lesson_type_label}</small></div>
+              </button>
+            ))}
+          </aside>
+          <main className="learning-player__content">
+            {current.status === "completed" && current.lessons.every((item) => item.completed) ? (
+              <div className="learning-player__completed"><CheckCircle2 /><span className="eyebrow">Курс завершён</span><h1>{current.course_title}</h1><p>Прогресс сохранён. Следующий курс траектории уже открыт.</p>{current.score !== null && <strong>Итоговый результат: {current.score}%</strong>}<button className="primary-button" type="button" onClick={onClose}>Вернуться к траектории</button></div>
+            ) : lesson ? (
+              <article className="learning-player__page">
+                <div className="longread-chapter-kicker"><span>Урок {lessonIndex + 1} из {current.lessons.length}</span><span>{lesson.lesson_type_label}</span></div>
+                <h1>{lesson.title}</h1>
+                {error && <div className="form-error">{error}</div>}
+                {lesson.lesson_type === "quiz" ? (
+                  quizResult ? (
+                    <div className={quizResult.passed ? "quiz-result quiz-result--passed" : "quiz-result quiz-result--failed"}>
+                      <CheckCircle2 />
+                      <div><strong>{quizResult.passed ? "Тест пройден" : "Проходной балл не набран"}</strong><span>Результат: {quizResult.score}% · осталось попыток: {quizResult.attempts_left}</span></div>
+                      {quizResult.passed
+                        ? <button className="primary-button" type="button" onClick={() => moveForward(current)}>Продолжить <ChevronRight /></button>
+                        : quizResult.attempts_left > 0 && <button className="secondary-button" type="button" onClick={restartQuiz}>Повторить тест</button>}
+                    </div>
+                  ) : (
+                    <div className="quiz-preview learning-quiz">
+                      <div className="quiz-preview__progress"><div><span>Вопрос {questionIndex + 1} из {questions.length}</span><strong>{lesson.attempts_count + 1} попытка</strong></div><span><i style={{ width: `${((questionIndex + 1) / Math.max(questions.length, 1)) * 100}%` }} /></span></div>
+                      <p className="quiz-preview__intro">Проходной балл {lesson.quiz_data.passing_score}% · доступно попыток {lesson.quiz_data.max_attempts}</p>
+                      <fieldset className="quiz-question">
+                        <legend>{questionIndex + 1}. {questions[questionIndex]?.prompt}</legend>
+                        <div className="quiz-options">{questions[questionIndex]?.options.map((option, index) => <label className={selectedAnswer === index ? "quiz-option quiz-option--chosen" : "quiz-option"} key={`${option.text}-${index}`}><input type="radio" name={`learning-question-${questionIndex}`} checked={selectedAnswer === index} onChange={() => setAnswers({ ...answers, [questionIndex]: index })} /><span>{option.text}</span></label>)}</div>
+                      </fieldset>
+                      {questionIndex < questions.length - 1
+                        ? <button className="primary-button quiz-preview__submit" type="button" disabled={selectedAnswer === undefined} onClick={() => setQuestionIndex((value) => value + 1)}>Следующий вопрос <ChevronRight /></button>
+                        : <button className="primary-button quiz-preview__submit" type="button" disabled={selectedAnswer === undefined || saving} onClick={() => void submitQuiz()}>{saving ? "Проверяем…" : "Завершить тест"} <CheckCircle2 /></button>}
+                    </div>
+                  )
+                ) : lesson.lesson_type === "text" ? (
+                  <div className="native-preview-content" dangerouslySetInnerHTML={{ __html: lesson.content || "<p>Содержание пока не добавлено.</p>" }} />
+                ) : lesson.lesson_type === "video" ? (
+                  lesson.video_url ? <video className="native-preview-video" src={lesson.video_url} controls /> : <div className="native-preview-placeholder"><Video /><p>Видеофайл недоступен.</p></div>
+                ) : lesson.lesson_type === "scorm" ? (
+                  <div className="native-preview-placeholder"><FileArchive /><p>Изучите материал SCORM, затем отметьте урок завершённым.</p></div>
+                ) : (
+                  <div className="native-preview-placeholder"><Link2 /><p>Материал откроется в новой вкладке.</p><a className="primary-button" href={lesson.media_url} target="_blank" rel="noreferrer">Открыть материал</a></div>
+                )}
+                {lesson.lesson_type !== "quiz" && <footer className="learning-player__continue"><span>{lesson.completed ? "Урок завершён" : "Прогресс сохранится автоматически"}</span><button className="primary-button" type="button" disabled={saving} onClick={() => void completeLesson()}>{saving ? "Сохраняем…" : lessonIndex === current.lessons.length - 1 ? "Завершить курс" : "Продолжить"} <ChevronRight /></button></footer>}
+              </article>
+            ) : null}
+          </main>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function TrajectoryView({ token, user }: { token: string; user: User }) {
+  const [learning, setLearning] = useState<MyLearning>({ paths: [], standalone: [] });
+  const [opened, setOpened] = useState<CourseEnrollment | null>(null);
+  const [showAssign, setShowAssign] = useState(false);
+  const [assignmentOptions, setAssignmentOptions] = useState<{
+    users: Array<{ id: number; name: string; email: string }>;
+    paths: Array<{ id: number; title: string }>;
+    courses: Array<{ id: number; title: string }>;
+  }>({ users: [], paths: [], courses: [] });
+  const [assignment, setAssignment] = useState({ user_id: "", kind: "path", material_id: "" });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  async function load() {
+    try {
+      const next = await apiRequest<MyLearning>("/my-learning/", token);
+      setLearning(next);
+      if (opened) {
+        const fresh = [...next.paths.flatMap((path) => path.courses), ...next.standalone].find((item) => item.id === opened.id);
+        if (fresh) setOpened(fresh);
+      }
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось загрузить обучение");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { void load(); }, [token]);
+  const canAssign = user.role === "admin" || user.role === "hr";
+  const allCourses = [...learning.paths.flatMap((path) => path.courses), ...learning.standalone];
+  const completed = allCourses.filter((item) => item.status === "completed").length;
+
+  async function openAssignment() {
+    setError("");
+    try {
+      const options = await apiRequest<typeof assignmentOptions>("/my-learning/assignment-options/", token);
+      setAssignmentOptions(options);
+      setAssignment({
+        user_id: options.users[0] ? String(options.users[0].id) : "",
+        kind: options.paths.length ? "path" : "course",
+        material_id: String(options.paths[0]?.id || options.courses[0]?.id || ""),
+      });
+      setShowAssign(true);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось открыть назначения");
+    }
+  }
+
+  function changeAssignmentKind(kind: string) {
+    const list = kind === "path" ? assignmentOptions.paths : assignmentOptions.courses;
+    setAssignment({ ...assignment, kind, material_id: String(list[0]?.id || "") });
+  }
+
+  async function assignLearning(event: FormEvent) {
+    event.preventDefault();
+    setError("");
+    try {
+      await apiRequest(
+        assignment.kind === "path" ? "/my-learning/assign-path/" : "/my-learning/assign-course/",
+        token,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            user_id: Number(assignment.user_id),
+            [assignment.kind === "path" ? "learning_path_id" : "course_id"]: Number(assignment.material_id),
+          }),
+        },
+      );
+      setShowAssign(false);
+      if (Number(assignment.user_id) === user.id) await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось назначить обучение");
+    }
+  }
+
+  return (
+    <>
+      <PageHeader title="Траектория обучения" subtitle="Назначенные курсы открываются последовательно" action={canAssign ? <button className="primary-button" type="button" onClick={() => void openAssignment()}><Plus />Назначить обучение</button> : undefined} />
+      {error && <div className="form-error">{error}</div>}
+      <section className="learning-overview">
+        <article><span>Общий прогресс</span><strong>{allCourses.length ? Math.round(allCourses.reduce((sum, item) => sum + item.progress, 0) / allCourses.length) : 0}%</strong></article>
+        <article><span>Завершено курсов</span><strong>{completed} из {allCourses.length}</strong></article>
+        <article><span>Активные траектории</span><strong>{learning.paths.filter((path) => path.status !== "completed").length}</strong></article>
+      </section>
+      <div className="learning-path-list">
+        {learning.paths.map((path) => (
+          <section className="panel learner-path" key={path.id}>
+            <header><div><span className="eyebrow">{path.status === "completed" ? "Завершена" : "Траектория"}</span><h2>{path.title}</h2><p>{path.description}</p></div><strong>{path.progress}%</strong></header>
+            <div className="learner-path__progress"><i style={{ width: `${path.progress}%` }} /></div>
+            <div className="learning-path-courses">
+              {path.courses.map((course, index) => (
+                <article className={`learning-course-row learning-course-row--${course.status}`} key={course.id}>
+                  <span className="learning-course-row__number">{course.status === "completed" ? <CheckCircle2 /> : index + 1}</span>
+                  <div><strong>{course.course_title}</strong><span>{course.lessons.length} уроков · {course.course_minutes} мин · {course.status_label}</span></div>
+                  <div className="mini-progress"><i style={{ width: `${course.progress}%` }} /></div>
+                  <strong>{course.progress}%</strong>
+                  <button className={course.status === "locked" ? "secondary-button" : "primary-button"} type="button" disabled={course.status === "locked"} onClick={() => setOpened(course)}>{course.status === "completed" ? "Повторить" : course.status === "in_progress" ? "Продолжить" : course.status === "available" ? "Начать" : "Недоступен"}</button>
+                </article>
+              ))}
+            </div>
+          </section>
+        ))}
+        {learning.standalone.length > 0 && <section className="panel learner-path"><header><div><span className="eyebrow">Отдельные назначения</span><h2>Мои курсы</h2></div></header><div className="learning-path-courses">{learning.standalone.map((course, index) => <article className={`learning-course-row learning-course-row--${course.status}`} key={course.id}><span className="learning-course-row__number">{course.status === "completed" ? <CheckCircle2 /> : index + 1}</span><div><strong>{course.course_title}</strong><span>{course.lessons.length} уроков · {course.status_label}</span></div><div className="mini-progress"><i style={{ width: `${course.progress}%` }} /></div><strong>{course.progress}%</strong><button className="primary-button" type="button" onClick={() => setOpened(course)}>{course.status === "completed" ? "Повторить" : course.status === "in_progress" ? "Продолжить" : "Начать"}</button></article>)}</div></section>}
+        {!loading && !allCourses.length && <section className="panel learning-empty"><Route /><h2>Обучение пока не назначено</h2><p>После назначения курса или траектории они появятся здесь.</p></section>}
+      </div>
+      {opened && <LearningCourseModal enrollment={opened} token={token} onClose={() => setOpened(null)} onUpdated={load} />}
+      {showAssign && <div className="hcm-dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setShowAssign(false); }}><section className="hcm-dialog learning-assignment-dialog" role="dialog" aria-modal="true"><header><div><span className="eyebrow">Ручное назначение</span><h2>Назначить обучение</h2></div><button className="icon-button" type="button" aria-label="Закрыть" onClick={() => setShowAssign(false)}><X /></button></header><form className="hcm-form" onSubmit={assignLearning}><div className="hcm-form__grid"><label className="hcm-form__wide">Сотрудник<select value={assignment.user_id} onChange={(event) => setAssignment({ ...assignment, user_id: event.target.value })} required>{assignmentOptions.users.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label><label>Тип назначения<select value={assignment.kind} onChange={(event) => changeAssignmentKind(event.target.value)}><option value="path" disabled={!assignmentOptions.paths.length}>Траектория</option><option value="course" disabled={!assignmentOptions.courses.length}>Отдельный курс</option></select></label><label>{assignment.kind === "path" ? "Траектория" : "Курс"}<select value={assignment.material_id} onChange={(event) => setAssignment({ ...assignment, material_id: event.target.value })} required>{(assignment.kind === "path" ? assignmentOptions.paths : assignmentOptions.courses).map((item) => <option value={item.id} key={item.id}>{item.title}</option>)}</select></label></div><footer><button className="secondary-button" type="button" onClick={() => setShowAssign(false)}>Отмена</button><button className="primary-button" type="submit" disabled={!assignment.user_id || !assignment.material_id}>Назначить</button></footer></form></section></div>}
+    </>
   );
 }
 
@@ -4684,7 +5022,9 @@ function App() {
       )}
       <main className="main-content">
         {active === "home" ? (
-          <HomeView user={user} />
+          <HomeView user={user} token={token} onNavigate={navigate} />
+        ) : active === "trajectory" ? (
+          <TrajectoryView token={token} user={user} />
         ) : active === "tasks" ? (
           <TaskCenterView token={token} onNavigate={navigate} />
         ) : active === "analytics" ? (

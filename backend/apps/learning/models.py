@@ -239,6 +239,101 @@ class Lesson(models.Model):
         return self.title
 
 
+class CourseEnrollment(models.Model):
+    class Status(models.TextChoices):
+        LOCKED = "locked", "Недоступен"
+        AVAILABLE = "available", "Доступен"
+        IN_PROGRESS = "in_progress", "В процессе"
+        COMPLETED = "completed", "Завершён"
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="course_enrollments",
+        on_delete=models.CASCADE,
+    )
+    course = models.ForeignKey(Course, related_name="enrollments", on_delete=models.CASCADE)
+    learning_path = models.ForeignKey(
+        LearningPath,
+        related_name="enrollments",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+    )
+    position = models.PositiveIntegerField("Позиция в траектории", default=0)
+    status = models.CharField(
+        "Статус",
+        max_length=20,
+        choices=Status.choices,
+        default=Status.AVAILABLE,
+    )
+    progress = models.PositiveSmallIntegerField("Прогресс, %", default=0)
+    score = models.PositiveSmallIntegerField("Итоговый балл, %", null=True, blank=True)
+    started_at = models.DateTimeField("Начат", null=True, blank=True)
+    completed_at = models.DateTimeField("Завершён", null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["learning_path_id", "position", "created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "course", "learning_path"],
+                name="unique_user_course_path_enrollment",
+            ),
+        ]
+        verbose_name = "Прохождение курса"
+        verbose_name_plural = "Прохождение курсов"
+
+
+class LessonProgress(models.Model):
+    enrollment = models.ForeignKey(
+        CourseEnrollment,
+        related_name="lesson_progress",
+        on_delete=models.CASCADE,
+    )
+    lesson = models.ForeignKey(Lesson, related_name="learner_progress", on_delete=models.CASCADE)
+    completed = models.BooleanField("Завершён", default=False)
+    best_score = models.PositiveSmallIntegerField("Лучший балл, %", null=True, blank=True)
+    attempts_count = models.PositiveSmallIntegerField("Количество попыток", default=0)
+    completed_at = models.DateTimeField("Завершён", null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["enrollment", "lesson"],
+                name="unique_lesson_progress_per_enrollment",
+            ),
+        ]
+        verbose_name = "Прогресс урока"
+        verbose_name_plural = "Прогресс уроков"
+
+
+class QuizAttempt(models.Model):
+    enrollment = models.ForeignKey(
+        CourseEnrollment,
+        related_name="quiz_attempts",
+        on_delete=models.CASCADE,
+    )
+    lesson = models.ForeignKey(Lesson, related_name="quiz_attempts", on_delete=models.CASCADE)
+    attempt_number = models.PositiveSmallIntegerField("Номер попытки")
+    answers = models.JSONField("Ответы", default=list)
+    score = models.PositiveSmallIntegerField("Результат, %")
+    passed = models.BooleanField("Пройден", default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["enrollment", "lesson", "attempt_number"],
+                name="unique_quiz_attempt_number",
+            ),
+        ]
+        verbose_name = "Попытка теста"
+        verbose_name_plural = "Попытки тестов"
+
+
 @receiver(post_delete, sender=Lesson)
 def delete_lesson_video(sender, instance, **kwargs):
     if instance.video_file:

@@ -4,7 +4,15 @@ from rest_framework import serializers
 
 from apps.identity.models import User
 
-from .models import ContentFolder, ContentProject, Course, LearningPath, LearningPathCourse, Lesson
+from .models import (
+    ContentFolder,
+    ContentProject,
+    Course,
+    CourseEnrollment,
+    LearningPath,
+    LearningPathCourse,
+    Lesson,
+)
 
 
 def validate_library_placement(request, project, folder):
@@ -113,6 +121,32 @@ class LessonSerializer(serializers.ModelSerializer):
         request = self.context.get("request")
         return request.build_absolute_uri(obj.video_file.url) if request else obj.video_file.url
 
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        can_edit = bool(
+            user
+            and user.is_authenticated
+            and (user.is_superuser or user.role in {User.Role.ADMIN, User.Role.AUTHOR})
+        )
+        if instance.lesson_type == Lesson.Type.QUIZ and not can_edit:
+            quiz_data = data.get("quiz_data") or {}
+            data["quiz_data"] = {
+                **quiz_data,
+                "questions": [
+                    {
+                        **question,
+                        "options": [
+                            {"text": option.get("text", "")}
+                            for option in question.get("options", [])
+                        ],
+                    }
+                    for question in quiz_data.get("questions", [])
+                ],
+            }
+        return data
+
     def validate_content(self, value):
         return nh3.clean(
             value,
@@ -148,8 +182,11 @@ class LessonSerializer(serializers.ModelSerializer):
             quiz_data = attrs.get("quiz_data", getattr(self.instance, "quiz_data", {}))
             questions = quiz_data.get("questions", []) if isinstance(quiz_data, dict) else []
             passing_score = quiz_data.get("passing_score", 80) if isinstance(quiz_data, dict) else 80
+            max_attempts = quiz_data.get("max_attempts", 3) if isinstance(quiz_data, dict) else 3
             if not isinstance(passing_score, (int, float)) or not 0 <= passing_score <= 100:
                 raise serializers.ValidationError({"quiz_data": "Проходной балл должен быть от 0 до 100"})
+            if not isinstance(max_attempts, int) or not 1 <= max_attempts <= 20:
+                raise serializers.ValidationError({"quiz_data": "Количество попыток должно быть от 1 до 20"})
             if not questions:
                 raise serializers.ValidationError({"quiz_data": "Добавьте хотя бы один вопрос"})
             for question in questions:
@@ -375,3 +412,68 @@ class LearningPathSerializer(serializers.ModelSerializer):
                 for position, course in enumerate(courses)
             ])
         return instance
+
+
+class CourseEnrollmentSerializer(serializers.ModelSerializer):
+    course_title = serializers.CharField(source="course.title", read_only=True)
+    course_description = serializers.CharField(source="course.description", read_only=True)
+    course_minutes = serializers.IntegerField(source="course.estimated_minutes", read_only=True)
+    course_cover_url = serializers.SerializerMethodField()
+    learning_path_title = serializers.CharField(source="learning_path.title", read_only=True, default="")
+    status_label = serializers.CharField(source="get_status_display", read_only=True)
+    lessons = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CourseEnrollment
+        fields = [
+            "id", "course", "course_title", "course_description", "course_minutes",
+            "course_cover_url", "learning_path", "learning_path_title", "position",
+            "status", "status_label", "progress", "score", "started_at",
+            "completed_at", "lessons",
+        ]
+
+    def get_course_cover_url(self, obj):
+        if not obj.course.cover_file:
+            return ""
+        request = self.context.get("request")
+        return request.build_absolute_uri(obj.course.cover_file.url) if request else obj.course.cover_file.url
+
+    def get_lessons(self, obj):
+        progress_by_lesson = {
+            item.lesson_id: item
+            for item in obj.lesson_progress.all()
+        }
+        result = []
+        for lesson in obj.course.lessons.all():
+            progress = progress_by_lesson.get(lesson.pk)
+            quiz_data = lesson.quiz_data if isinstance(lesson.quiz_data, dict) else {}
+            safe_questions = [
+                {
+                    "prompt": question.get("prompt", ""),
+                    "options": [{"text": option.get("text", "")} for option in question.get("options", [])],
+                }
+                for question in quiz_data.get("questions", [])
+                if isinstance(question, dict)
+            ]
+            result.append({
+                "id": lesson.pk,
+                "title": lesson.title,
+                "lesson_type": lesson.lesson_type,
+                "lesson_type_label": lesson.get_lesson_type_display(),
+                "content": lesson.content,
+                "media_url": lesson.media_url,
+                "video_url": self.context["request"].build_absolute_uri(lesson.video_file.url)
+                if lesson.video_file and self.context.get("request") else lesson.video_file.url if lesson.video_file else "",
+                "duration_minutes": lesson.duration_minutes,
+                "position": lesson.position,
+                "is_required": lesson.is_required,
+                "quiz_data": {
+                    "passing_score": quiz_data.get("passing_score", 80),
+                    "max_attempts": quiz_data.get("max_attempts", 3),
+                    "questions": safe_questions,
+                } if lesson.lesson_type == Lesson.Type.QUIZ else {},
+                "completed": bool(progress and progress.completed),
+                "best_score": progress.best_score if progress else None,
+                "attempts_count": progress.attempts_count if progress else 0,
+            })
+        return result

@@ -10,7 +10,7 @@ from rest_framework.test import APIClient
 
 from apps.identity.models import User
 
-from .models import ContentProject, Course
+from .models import ContentProject, Course, CourseEnrollment, LearningPath, Lesson
 
 
 def make_scorm_12_package(title="Курс из SCORM", filename="course-scorm.zip", extra_files=None):
@@ -490,5 +490,120 @@ class CourseApiTests(TestCase):
         self.assertEqual(self.client.get("/api/v1/projects/").status_code, 403)
         self.assertEqual(
             self.client.post("/api/v1/projects/", {"name": "Личный проект"}, format="json").status_code,
+            403,
+        )
+
+    def test_path_unlocks_courses_in_sequence_after_required_lessons(self):
+        first = Course.objects.create(
+            title="Первый курс", author=self.admin, status=Course.Status.PUBLISHED
+        )
+        first_lesson = Lesson.objects.create(course=first, title="Введение", position=0)
+        second = Course.objects.create(
+            title="Второй курс", author=self.admin, status=Course.Status.PUBLISHED
+        )
+        Lesson.objects.create(course=second, title="Продолжение", position=0)
+        path = LearningPath.objects.create(
+            title="Последовательная траектория",
+            author=self.admin,
+            status=LearningPath.Status.PUBLISHED,
+        )
+        path.courses.add(first, through_defaults={"position": 0})
+        path.courses.add(second, through_defaults={"position": 1})
+
+        self.client.force_authenticate(self.admin)
+        assigned = self.client.post(
+            "/api/v1/my-learning/assign-path/",
+            {"user_id": self.employee.pk, "learning_path_id": path.pk},
+            format="json",
+        )
+        self.assertEqual(assigned.status_code, 201)
+        self.assertEqual(
+            [item["status"] for item in assigned.data],
+            [CourseEnrollment.Status.AVAILABLE, CourseEnrollment.Status.LOCKED],
+        )
+
+        self.client.force_authenticate(self.employee)
+        listing = self.client.get("/api/v1/my-learning/")
+        first_enrollment, second_enrollment = listing.data["paths"][0]["courses"]
+        self.assertNotIn("correct", first_enrollment["lessons"][0].get("quiz_data", {}))
+        self.assertEqual(
+            self.client.post(f"/api/v1/my-learning/{second_enrollment['id']}/start/").status_code,
+            400,
+        )
+        completed = self.client.post(
+            f"/api/v1/my-learning/{first_enrollment['id']}/lessons/{first_lesson.pk}/complete/"
+        )
+        self.assertEqual(completed.status_code, 200)
+        self.assertEqual(completed.data["status"], CourseEnrollment.Status.COMPLETED)
+        self.assertEqual(completed.data["progress"], 100)
+        second.refresh_from_db()
+        unlocked = CourseEnrollment.objects.get(pk=second_enrollment["id"])
+        self.assertEqual(unlocked.status, CourseEnrollment.Status.AVAILABLE)
+
+    def test_quiz_attempts_are_saved_and_passing_score_completes_course(self):
+        course = Course.objects.create(
+            title="Курс с тестом", author=self.admin, status=Course.Status.PUBLISHED
+        )
+        lesson = Lesson.objects.create(
+            course=course,
+            title="Итоговый тест",
+            lesson_type=Lesson.Type.QUIZ,
+            position=0,
+            quiz_data={
+                "passing_score": 100,
+                "max_attempts": 2,
+                "questions": [{
+                    "prompt": "Выберите верный ответ",
+                    "options": [
+                        {"text": "Неверно", "correct": False},
+                        {"text": "Верно", "correct": True},
+                    ],
+                }],
+            },
+        )
+        self.client.force_authenticate(self.admin)
+        assigned = self.client.post(
+            "/api/v1/my-learning/assign-course/",
+            {"user_id": self.employee.pk, "course_id": course.pk},
+            format="json",
+        )
+        enrollment_id = assigned.data["id"]
+
+        self.client.force_authenticate(self.employee)
+        public_course = self.client.get(f"/api/v1/courses/{course.pk}/")
+        self.assertNotIn(
+            "correct",
+            public_course.data["lessons"][0]["quiz_data"]["questions"][0]["options"][0],
+        )
+        failed = self.client.post(
+            f"/api/v1/my-learning/{enrollment_id}/lessons/{lesson.pk}/submit-quiz/",
+            {"answers": [0]},
+            format="json",
+        )
+        self.assertEqual(failed.status_code, 200)
+        self.assertFalse(failed.data["passed"])
+        self.assertEqual(failed.data["attempts_left"], 1)
+        passed = self.client.post(
+            f"/api/v1/my-learning/{enrollment_id}/lessons/{lesson.pk}/submit-quiz/",
+            {"answers": [1]},
+            format="json",
+        )
+        self.assertTrue(passed.data["passed"])
+        self.assertEqual(passed.data["score"], 100)
+        self.assertEqual(passed.data["enrollment"]["status"], CourseEnrollment.Status.COMPLETED)
+        self.assertEqual(passed.data["enrollment"]["lessons"][0]["attempts_count"], 2)
+        self.assertNotIn(
+            "correct",
+            passed.data["enrollment"]["lessons"][0]["quiz_data"]["questions"][0]["options"][0],
+        )
+
+    def test_employee_cannot_assign_learning(self):
+        self.client.force_authenticate(self.employee)
+        self.assertEqual(
+            self.client.post(
+                "/api/v1/my-learning/assign-course/",
+                {"user_id": self.employee.pk, "course_id": 999},
+                format="json",
+            ).status_code,
             403,
         )

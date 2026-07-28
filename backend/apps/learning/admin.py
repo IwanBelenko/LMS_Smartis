@@ -1,6 +1,15 @@
 from django.contrib import admin
 
-from .models import ContentFolder, ContentProject, Course, LearningPath, Lesson
+from .models import (
+    ContentFolder,
+    ContentProject,
+    Course,
+    CourseEnrollment,
+    LearningPath,
+    Lesson,
+    LessonProgress,
+    QuizAttempt,
+)
 
 
 class LessonInline(admin.TabularInline):
@@ -32,3 +41,8 @@ class ContentFolderAdmin(admin.ModelAdmin):
 class LearningPathAdmin(admin.ModelAdmin):
     list_display = ["title", "author", "project", "folder", "status", "updated_at"]
     list_filter = ["status", "author", "project"]
+
+
+admin.site.register(CourseEnrollment)
+admin.site.register(LessonProgress)
+admin.site.register(QuizAttempt)

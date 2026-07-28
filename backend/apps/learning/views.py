@@ -5,6 +5,7 @@ from urllib.parse import quote
 
 from django.conf import settings
 from django.core import signing
+from django.db import transaction
 from django.http import FileResponse, HttpResponseNotFound
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -13,11 +14,21 @@ from django.views.decorators.clickjacking import xframe_options_exempt
 from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, MultiPartParser
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from apps.identity.models import User
 
-from .models import ContentFolder, ContentProject, Course, LearningPath, Lesson
+from .models import (
+    ContentFolder,
+    ContentProject,
+    Course,
+    CourseEnrollment,
+    LearningPath,
+    Lesson,
+    LessonProgress,
+    QuizAttempt,
+)
 from .permissions import IsCourseManagerOrReadOnly, IsLibraryManager
 from .scorm import build_scorm_12_package, ensure_scorm_runtime_bridge, extract_scorm_package, inspect_scorm_package
 from .scorm_convert import convert_ispring_scorm_to_native, restore_ispring_images
@@ -25,10 +36,258 @@ from .serializers import (
     ContentFolderSerializer,
     ContentProjectSerializer,
     CourseSerializer,
+    CourseEnrollmentSerializer,
     LearningPathSerializer,
     LessonSerializer,
     validate_library_placement,
 )
+
+
+def create_path_enrollments(user, learning_path):
+    entries = list(
+        learning_path.path_courses.select_related("course")
+        .filter(course__status=Course.Status.PUBLISHED)
+        .order_by("position", "id")
+    )
+    enrollments = []
+    for index, entry in enumerate(entries):
+        enrollment, created = CourseEnrollment.objects.get_or_create(
+            user=user,
+            course=entry.course,
+            learning_path=learning_path,
+            defaults={
+                "position": index,
+                "status": CourseEnrollment.Status.AVAILABLE if index == 0 else CourseEnrollment.Status.LOCKED,
+            },
+        )
+        if not created and enrollment.status != CourseEnrollment.Status.COMPLETED:
+            desired = CourseEnrollment.Status.AVAILABLE if index == 0 else enrollment.status
+            if enrollment.status != desired:
+                enrollment.status = desired
+                enrollment.save(update_fields=["status", "updated_at"])
+        enrollments.append(enrollment)
+    return enrollments
+
+
+def recalculate_enrollment(enrollment):
+    lessons = list(enrollment.course.lessons.all())
+    required = [lesson for lesson in lessons if lesson.is_required] or lessons
+    completed_ids = set(
+        enrollment.lesson_progress.filter(completed=True).values_list("lesson_id", flat=True)
+    )
+    completed_count = sum(lesson.pk in completed_ids for lesson in required)
+    enrollment.progress = round(completed_count / max(len(required), 1) * 100)
+    quiz_scores = list(
+        enrollment.lesson_progress.filter(completed=True, best_score__isnull=False)
+        .values_list("best_score", flat=True)
+    )
+    enrollment.score = round(sum(quiz_scores) / len(quiz_scores)) if quiz_scores else None
+    if required and completed_count == len(required):
+        enrollment.status = CourseEnrollment.Status.COMPLETED
+        enrollment.progress = 100
+        enrollment.completed_at = timezone.now()
+    elif enrollment.status == CourseEnrollment.Status.AVAILABLE:
+        enrollment.status = CourseEnrollment.Status.IN_PROGRESS
+        enrollment.started_at = enrollment.started_at or timezone.now()
+    enrollment.save()
+    if enrollment.status == CourseEnrollment.Status.COMPLETED and enrollment.learning_path_id:
+        next_enrollment = CourseEnrollment.objects.filter(
+            user=enrollment.user,
+            learning_path=enrollment.learning_path,
+            position__gt=enrollment.position,
+        ).order_by("position").first()
+        if next_enrollment and next_enrollment.status == CourseEnrollment.Status.LOCKED:
+            next_enrollment.status = CourseEnrollment.Status.AVAILABLE
+            next_enrollment.save(update_fields=["status", "updated_at"])
+    return enrollment
+
+
+class MyLearningViewSet(viewsets.GenericViewSet):
+    serializer_class = CourseEnrollmentSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return (
+            CourseEnrollment.objects.filter(user=self.request.user)
+            .select_related("course", "learning_path")
+            .prefetch_related("course__lessons", "lesson_progress")
+        )
+
+    def list(self, request):
+        enrollments = list(self.get_queryset())
+        grouped = {}
+        standalone = []
+        for enrollment in enrollments:
+            if enrollment.learning_path_id:
+                group = grouped.setdefault(enrollment.learning_path_id, {
+                    "id": enrollment.learning_path_id,
+                    "title": enrollment.learning_path.title,
+                    "description": enrollment.learning_path.description,
+                    "courses": [],
+                })
+                group["courses"].append(enrollment)
+            else:
+                standalone.append(enrollment)
+        paths = []
+        for group in grouped.values():
+            serialized = self.get_serializer(group["courses"], many=True).data
+            completed = sum(item["status"] == CourseEnrollment.Status.COMPLETED for item in serialized)
+            paths.append({
+                "id": group["id"],
+                "title": group["title"],
+                "description": group["description"],
+                "progress": round(completed / max(len(serialized), 1) * 100),
+                "completed_courses": completed,
+                "course_count": len(serialized),
+                "status": "completed" if serialized and completed == len(serialized) else "in_progress",
+                "courses": serialized,
+            })
+        return Response({
+            "paths": paths,
+            "standalone": self.get_serializer(standalone, many=True).data,
+        })
+
+    @action(detail=False, methods=["get"], url_path="assignment-options")
+    def assignment_options(self, request):
+        if not (request.user.is_superuser or request.user.role in {User.Role.ADMIN, User.Role.HR}):
+            return Response({"detail": "Назначать обучение могут только HR и администраторы"}, status=403)
+        users = User.objects.filter(status=User.Status.ACTIVE).order_by("last_name", "first_name", "email")
+        paths = LearningPath.objects.filter(status=LearningPath.Status.PUBLISHED).order_by("title")
+        courses = Course.objects.filter(status=Course.Status.PUBLISHED).order_by("title")
+        return Response({
+            "users": [
+                {"id": user.pk, "name": user.get_full_name() or user.email, "email": user.email}
+                for user in users
+            ],
+            "paths": [{"id": item.pk, "title": item.title} for item in paths],
+            "courses": [{"id": item.pk, "title": item.title} for item in courses],
+        })
+
+    @action(detail=False, methods=["post"], url_path="assign-path")
+    @transaction.atomic
+    def assign_path(self, request):
+        if not (request.user.is_superuser or request.user.role in {User.Role.ADMIN, User.Role.HR}):
+            return Response({"detail": "Назначать траектории могут только HR и администраторы"}, status=403)
+        user = get_object_or_404(User, pk=request.data.get("user_id"), status=User.Status.ACTIVE)
+        learning_path = get_object_or_404(
+            LearningPath,
+            pk=request.data.get("learning_path_id"),
+            status=LearningPath.Status.PUBLISHED,
+        )
+        enrollments = create_path_enrollments(user, learning_path)
+        return Response(
+            CourseEnrollmentSerializer(enrollments, many=True, context={"request": request}).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+    @action(detail=False, methods=["post"], url_path="assign-course")
+    def assign_course(self, request):
+        if not (request.user.is_superuser or request.user.role in {User.Role.ADMIN, User.Role.HR}):
+            return Response({"detail": "Назначать курсы могут только HR и администраторы"}, status=403)
+        user = get_object_or_404(User, pk=request.data.get("user_id"), status=User.Status.ACTIVE)
+        course = get_object_or_404(Course, pk=request.data.get("course_id"), status=Course.Status.PUBLISHED)
+        enrollment, _ = CourseEnrollment.objects.get_or_create(
+            user=user,
+            course=course,
+            learning_path=None,
+            defaults={"status": CourseEnrollment.Status.AVAILABLE},
+        )
+        return Response(
+            CourseEnrollmentSerializer(enrollment, context={"request": request}).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+    @action(detail=True, methods=["post"])
+    def start(self, request, pk=None):
+        enrollment = self.get_object()
+        if enrollment.status == CourseEnrollment.Status.LOCKED:
+            return Response({"detail": "Сначала завершите предыдущий курс"}, status=400)
+        if enrollment.status == CourseEnrollment.Status.AVAILABLE:
+            enrollment.status = CourseEnrollment.Status.IN_PROGRESS
+            enrollment.started_at = timezone.now()
+            enrollment.save(update_fields=["status", "started_at", "updated_at"])
+        return Response(self.get_serializer(enrollment).data)
+
+    def validate_lesson_access(self, enrollment, lesson):
+        previous_required = enrollment.course.lessons.filter(
+            is_required=True,
+            position__lt=lesson.position,
+        )
+        completed = set(
+            enrollment.lesson_progress.filter(completed=True).values_list("lesson_id", flat=True)
+        )
+        if any(item.pk not in completed for item in previous_required):
+            raise serializers.ValidationError("Сначала завершите предыдущий обязательный урок")
+
+    @action(detail=True, methods=["post"], url_path=r"lessons/(?P<lesson_id>\d+)/complete")
+    @transaction.atomic
+    def complete_lesson(self, request, pk=None, lesson_id=None):
+        enrollment = self.get_object()
+        if enrollment.status == CourseEnrollment.Status.LOCKED:
+            return Response({"detail": "Курс пока недоступен"}, status=400)
+        lesson = get_object_or_404(enrollment.course.lessons, pk=lesson_id)
+        if lesson.lesson_type == Lesson.Type.QUIZ:
+            return Response({"detail": "Тест завершается после успешной попытки"}, status=400)
+        self.validate_lesson_access(enrollment, lesson)
+        LessonProgress.objects.update_or_create(
+            enrollment=enrollment,
+            lesson=lesson,
+            defaults={"completed": True, "completed_at": timezone.now()},
+        )
+        recalculate_enrollment(enrollment)
+        return Response(self.get_serializer(self.get_queryset().get(pk=enrollment.pk)).data)
+
+    @action(detail=True, methods=["post"], url_path=r"lessons/(?P<lesson_id>\d+)/submit-quiz")
+    @transaction.atomic
+    def submit_quiz(self, request, pk=None, lesson_id=None):
+        enrollment = self.get_object()
+        if enrollment.status == CourseEnrollment.Status.LOCKED:
+            return Response({"detail": "Курс пока недоступен"}, status=400)
+        lesson = get_object_or_404(enrollment.course.lessons, pk=lesson_id, lesson_type=Lesson.Type.QUIZ)
+        self.validate_lesson_access(enrollment, lesson)
+        quiz_data = lesson.quiz_data if isinstance(lesson.quiz_data, dict) else {}
+        questions = quiz_data.get("questions", [])
+        answers = request.data.get("answers", [])
+        if not isinstance(answers, list) or len(answers) != len(questions):
+            return Response({"detail": "Ответьте на все вопросы"}, status=400)
+        progress, _ = LessonProgress.objects.get_or_create(enrollment=enrollment, lesson=lesson)
+        max_attempts = quiz_data.get("max_attempts", 3)
+        if progress.attempts_count >= max_attempts and not progress.completed:
+            return Response({"detail": "Количество попыток исчерпано"}, status=400)
+        correct = 0
+        for question_index, question in enumerate(questions):
+            options = question.get("options", [])
+            answer = answers[question_index]
+            if not isinstance(answer, int) or answer < 0 or answer >= len(options):
+                return Response({"detail": "Один из ответов некорректен"}, status=400)
+            correct += bool(options[answer].get("correct"))
+        score = round(correct / max(len(questions), 1) * 100)
+        passing_score = quiz_data.get("passing_score", 80)
+        passed = score >= passing_score
+        attempt_number = progress.attempts_count + 1
+        QuizAttempt.objects.create(
+            enrollment=enrollment,
+            lesson=lesson,
+            attempt_number=attempt_number,
+            answers=answers,
+            score=score,
+            passed=passed,
+        )
+        progress.attempts_count = attempt_number
+        progress.best_score = max(progress.best_score or 0, score)
+        if passed:
+            progress.completed = True
+            progress.completed_at = timezone.now()
+        progress.save()
+        recalculate_enrollment(enrollment)
+        refreshed = self.get_queryset().get(pk=enrollment.pk)
+        return Response({
+            "score": score,
+            "passed": passed,
+            "attempts_used": attempt_number,
+            "attempts_left": max(max_attempts - attempt_number, 0),
+            "enrollment": self.get_serializer(refreshed).data,
+        })
 
 
 class ContentProjectViewSet(viewsets.ModelViewSet):
