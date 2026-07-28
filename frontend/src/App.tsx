@@ -897,22 +897,20 @@ function SmartisSpiderMark() {
   );
 }
 
-const developmentNodePositions = [
-  [50, 7],
-  [79, 18],
-  [92, 50],
-  [79, 82],
-  [50, 93],
-  [21, 82],
-  [8, 50],
-  [21, 18],
-] as const;
+const developmentNodePositions = Array.from({ length: 12 }, (_, index) => {
+  const angle = -90 + index * 30;
+  const radialVariation = [1, .95, 1.02, .97, 1.01, .94, 1, .96, 1.03, .95, 1.01, .96][index];
+  return [
+    50 + Math.cos(angle * Math.PI / 180) * 43 * radialVariation,
+    50 + Math.sin(angle * Math.PI / 180) * 43 * radialVariation,
+  ] as const;
+});
 
 type DevelopmentPoint = { x: number; y: number };
 type DevelopmentSegment = { start: DevelopmentPoint; end: DevelopmentPoint };
 
 const developmentCenter = { x: 50, y: 50 };
-const developmentRingFactors = [0.2, 0.4, 0.6, 0.8, 1] as const;
+const developmentRingFactors = [0.16, 0.32, 0.49, 0.66, 0.83, 1] as const;
 const developmentRingPoints = developmentRingFactors.map((factor) =>
   developmentNodePositions.map(([x, y]) => ({
     x: developmentCenter.x + (x - developmentCenter.x) * factor,
@@ -924,6 +922,28 @@ const developmentWebSegments: DevelopmentSegment[] = [
   ...developmentRingPoints.flatMap((ring) =>
     ring.map((point, index) => ({ start: point, end: ring[(index + 1) % ring.length] })),
   ),
+];
+
+function developmentRingPath(ring: DevelopmentPoint[]) {
+  let path = `M ${ring[0].x} ${ring[0].y}`;
+  ring.forEach((point, index) => {
+    const next = ring[(index + 1) % ring.length];
+    const midpoint = { x: (point.x + next.x) / 2, y: (point.y + next.y) / 2 };
+    const control = {
+      x: developmentCenter.x + (midpoint.x - developmentCenter.x) * .91,
+      y: developmentCenter.y + (midpoint.y - developmentCenter.y) * .91,
+    };
+    path += ` Q ${control.x} ${control.y} ${next.x} ${next.y}`;
+  });
+  return `${path} Z`;
+}
+
+const developmentDewPoints = [
+  developmentRingPoints[1][1],
+  developmentRingPoints[2][4],
+  developmentRingPoints[3][7],
+  developmentRingPoints[4][10],
+  developmentRingPoints[5][2],
 ];
 
 type DevelopmentCourseNode = {
@@ -1093,14 +1113,20 @@ function DevelopmentNetwork({
             <path className="development-web__segment development-web__segment--3" d="M50 50 50 93 8 50Z" />
             <path className="development-web__segment development-web__segment--4" d="M50 50 8 50 50 7Z" />
             {developmentNodePositions.map(([x, y], index) => (
-              <line className="development-web__thread" key={`spoke-${index}`} x1="50" y1="50" x2={x} y2={y} />
+              <line className={`development-web__thread ${index % 3 === 1 ? "development-web__thread--glint" : ""}`} key={`spoke-${index}`} x1="50" y1="50" x2={x} y2={y} />
             ))}
             {developmentRingPoints.map((ring, index) => (
-              <polygon
+              <path
                 className={`development-web__ring development-web__ring--${index + 1}`}
                 key={`ring-${index}`}
-                points={ring.map((point) => `${point.x},${point.y}`).join(" ")}
+                d={developmentRingPath(ring)}
               />
+            ))}
+            {developmentDewPoints.map((point, index) => (
+              <g className="development-web__dew" key={`dew-${index}`}>
+                <circle cx={point.x} cy={point.y} r=".8" />
+                <circle className="development-web__dew-shine" cx={point.x - .22} cy={point.y - .22} r=".2" />
+              </g>
             ))}
           </svg>
           {developmentSegmentNames.map((name, index) => {
