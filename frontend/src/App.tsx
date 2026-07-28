@@ -156,6 +156,29 @@ type Candidate = {
   next_action_at: string | null;
   comment: string;
 };
+type CandidateOffer = {
+  id: number;
+  candidate: number;
+  candidate_name: string;
+  vacancy_title: string | null;
+  position_title: string;
+  salary: string | null;
+  start_date: string | null;
+  valid_until: string | null;
+  probation_months: number;
+  work_format: "office" | "hybrid" | "remote";
+  work_format_label: string;
+  conditions: string;
+  file_url: string;
+  file_original_name: string;
+  status: "draft" | "pending" | "approved" | "accepted" | "declined" | "withdrawn";
+  status_label: string;
+  approved_by_name: string;
+  approved_at: string | null;
+  responded_at: string | null;
+  decision_comment: string;
+  updated_at: string;
+};
 type InterviewFeedback = {
   id: number;
   participant: number;
@@ -518,9 +541,9 @@ async function apiRequest<T>(
   return response.status === 204 ? (undefined as T) : response.json();
 }
 
-async function apiUpload<T>(path: string, token: string, body: FormData): Promise<T> {
+async function apiUpload<T>(path: string, token: string, body: FormData, method = "POST"): Promise<T> {
   const response = await fetch(API + path, {
-    method: "POST",
+    method,
     headers: { Authorization: "Token " + token },
     body,
   });
@@ -1967,6 +1990,11 @@ const emptyHireForm = {
   corporate_email: "", first_name: "", last_name: "", employee_number: "",
   hire_date: new Date().toISOString().slice(0, 10), grade: "",
 };
+const dateFromNow = (days: number) => new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
+const emptyOfferForm = {
+  position_title: "", salary: "", start_date: dateFromNow(21), valid_until: dateFromNow(7),
+  probation_months: "3", work_format: "office", conditions: "",
+};
 
 function RecruitmentView({ token, user }: { token: string; user: User }) {
   const [stages, setStages] = useState<CandidateStage[]>([]);
@@ -1976,6 +2004,7 @@ function RecruitmentView({ token, user }: { token: string; user: User }) {
   const [staff, setStaff] = useState<StaffPosition[]>([]);
   const [vacancies, setVacancies] = useState<Vacancy[]>([]);
   const [interviews, setInterviews] = useState<Interview[]>([]);
+  const [offers, setOffers] = useState<CandidateOffer[]>([]);
   const [interviewOptions, setInterviewOptions] = useState<{
     participants: Array<{ id: number; name: string; role: string }>;
     default_questions: string[];
@@ -1988,10 +2017,13 @@ function RecruitmentView({ token, user }: { token: string; user: User }) {
   const [hiring, setHiring] = useState<Candidate | null>(null);
   const [scheduling, setScheduling] = useState<Candidate | null>(null);
   const [activeInterview, setActiveInterview] = useState<Interview | null>(null);
+  const [offerDialog, setOfferDialog] = useState<{ candidate: Candidate; offer: CandidateOffer | null } | null>(null);
+  const [offerFile, setOfferFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(emptyCandidateForm);
   const [vacancyForm, setVacancyForm] = useState(emptyVacancyForm);
   const [hireForm, setHireForm] = useState(emptyHireForm);
+  const [offerForm, setOfferForm] = useState(emptyOfferForm);
   const [interviewForm, setInterviewForm] = useState({
     title: "Интервью с руководителем",
     scheduled_at: "",
@@ -2012,7 +2044,7 @@ function RecruitmentView({ token, user }: { token: string; user: User }) {
 
   async function load() {
     try {
-      const [nextStages, nextCandidates, nextDepartments, nextPositions, nextStaff, nextVacancies, nextInterviews] = await Promise.all([
+      const [nextStages, nextCandidates, nextDepartments, nextPositions, nextStaff, nextVacancies, nextInterviews, nextOffers] = await Promise.all([
         apiRequest<CandidateStage[]>("/candidate-stages/", token),
         apiRequest<Candidate[]>("/candidates/", token),
         apiRequest<OrgDepartment[]>("/org/departments/", token),
@@ -2020,6 +2052,7 @@ function RecruitmentView({ token, user }: { token: string; user: User }) {
         apiRequest<StaffPosition[]>("/org/staff-positions/", token),
         apiRequest<Vacancy[]>("/vacancies/", token),
         apiRequest<Interview[]>("/interviews/", token),
+        apiRequest<CandidateOffer[]>("/offers/", token),
       ]);
       setStages(nextStages);
       setCandidates(nextCandidates);
@@ -2028,6 +2061,7 @@ function RecruitmentView({ token, user }: { token: string; user: User }) {
       setStaff(nextStaff);
       setVacancies(nextVacancies);
       setInterviews(nextInterviews);
+      setOffers(nextOffers);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Не удалось загрузить подбор");
     }
@@ -2195,6 +2229,76 @@ function RecruitmentView({ token, user }: { token: string; user: User }) {
       await load();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Не удалось оформить сотрудника");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function openOffer(candidate: Candidate) {
+    const offer = offers.find((item) => item.candidate === candidate.id) || null;
+    setError("");
+    setOfferDialog({ candidate, offer });
+    setOfferFile(null);
+    setOfferForm(offer ? {
+      position_title: offer.position_title,
+      salary: offer.salary || "",
+      start_date: offer.start_date || dateFromNow(21),
+      valid_until: offer.valid_until || dateFromNow(7),
+      probation_months: String(offer.probation_months),
+      work_format: offer.work_format,
+      conditions: offer.conditions,
+    } : {
+      ...emptyOfferForm,
+      position_title: candidate.vacancy_title || candidate.desired_position,
+      salary: candidate.desired_salary || "",
+    });
+  }
+
+  async function saveOffer(event: FormEvent) {
+    event.preventDefault();
+    if (!offerDialog) return;
+    setSaving(true);
+    setError("");
+    const body = new FormData();
+    body.append("candidate", String(offerDialog.candidate.id));
+    Object.entries(offerForm).forEach(([key, value]) => body.append(key, value));
+    if (offerFile) body.append("file", offerFile);
+    try {
+      const current = offerDialog.offer;
+      const saved = await apiUpload<CandidateOffer>(
+        current ? `/offers/${current.id}/` : "/offers/",
+        token,
+        body,
+        current ? "PATCH" : "POST",
+      );
+      setOfferDialog({ candidate: offerDialog.candidate, offer: saved });
+      setOfferFile(null);
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось сохранить оффер");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function changeOfferStatus(action: "submit" | "approve" | "accepted" | "declined") {
+    if (!offerDialog?.offer) return;
+    setSaving(true);
+    setError("");
+    try {
+      const path = action === "submit"
+        ? `/offers/${offerDialog.offer.id}/submit/`
+        : action === "approve"
+          ? `/offers/${offerDialog.offer.id}/approve/`
+          : `/offers/${offerDialog.offer.id}/outcome/`;
+      const updated = await apiRequest<CandidateOffer>(path, token, {
+        method: "POST",
+        body: JSON.stringify(action === "accepted" || action === "declined" ? { outcome: action } : {}),
+      });
+      setOfferDialog({ candidate: offerDialog.candidate, offer: updated });
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось изменить статус оффера");
     } finally {
       setSaving(false);
     }
@@ -2375,6 +2479,12 @@ function RecruitmentView({ token, user }: { token: string; user: User }) {
                     if (lastCompleted) return <div className="candidate-card__interview-actions"><button type="button" onClick={() => openInterview(lastCompleted)}>Итоги</button><button type="button" onClick={() => void openSchedule(candidate)}><Plus />Следующее</button></div>;
                     return <button className="candidate-card__interview" type="button" onClick={() => void openSchedule(candidate)}><CalendarDays />Запланировать интервью</button>;
                   })()}
+                  {!candidate.hired_employee && (() => {
+                    const candidateOffer = offers.find((item) => item.candidate === candidate.id);
+                    const interviewCompleted = interviews.some((item) => item.candidate === candidate.id && item.status === "completed");
+                    if (!candidateOffer && !interviewCompleted) return null;
+                    return <button className={`candidate-card__offer candidate-card__offer--${candidateOffer?.status || "new"}`} type="button" onClick={() => openOffer(candidate)}><FileText /><span>{candidateOffer ? `Оффер · ${candidateOffer.status_label}` : "Подготовить оффер"}</span></button>;
+                  })()}
                   {candidate.hired_employee ? (
                     <div className="candidate-card__hired"><CheckCircle2 /> Оформлен как сотрудник</div>
                   ) : stages.find((item) => item.id === candidate.stage)?.is_terminal && candidate.vacancy ? (
@@ -2488,6 +2598,56 @@ function RecruitmentView({ token, user }: { token: string; user: User }) {
               {error && <p className="form-error">{error}</p>}
               <footer><button className="secondary-button" type="button" onClick={() => setVacancyDialog(null)}>Отмена</button><button className="primary-button" type="submit" disabled={saving}>{saving ? "Сохраняем…" : "Сохранить вакансию"}</button></footer>
             </form>
+          </section>
+        </div>
+      )}
+      {offerDialog && (
+        <div className="hcm-dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setOfferDialog(null); }}>
+          <section className="hcm-dialog offer-dialog" role="dialog" aria-modal="true" aria-labelledby="offer-dialog-title">
+            <header>
+              <div><span className="eyebrow">{offerDialog.candidate.full_name}</span><h2 id="offer-dialog-title">Оффер кандидату</h2></div>
+              <button className="icon-button" type="button" aria-label="Закрыть" onClick={() => setOfferDialog(null)}><X /></button>
+            </header>
+            {offerDialog.offer && <div className="offer-status-row"><span className={`offer-status offer-status--${offerDialog.offer.status}`}>{offerDialog.offer.status_label}</span><small>Версия от {new Date(offerDialog.offer.updated_at || Date.now()).toLocaleDateString("ru-RU")}</small></div>}
+            {(!offerDialog.offer || offerDialog.offer.status === "draft") ? (
+              <>
+                <form className="hcm-form" onSubmit={saveOffer}>
+                  <div className="hcm-form__grid">
+                    <label className="hcm-form__wide">Должность<input value={offerForm.position_title} onChange={(event) => setOfferForm({ ...offerForm, position_title: event.target.value })} required /></label>
+                    <label>Оклад<input type="number" min="0" value={offerForm.salary} onChange={(event) => setOfferForm({ ...offerForm, salary: event.target.value })} required /></label>
+                    <label>Формат<select value={offerForm.work_format} onChange={(event) => setOfferForm({ ...offerForm, work_format: event.target.value })}><option value="office">Офис</option><option value="hybrid">Гибрид</option><option value="remote">Удалённо</option></select></label>
+                    <label>Плановая дата выхода<input type="date" value={offerForm.start_date} onChange={(event) => setOfferForm({ ...offerForm, start_date: event.target.value })} required /></label>
+                    <label>Ответ до<input type="date" max={offerForm.start_date} value={offerForm.valid_until} onChange={(event) => setOfferForm({ ...offerForm, valid_until: event.target.value })} required /></label>
+                    <label>Испытательный срок<input type="number" min="0" max="12" value={offerForm.probation_months} onChange={(event) => setOfferForm({ ...offerForm, probation_months: event.target.value })} /></label>
+                    <label className="offer-file-field">Файл PDF/DOCX<input type="file" accept=".pdf,.doc,.docx" onChange={(event) => setOfferFile(event.target.files?.[0] || null)} /></label>
+                    <label className="hcm-form__wide">Условия<textarea value={offerForm.conditions} onChange={(event) => setOfferForm({ ...offerForm, conditions: event.target.value })} placeholder="График, бонусы, ДМС и дополнительные договорённости" /></label>
+                  </div>
+                  {offerDialog.offer?.file_url && <a className="offer-file-link" href={offerDialog.offer.file_url} target="_blank" rel="noreferrer"><FileText />{offerDialog.offer.file_original_name || "Открыть текущий файл"}</a>}
+                  {error && <p className="form-error">{error}</p>}
+                  <footer><button className="secondary-button" type="button" onClick={() => setOfferDialog(null)}>Закрыть</button><button className="primary-button" type="submit" disabled={saving}>{saving ? "Сохраняем…" : offerDialog.offer ? "Сохранить изменения" : "Создать черновик"}</button></footer>
+                </form>
+                {offerDialog.offer && <button className="offer-next-action" type="button" disabled={saving} onClick={() => void changeOfferStatus("submit")}>Отправить на согласование <ChevronRight /></button>}
+              </>
+            ) : (
+              <div className="offer-review">
+                <dl>
+                  <div><dt>Должность</dt><dd>{offerDialog.offer.position_title}</dd></div>
+                  <div><dt>Оклад</dt><dd>{offerDialog.offer.salary ? `${Number(offerDialog.offer.salary).toLocaleString("ru-RU")} ₽` : "Не указан"}</dd></div>
+                  <div><dt>Формат</dt><dd>{offerDialog.offer.work_format_label}</dd></div>
+                  <div><dt>Дата выхода</dt><dd>{offerDialog.offer.start_date ? new Date(`${offerDialog.offer.start_date}T00:00:00`).toLocaleDateString("ru-RU") : "Не указана"}</dd></div>
+                  <div><dt>Ответ до</dt><dd>{offerDialog.offer.valid_until ? new Date(`${offerDialog.offer.valid_until}T00:00:00`).toLocaleDateString("ru-RU") : "Не указан"}</dd></div>
+                  <div><dt>Испытательный срок</dt><dd>{offerDialog.offer.probation_months} мес.</dd></div>
+                </dl>
+                {offerDialog.offer.conditions && <div className="offer-review__conditions"><span>Условия</span><p>{offerDialog.offer.conditions}</p></div>}
+                {offerDialog.offer.file_url && <a className="offer-file-link" href={offerDialog.offer.file_url} target="_blank" rel="noreferrer"><FileText />{offerDialog.offer.file_original_name || "Открыть файл оффера"}</a>}
+                {error && <p className="form-error">{error}</p>}
+                <div className="offer-review__actions">
+                  {offerDialog.offer.status === "pending" && <button className="primary-button" type="button" disabled={saving} onClick={() => void changeOfferStatus("approve")}><CheckCircle2 />Согласовать</button>}
+                  {offerDialog.offer.status === "approved" && <><button className="secondary-button" type="button" disabled={saving} onClick={() => void changeOfferStatus("declined")}>Кандидат отказался</button><button className="primary-button" type="button" disabled={saving} onClick={() => void changeOfferStatus("accepted")}><CheckCircle2 />Кандидат принял</button></>}
+                  {(offerDialog.offer.status === "accepted" || offerDialog.offer.status === "declined") && <div className="offer-outcome"><CheckCircle2 /><span><strong>{offerDialog.offer.status_label}</strong><small>Результат зафиксирован в истории подбора</small></span></div>}
+                </div>
+              </div>
+            )}
           </section>
         </div>
       )}

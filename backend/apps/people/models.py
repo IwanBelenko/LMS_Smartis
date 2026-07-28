@@ -577,6 +577,64 @@ class Candidate(models.Model):
         return self.full_name
 
 
+def candidate_offer_path(instance, filename):
+    suffix = Path(filename).suffix.lower()
+    return f"recruitment/candidates/{instance.candidate_id}/offers/{uuid4().hex}{suffix}"
+
+
+class CandidateOffer(models.Model):
+    class Status(models.TextChoices):
+        DRAFT = "draft", "Черновик"
+        PENDING = "pending", "На согласовании"
+        APPROVED = "approved", "Согласован"
+        ACCEPTED = "accepted", "Принят кандидатом"
+        DECLINED = "declined", "Отклонён кандидатом"
+        WITHDRAWN = "withdrawn", "Отозван"
+
+    class WorkFormat(models.TextChoices):
+        OFFICE = "office", "Офис"
+        HYBRID = "hybrid", "Гибрид"
+        REMOTE = "remote", "Удалённо"
+
+    candidate = models.ForeignKey(Candidate, related_name="offers", on_delete=models.CASCADE)
+    position_title = models.CharField("Должность", max_length=180)
+    salary = models.DecimalField("Оклад", max_digits=12, decimal_places=2, null=True, blank=True)
+    start_date = models.DateField("Плановая дата выхода", null=True, blank=True)
+    valid_until = models.DateField("Действует до", null=True, blank=True)
+    probation_months = models.PositiveSmallIntegerField("Испытательный срок, месяцев", default=3)
+    work_format = models.CharField("Формат работы", max_length=20, choices=WorkFormat.choices, default=WorkFormat.OFFICE)
+    conditions = models.TextField("Условия", blank=True)
+    file = models.FileField("Файл оффера", upload_to=candidate_offer_path, blank=True)
+    file_original_name = models.CharField("Исходное имя файла", max_length=255, blank=True)
+    status = models.CharField("Статус", max_length=20, choices=Status.choices, default=Status.DRAFT)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="created_candidate_offers",
+        null=True,
+        on_delete=models.SET_NULL,
+    )
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="approved_candidate_offers",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    approved_at = models.DateTimeField("Согласован", null=True, blank=True)
+    responded_at = models.DateTimeField("Ответ кандидата", null=True, blank=True)
+    decision_comment = models.TextField("Комментарий к решению", blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "Оффер кандидату"
+        verbose_name_plural = "Офферы кандидатам"
+
+    def __str__(self):
+        return f"{self.candidate}: {self.position_title}"
+
+
 class Interview(models.Model):
     class Status(models.TextChoices):
         SCHEDULED = "scheduled", "Запланировано"

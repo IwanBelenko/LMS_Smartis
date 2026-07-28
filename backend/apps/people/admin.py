@@ -6,6 +6,7 @@ from .models import (
     DailyTranscript,
     AuditEvent,
     Candidate,
+    CandidateOffer,
     CandidateStage,
     EmployeeDocument,
     EmployeeGoal,
@@ -29,6 +30,6 @@ admin.site.register([
     Position, StaffPosition, EmployeeProfile, EmployeeGoal, EmploymentEvent, EmployeeLearning,
     EmployeeDocument, AbsenceRequest, PerformanceCycle, Competency, PerformanceReview, PerformanceScore,
     DailyTranscript, ProductUpdate,
-    OnboardingTemplate, OnboardingPlan, CandidateStage, Vacancy, Candidate, AuditEvent,
+    OnboardingTemplate, OnboardingPlan, CandidateStage, Vacancy, Candidate, CandidateOffer, AuditEvent,
     Interview, InterviewFeedback,
 ])

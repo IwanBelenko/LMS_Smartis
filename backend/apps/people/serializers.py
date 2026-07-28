@@ -12,6 +12,7 @@ from apps.identity.models import Department, Invitation, User
 from .models import (
     AbsenceRequest,
     Candidate,
+    CandidateOffer,
     CandidateStage,
     Competency,
     DailyTranscript,
@@ -743,6 +744,66 @@ class CandidateSerializer(serializers.ModelSerializer):
             attrs["department"] = vacancy.department
             attrs["desired_position"] = vacancy.position.name
         return attrs
+
+
+class CandidateOfferSerializer(serializers.ModelSerializer):
+    candidate_name = serializers.CharField(source="candidate.full_name", read_only=True)
+    vacancy_title = serializers.CharField(source="candidate.vacancy.title", read_only=True)
+    status_label = serializers.CharField(source="get_status_display", read_only=True)
+    work_format_label = serializers.CharField(source="get_work_format_display", read_only=True)
+    created_by_name = serializers.CharField(source="created_by.get_full_name", read_only=True)
+    approved_by_name = serializers.CharField(source="approved_by.get_full_name", read_only=True)
+    file_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CandidateOffer
+        fields = [
+            "id", "candidate", "candidate_name", "vacancy_title", "position_title", "salary",
+            "start_date", "valid_until", "probation_months", "work_format", "work_format_label",
+            "conditions", "file", "file_url", "file_original_name", "status", "status_label",
+            "created_by", "created_by_name", "approved_by", "approved_by_name", "approved_at",
+            "responded_at", "decision_comment", "created_at", "updated_at",
+        ]
+        read_only_fields = [
+            "id", "file_url", "file_original_name", "status", "created_by", "approved_by",
+            "approved_at", "responded_at", "decision_comment", "created_at", "updated_at",
+        ]
+        extra_kwargs = {"file": {"write_only": True, "required": False}}
+
+    def get_file_url(self, obj):
+        if not obj.file:
+            return ""
+        request = self.context.get("request")
+        return request.build_absolute_uri(obj.file.url) if request else obj.file.url
+
+    def validate_file(self, value):
+        if value.size > 10 * 1024 * 1024:
+            raise serializers.ValidationError("Файл оффера не должен превышать 10 МБ")
+        if Path(value.name).suffix.lower() not in {".pdf", ".doc", ".docx"}:
+            raise serializers.ValidationError("Поддерживаются PDF, DOC и DOCX")
+        return value
+
+    def validate(self, attrs):
+        candidate = attrs.get("candidate", getattr(self.instance, "candidate", None))
+        if candidate and candidate.hired_employee_id:
+            raise serializers.ValidationError("Кандидат уже оформлен как сотрудник")
+        start_date = attrs.get("start_date", getattr(self.instance, "start_date", None))
+        valid_until = attrs.get("valid_until", getattr(self.instance, "valid_until", None))
+        if start_date and valid_until and valid_until > start_date:
+            raise serializers.ValidationError("Срок ответа на оффер должен быть не позже даты выхода")
+        return attrs
+
+    def create(self, validated_data):
+        uploaded = validated_data.get("file")
+        if uploaded:
+            validated_data["file_original_name"] = uploaded.name[:255]
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        uploaded = validated_data.get("file")
+        if uploaded:
+            validated_data["file_original_name"] = uploaded.name[:255]
+        return super().update(instance, validated_data)
 
 
 class InterviewFeedbackSerializer(serializers.ModelSerializer):

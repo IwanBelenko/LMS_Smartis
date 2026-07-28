@@ -1504,6 +1504,16 @@ button.vacancy-card { padding: 13px; display: grid; align-content: center; gap: 
 }
 .candidate-card__interview-actions button:hover { border-color: var(--brand); background: color-mix(in srgb, var(--brand) 9%, var(--surface)); }
 .candidate-card__interview-actions svg { width: 13px; height: 13px; color: var(--brand-hover); }
+.candidate-card__offer {
+  width: 100%; min-height: 31px; padding: 5px 8px; border: 1px solid color-mix(in srgb, var(--brand) 28%, var(--border)); border-radius: 5px;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  background: color-mix(in srgb, var(--brand) 7%, var(--surface)); color: var(--foreground);
+  font-size: .68rem; font-weight: 650; cursor: pointer;
+}
+.candidate-card__offer:hover { border-color: var(--brand); background: color-mix(in srgb, var(--brand) 12%, var(--surface)); }
+.candidate-card__offer svg { width: 13px; height: 13px; color: var(--brand-hover); }
+.candidate-card__offer--accepted { background: color-mix(in srgb, var(--brand) 17%, var(--surface)); }
+.candidate-card__offer--declined { border-color: color-mix(in srgb, var(--danger) 35%, var(--border)); background: transparent; }
 .recruitment-empty { padding: 22px 6px; color: var(--muted); font-size: 0.78rem; text-align: center; }
 .interview-agenda { padding: 0; overflow: hidden; }
 .interview-agenda > header { min-height: 62px; padding: 12px 15px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 12px; }
@@ -1574,6 +1584,37 @@ button.vacancy-card { padding: 13px; display: grid; align-content: center; gap: 
 .interview-result > span { display: grid; gap: 3px; }
 .interview-result small { color: var(--muted); }
 .interview-result p { font-size: .7rem; }
+.hcm-dialog.offer-dialog { width: min(720px, 100%); }
+.offer-status-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.offer-status-row small { color: var(--muted); font-size: .65rem; }
+.offer-status { width: max-content; padding: 5px 8px; border-radius: 5px; background: var(--surface-soft); color: var(--muted); font-size: .65rem; font-weight: 700; }
+.offer-status--pending { background: color-mix(in srgb, var(--warning) 13%, var(--surface)); color: var(--warning); }
+.offer-status--approved, .offer-status--accepted { background: color-mix(in srgb, var(--brand) 15%, var(--surface)); color: var(--brand-hover); }
+.offer-status--declined { background: color-mix(in srgb, var(--danger) 10%, var(--surface)); color: var(--danger); }
+.offer-file-field input { padding: 6px; font-size: .7rem; }
+.offer-file-link { width: max-content; display: inline-flex; align-items: center; gap: 7px; color: var(--brand-hover); font-size: .7rem; font-weight: 650; text-decoration: none; }
+.offer-file-link:hover { text-decoration: underline; }
+.offer-file-link svg { width: 15px; }
+.offer-next-action {
+  min-height: 38px; margin-top: -6px; border: 1px dashed color-mix(in srgb, var(--brand) 45%, var(--border)); border-radius: 6px;
+  display: flex; align-items: center; justify-content: center; gap: 7px; background: color-mix(in srgb, var(--brand) 7%, var(--surface));
+  color: var(--foreground); font-size: .72rem; font-weight: 700; cursor: pointer;
+}
+.offer-next-action:hover { border-style: solid; background: color-mix(in srgb, var(--brand) 12%, var(--surface)); }
+.offer-review { display: grid; gap: 16px; }
+.offer-review dl { margin: 0; border-top: 1px solid var(--border); display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.offer-review dl > div { padding: 12px 0; border-bottom: 1px solid var(--border); display: grid; gap: 3px; }
+.offer-review dl > div:nth-child(odd) { padding-right: 14px; border-right: 1px solid var(--border); }
+.offer-review dl > div:nth-child(even) { padding-left: 14px; }
+.offer-review dt, .offer-review__conditions > span { color: var(--muted); font-size: .64rem; }
+.offer-review dd { margin: 0; font-size: .76rem; font-weight: 650; }
+.offer-review__conditions { padding: 12px; border-radius: 6px; display: grid; gap: 5px; background: var(--surface-soft); }
+.offer-review__conditions p { white-space: pre-wrap; font-size: .7rem; line-height: 1.45; }
+.offer-review__actions { padding-top: 14px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 8px; }
+.offer-outcome { width: 100%; padding: 11px; border-radius: 6px; display: flex; align-items: flex-start; gap: 8px; background: color-mix(in srgb, var(--brand) 12%, var(--surface)); }
+.offer-outcome > svg { color: var(--brand-hover); }
+.offer-outcome > span { display: grid; gap: 2px; }
+.offer-outcome small { color: var(--muted); font-size: .64rem; }
 
 .hcm-dialog-backdrop {
   position: fixed; inset: 0; z-index: 90; padding: 24px; display: grid; place-items: center;
@@ -2340,6 +2381,9 @@ button.vacancy-card { padding: 13px; display: grid; align-content: center; gap: 
 }
 
 @media (max-width: 620px) {
+  .offer-review dl { grid-template-columns: 1fr; }
+  .offer-review dl > div:nth-child(odd), .offer-review dl > div:nth-child(even) { padding-right: 0; padding-left: 0; border-right: 0; }
+  .offer-review__actions { align-items: stretch; flex-direction: column; }
   .development-card__heading { min-height: 0; align-items: flex-start; flex-direction: column; }
   .development-map, .development-card--compact .development-map { min-height: 390px; }
   .development-map::after { inset: 17% 8%; }

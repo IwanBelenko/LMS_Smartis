@@ -10,6 +10,7 @@ from apps.learning.models import Course, LearningPath, LearningPathCourse, Lesso
 from .models import (
     AbsenceRequest,
     Candidate,
+    CandidateOffer,
     CandidateStage,
     Competency,
     DailyTranscript,
@@ -434,6 +435,53 @@ class PeopleApiTests(TestCase):
             format="json",
         )
         self.assertEqual(response.status_code, 400)
+
+    def test_hr_creates_submits_and_completes_candidate_offer(self):
+        candidate = Candidate.objects.get(full_name="Мария Тестова")
+        start_date = date.today() + timedelta(days=21)
+        valid_until = date.today() + timedelta(days=7)
+        self.client.force_authenticate(self.hr)
+        created = self.client.post(
+            "/api/v1/offers/",
+            {
+                "candidate": candidate.pk,
+                "position_title": "Аналитик",
+                "salary": "180000.00",
+                "start_date": start_date.isoformat(),
+                "valid_until": valid_until.isoformat(),
+                "probation_months": 3,
+                "work_format": CandidateOffer.WorkFormat.HYBRID,
+                "conditions": "ДМС после испытательного срока",
+            },
+            format="json",
+        )
+        self.assertEqual(created.status_code, 201)
+        offer_id = created.json()["id"]
+        submitted = self.client.post(f"/api/v1/offers/{offer_id}/submit/", {}, format="json")
+        self.assertEqual(submitted.status_code, 200)
+        self.assertEqual(submitted.json()["status"], CandidateOffer.Status.PENDING)
+        approved = self.client.post(
+            f"/api/v1/offers/{offer_id}/approve/",
+            {"comment": "Условия согласованы"},
+            format="json",
+        )
+        self.assertEqual(approved.status_code, 200)
+        self.assertEqual(approved.json()["status"], CandidateOffer.Status.APPROVED)
+        accepted = self.client.post(
+            f"/api/v1/offers/{offer_id}/outcome/",
+            {"outcome": CandidateOffer.Status.ACCEPTED, "comment": "Кандидат подтвердил"},
+            format="json",
+        )
+        self.assertEqual(accepted.status_code, 200)
+        candidate.refresh_from_db()
+        self.assertEqual(accepted.json()["status"], CandidateOffer.Status.ACCEPTED)
+        self.assertEqual(candidate.next_action_at.date(), start_date)
+
+    def test_employee_cannot_access_candidate_offers(self):
+        candidate = Candidate.objects.get(full_name="Мария Тестова")
+        CandidateOffer.objects.create(candidate=candidate, position_title="Аналитик", created_by=self.hr)
+        self.client.force_authenticate(self.employee)
+        self.assertEqual(self.client.get("/api/v1/offers/").status_code, 403)
 
     def test_employee_creates_and_sees_only_own_absence_requests(self):
         other_profile = self.other_employee.employee_profile

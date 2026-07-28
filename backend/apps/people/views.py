@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 from html import escape
 import mimetypes
 
@@ -9,7 +9,7 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import generics, status
 from rest_framework.exceptions import PermissionDenied, ValidationError
-from rest_framework.parsers import FormParser, MultiPartParser
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -20,6 +20,7 @@ from .models import (
     AbsenceRequest,
     AuditEvent,
     Candidate,
+    CandidateOffer,
     CandidateStage,
     Competency,
     DailyTranscript,
@@ -45,6 +46,7 @@ from .serializers import (
     AbsenceRequestSerializer,
     CandidateSerializer,
     CandidateHireSerializer,
+    CandidateOfferSerializer,
     CandidateStageSerializer,
     CompetencySerializer,
     DailyTranscriptSerializer,
@@ -979,6 +981,118 @@ class CandidateHireView(APIView):
             },
             status=201,
         )
+
+
+class CandidateOfferListCreateView(generics.ListCreateAPIView):
+    serializer_class = CandidateOfferSerializer
+    permission_classes = [IsRecruiter]
+    parser_classes = [JSONParser, MultiPartParser, FormParser]
+
+    def get_queryset(self):
+        queryset = CandidateOffer.objects.select_related(
+            "candidate", "candidate__vacancy", "created_by", "approved_by"
+        )
+        candidate_id = self.request.query_params.get("candidate")
+        if candidate_id:
+            queryset = queryset.filter(candidate_id=candidate_id)
+        return queryset
+
+    def perform_create(self, serializer):
+        offer = serializer.save(created_by=self.request.user)
+        AuditEvent.objects.create(
+            actor=self.request.user,
+            entity_type="candidate_offer",
+            entity_id=str(offer.pk),
+            action="created",
+            changes={"candidate_id": offer.candidate_id},
+        )
+
+
+class CandidateOfferDetailView(generics.RetrieveUpdateAPIView):
+    serializer_class = CandidateOfferSerializer
+    permission_classes = [IsRecruiter]
+    parser_classes = [JSONParser, MultiPartParser, FormParser]
+    queryset = CandidateOffer.objects.select_related(
+        "candidate", "candidate__vacancy", "created_by", "approved_by"
+    )
+
+    def update(self, request, *args, **kwargs):
+        offer = self.get_object()
+        if offer.status != CandidateOffer.Status.DRAFT:
+            raise ValidationError("Редактировать можно только черновик оффера")
+        return super().update(request, *args, **kwargs)
+
+
+class CandidateOfferSubmitView(APIView):
+    permission_classes = [IsRecruiter]
+
+    def post(self, request, pk):
+        offer = get_object_or_404(CandidateOffer, pk=pk)
+        if offer.status != CandidateOffer.Status.DRAFT:
+            raise ValidationError("На согласование можно отправить только черновик")
+        if not offer.salary or not offer.start_date or not offer.valid_until:
+            raise ValidationError("Укажите оклад, дату выхода и срок ответа")
+        offer.status = CandidateOffer.Status.PENDING
+        offer.save(update_fields=["status", "updated_at"])
+        AuditEvent.objects.create(
+            actor=request.user,
+            entity_type="candidate_offer",
+            entity_id=str(offer.pk),
+            action="submitted",
+        )
+        return Response(CandidateOfferSerializer(offer, context={"request": request}).data)
+
+
+class CandidateOfferApproveView(APIView):
+    permission_classes = [IsRecruiter]
+
+    def post(self, request, pk):
+        offer = get_object_or_404(CandidateOffer, pk=pk)
+        if offer.status != CandidateOffer.Status.PENDING:
+            raise ValidationError("Согласовать можно только отправленный оффер")
+        offer.status = CandidateOffer.Status.APPROVED
+        offer.approved_by = request.user
+        offer.approved_at = timezone.now()
+        offer.decision_comment = str(request.data.get("comment", "")).strip()
+        offer.save(update_fields=["status", "approved_by", "approved_at", "decision_comment", "updated_at"])
+        AuditEvent.objects.create(
+            actor=request.user,
+            entity_type="candidate_offer",
+            entity_id=str(offer.pk),
+            action="approved",
+        )
+        return Response(CandidateOfferSerializer(offer, context={"request": request}).data)
+
+
+class CandidateOfferOutcomeView(APIView):
+    permission_classes = [IsRecruiter]
+
+    def post(self, request, pk):
+        offer = get_object_or_404(CandidateOffer.objects.select_related("candidate"), pk=pk)
+        outcome = request.data.get("outcome")
+        if offer.status != CandidateOffer.Status.APPROVED:
+            raise ValidationError("Ответ можно зафиксировать только по согласованному офферу")
+        if outcome not in {CandidateOffer.Status.ACCEPTED, CandidateOffer.Status.DECLINED}:
+            raise ValidationError("Выберите: принят или отклонён")
+        offer.status = outcome
+        offer.responded_at = timezone.now()
+        offer.decision_comment = str(request.data.get("comment", "")).strip()
+        offer.save(update_fields=["status", "responded_at", "decision_comment", "updated_at"])
+        if outcome == CandidateOffer.Status.ACCEPTED and offer.start_date:
+            offer_stage = CandidateStage.objects.filter(name__iexact="Оффер").first()
+            if offer_stage:
+                offer.candidate.stage = offer_stage
+            offer.candidate.next_action_at = timezone.make_aware(
+                datetime.combine(offer.start_date, time(hour=12))
+            )
+            offer.candidate.save(update_fields=["stage", "next_action_at", "updated_at"] if offer_stage else ["next_action_at", "updated_at"])
+        AuditEvent.objects.create(
+            actor=request.user,
+            entity_type="candidate_offer",
+            entity_id=str(offer.pk),
+            action=outcome,
+        )
+        return Response(CandidateOfferSerializer(offer, context={"request": request}).data)
 
 
 class InterviewListCreateView(generics.ListCreateAPIView):
