@@ -14,6 +14,10 @@ from .views import (
     EmploymentEventListCreateView,
     HcmSummaryView,
     PositionListView,
+    OrganizationDepartmentDetailView,
+    OrganizationDepartmentListCreateView,
+    StaffPositionDetailView,
+    StaffPositionListCreateView,
 )
 
 urlpatterns = [
@@ -26,6 +30,10 @@ urlpatterns = [
     path("employee-goals/<int:pk>/", EmployeeGoalDetailView.as_view(), name="employee-goal-detail"),
     path("employee-learning/<int:pk>/", EmployeeLearningDetailView.as_view(), name="employee-learning-detail"),
     path("positions/", PositionListView.as_view(), name="positions"),
+    path("org/departments/", OrganizationDepartmentListCreateView.as_view(), name="organization-departments"),
+    path("org/departments/<int:pk>/", OrganizationDepartmentDetailView.as_view(), name="organization-department-detail"),
+    path("org/staff-positions/", StaffPositionListCreateView.as_view(), name="staff-positions"),
+    path("org/staff-positions/<int:pk>/", StaffPositionDetailView.as_view(), name="staff-position-detail"),
     path("candidates/", CandidateListCreateView.as_view(), name="candidates"),
     path("candidates/<int:pk>/", CandidateDetailView.as_view(), name="candidate-detail"),
     path("candidate-stages/", CandidateStageListView.as_view(), name="candidate-stages"),

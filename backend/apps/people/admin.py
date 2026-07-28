@@ -10,9 +10,10 @@ from .models import (
     EmployeeProfile,
     EmploymentEvent,
     Position,
+    StaffPosition,
 )
 
 admin.site.register([
-    Position, EmployeeProfile, EmployeeGoal, EmploymentEvent, EmployeeLearning,
+    Position, StaffPosition, EmployeeProfile, EmployeeGoal, EmploymentEvent, EmployeeLearning,
     EmployeeDocument, CandidateStage, Candidate, AuditEvent,
 ])

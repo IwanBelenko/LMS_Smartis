@@ -4,6 +4,7 @@ from rest_framework import generics
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.identity.models import Department
 from .models import (
     AuditEvent,
     Candidate,
@@ -14,6 +15,7 @@ from .models import (
     EmployeeProfile,
     EmploymentEvent,
     Position,
+    StaffPosition,
 )
 from .permissions import IsHcmUser, IsRecruiter
 from .serializers import (
@@ -26,6 +28,8 @@ from .serializers import (
     EmployeeProfileWriteSerializer,
     EmploymentEventSerializer,
     PositionSerializer,
+    OrganizationDepartmentSerializer,
+    StaffPositionSerializer,
 )
 
 
@@ -190,6 +194,34 @@ class PositionListView(generics.ListAPIView):
     serializer_class = PositionSerializer
     permission_classes = [IsHcmUser]
     queryset = Position.objects.filter(is_active=True)
+
+
+class OrganizationDepartmentListCreateView(generics.ListCreateAPIView):
+    serializer_class = OrganizationDepartmentSerializer
+    permission_classes = [IsHcmUser]
+    queryset = Department.objects.filter(is_active=True).select_related("parent", "manager").prefetch_related("staff_positions")
+
+
+class OrganizationDepartmentDetailView(generics.RetrieveUpdateAPIView):
+    serializer_class = OrganizationDepartmentSerializer
+    permission_classes = [IsHcmUser]
+    queryset = Department.objects.select_related("parent", "manager").prefetch_related("staff_positions")
+
+
+class StaffPositionListCreateView(generics.ListCreateAPIView):
+    serializer_class = StaffPositionSerializer
+    permission_classes = [IsHcmUser]
+
+    def get_queryset(self):
+        queryset = StaffPosition.objects.select_related("department", "position")
+        department = self.request.query_params.get("department")
+        return queryset.filter(department_id=department) if department else queryset
+
+
+class StaffPositionDetailView(generics.RetrieveUpdateAPIView):
+    serializer_class = StaffPositionSerializer
+    permission_classes = [IsHcmUser]
+    queryset = StaffPosition.objects.select_related("department", "position")
 
 
 class HcmSummaryView(APIView):

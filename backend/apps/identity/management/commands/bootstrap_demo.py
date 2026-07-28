@@ -13,6 +13,7 @@ from apps.people.models import (
     EmployeeProfile,
     EmploymentEvent,
     Position,
+    StaffPosition,
 )
 
 
@@ -111,6 +112,31 @@ class Command(BaseCommand):
                     title="Согласие на обработку персональных данных",
                     defaults={"document_type": "Кадровый документ", "issue_date": profile.hire_date},
                 )
+
+        company_department, _ = Department.objects.get_or_create(
+            code="smartis",
+            defaults={"name": "Smartis"},
+        )
+        company_department.manager = user
+        company_department.save(update_fields=["manager"])
+        for child, manager_email in [
+            (department, "anna@smartis.local"),
+            (product_department, "maxim@smartis.local"),
+            (support_department, "olga@smartis.local"),
+        ]:
+            child.parent = company_department
+            child.manager = User.objects.get(email=manager_email)
+            child.save(update_fields=["parent", "manager"])
+        for staff_department, staff_position, headcount in [
+            (department, analyst_position, 2),
+            (product_department, manager_position, 2),
+            (support_department, support_position, 3),
+        ]:
+            StaffPosition.objects.update_or_create(
+                department=staff_department,
+                position=staff_position,
+                defaults={"headcount": headcount, "is_active": True},
+            )
 
         first_profile = EmployeeProfile.objects.order_by("id").first()
         if first_profile:

@@ -1,6 +1,7 @@
 from datetime import date
 
 from django.db import transaction
+from django.utils.text import slugify
 from rest_framework import serializers
 
 from apps.identity.models import Department, Invitation, User
@@ -13,6 +14,7 @@ from .models import (
     EmployeeProfile,
     EmploymentEvent,
     Position,
+    StaffPosition,
 )
 
 
@@ -26,6 +28,101 @@ class PositionSerializer(serializers.ModelSerializer):
     class Meta:
         model = Position
         fields = ["id", "name", "is_active"]
+
+
+class OrganizationDepartmentSerializer(serializers.ModelSerializer):
+    parent_name = serializers.CharField(source="parent.name", read_only=True)
+    manager_name = serializers.CharField(source="manager.get_full_name", read_only=True)
+    employee_count = serializers.SerializerMethodField()
+    child_count = serializers.IntegerField(source="children.count", read_only=True)
+    planned_headcount = serializers.SerializerMethodField()
+    vacancies = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Department
+        fields = [
+            "id", "name", "code", "parent", "parent_name", "manager", "manager_name",
+            "employee_count", "child_count", "planned_headcount", "vacancies", "is_active",
+        ]
+        read_only_fields = ["id"]
+        extra_kwargs = {"code": {"required": False, "allow_blank": True}}
+
+    def validate_parent(self, value):
+        if not self.instance or value is None:
+            return value
+        visited = set()
+        current = value
+        while current:
+            if current.pk == self.instance.pk:
+                raise serializers.ValidationError("Подразделение нельзя вложить само в себя")
+            if current.pk in visited:
+                break
+            visited.add(current.pk)
+            current = current.parent
+        return value
+
+    def validate_manager(self, value):
+        if value and not value.is_active:
+            raise serializers.ValidationError("Руководитель должен быть активным пользователем")
+        return value
+
+    def create(self, validated_data):
+        if not validated_data.get("code"):
+            base = slugify(validated_data["name"], allow_unicode=False) or "department"
+            candidate = base
+            suffix = 2
+            while Department.objects.filter(code=candidate).exists():
+                candidate = f"{base}-{suffix}"
+                suffix += 1
+            validated_data["code"] = candidate
+        return super().create(validated_data)
+
+    def get_employee_count(self, obj):
+        return obj.members.filter(employee_profile__status__in=[
+            EmployeeProfile.Status.EMPLOYED,
+            EmployeeProfile.Status.PROBATION,
+        ]).count()
+
+    def get_planned_headcount(self, obj):
+        return sum(obj.staff_positions.filter(is_active=True).values_list("headcount", flat=True))
+
+    def get_vacancies(self, obj):
+        return sum(max(item.headcount - item.filled_count, 0) for item in self._staff_rows(obj))
+
+    def _staff_rows(self, obj):
+        rows = list(obj.staff_positions.filter(is_active=True).select_related("position"))
+        for row in rows:
+            row.filled_count = EmployeeProfile.objects.filter(
+                user__department=obj,
+                position=row.position,
+                status__in=[EmployeeProfile.Status.EMPLOYED, EmployeeProfile.Status.PROBATION],
+            ).count()
+        return rows
+
+
+class StaffPositionSerializer(serializers.ModelSerializer):
+    department_name = serializers.CharField(source="department.name", read_only=True)
+    position_name = serializers.CharField(source="position.name", read_only=True)
+    filled_count = serializers.SerializerMethodField()
+    vacancies = serializers.SerializerMethodField()
+
+    class Meta:
+        model = StaffPosition
+        fields = [
+            "id", "department", "department_name", "position", "position_name",
+            "headcount", "filled_count", "vacancies", "note", "is_active",
+        ]
+        read_only_fields = ["id"]
+
+    def get_filled_count(self, obj):
+        return EmployeeProfile.objects.filter(
+            user__department=obj.department,
+            position=obj.position,
+            status__in=[EmployeeProfile.Status.EMPLOYED, EmployeeProfile.Status.PROBATION],
+        ).count()
+
+    def get_vacancies(self, obj):
+        return max(obj.headcount - self.get_filled_count(obj), 0)
 
 
 class EmployeeProfileSerializer(serializers.ModelSerializer):
@@ -112,12 +209,34 @@ class EmployeeProfileWriteSerializer(serializers.ModelSerializer):
 
     @transaction.atomic
     def update(self, instance, validated_data):
+        old_department = instance.user.department
+        old_position = instance.position
         user_data = validated_data.pop("user", {})
         for field, value in user_data.items():
             setattr(instance.user, field, value)
         if user_data:
             instance.user.save(update_fields=list(user_data))
-        return super().update(instance, validated_data)
+        instance = super().update(instance, validated_data)
+        actor = self.context.get("request").user if self.context.get("request") else None
+        today = date.today()
+        new_department = instance.user.department
+        if old_department != new_department:
+            EmploymentEvent.objects.create(
+                employee=instance,
+                event_type=EmploymentEvent.Type.TRANSFER,
+                title=f"Перевод: {old_department or 'Без отдела'} → {new_department or 'Без отдела'}",
+                effective_date=today,
+                created_by=actor,
+            )
+        if old_position != instance.position:
+            EmploymentEvent.objects.create(
+                employee=instance,
+                event_type=EmploymentEvent.Type.PROMOTION,
+                title=f"Смена должности: {old_position or 'Не указана'} → {instance.position or 'Не указана'}",
+                effective_date=today,
+                created_by=actor,
+            )
+        return instance
 
 
 class EmployeeGoalSerializer(serializers.ModelSerializer):

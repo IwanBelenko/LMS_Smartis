@@ -14,6 +14,7 @@ from .models import (
     EmployeeProfile,
     EmploymentEvent,
     Position,
+    StaffPosition,
 )
 
 
@@ -196,3 +197,48 @@ class PeopleApiTests(TestCase):
         )
         self.assertEqual(response.status_code, 403)
         self.assertEqual(forbidden.status_code, 403)
+
+    def test_hr_manages_organization_and_staffing(self):
+        self.client.force_authenticate(self.hr)
+        created = self.client.post(
+            "/api/v1/org/departments/",
+            {"name": "Продажи", "parent": self.department.pk, "manager": self.employee.pk},
+            format="json",
+        )
+        self.assertEqual(created.status_code, 201)
+        staff = self.client.post(
+            "/api/v1/org/staff-positions/",
+            {"department": self.department.pk, "position": self.position.pk, "headcount": 3},
+            format="json",
+        )
+        self.assertEqual(staff.status_code, 201)
+        self.assertEqual(staff.json()["filled_count"], 1)
+        self.assertEqual(staff.json()["vacancies"], 2)
+        self.assertTrue(StaffPosition.objects.filter(department=self.department).exists())
+
+    def test_non_hcm_roles_cannot_open_organization(self):
+        for user in (self.employee, self.author, self.leader):
+            self.client.force_authenticate(user)
+            self.assertEqual(self.client.get("/api/v1/org/departments/").status_code, 403)
+
+    def test_department_cannot_be_placed_inside_itself(self):
+        self.client.force_authenticate(self.admin)
+        response = self.client.patch(
+            f"/api/v1/org/departments/{self.department.pk}/",
+            {"parent": self.department.pk},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_transfer_and_position_change_are_added_to_history(self):
+        next_position = Position.objects.create(name="Старший аналитик")
+        self.client.force_authenticate(self.hr)
+        response = self.client.patch(
+            f"/api/v1/employees/{self.profile.pk}/",
+            {"department": self.other_department.pk, "position": next_position.pk},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        events = EmploymentEvent.objects.filter(employee=self.profile)
+        self.assertEqual(events.filter(event_type=EmploymentEvent.Type.TRANSFER).count(), 1)
+        self.assertEqual(events.filter(event_type=EmploymentEvent.Type.PROMOTION).count(), 1)

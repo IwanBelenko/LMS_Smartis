@@ -4,6 +4,7 @@ import {
   BarChart3,
   BookOpen,
   BriefcaseBusiness,
+  Building2,
   ChartNoAxesCombined,
   CheckCircle2,
   ChevronLeft,
@@ -63,7 +64,7 @@ function Brand({ login = false }: { login?: boolean }) {
 
 type ViewId =
   | "home" | "trajectory" | "ranking" | "analytics"
-  | "employees" | "recruitment" | "hrAnalytics"
+  | "organization" | "employees" | "recruitment" | "hrAnalytics"
   | "users" | "courses" | "settings";
 type User = {
   id: number;
@@ -79,6 +80,28 @@ type User = {
 };
 type Department = { id: number; name: string; code: string; is_active: boolean };
 type Position = { id: number; name: string; is_active: boolean };
+type OrgDepartment = Department & {
+  parent: number | null;
+  parent_name: string | null;
+  manager: number | null;
+  manager_name: string;
+  employee_count: number;
+  child_count: number;
+  planned_headcount: number;
+  vacancies: number;
+};
+type StaffPosition = {
+  id: number;
+  department: number;
+  department_name: string;
+  position: number;
+  position_name: string;
+  headcount: number;
+  filled_count: number;
+  vacancies: number;
+  note: string;
+  is_active: boolean;
+};
 type EmployeeProfile = {
   id: number;
   user: number;
@@ -364,6 +387,7 @@ const nav = [
   { id: "analytics" as const, label: "Аналитика", icon: BarChart3 },
 ];
 const hcmNav = [
+  { id: "organization" as const, label: "Оргструктура", icon: Building2 },
   { id: "employees" as const, label: "Сотрудники", icon: ContactRound },
   { id: "recruitment" as const, label: "Подбор", icon: BriefcaseBusiness },
   { id: "hrAnalytics" as const, label: "HR-аналитика", icon: ChartNoAxesCombined },
@@ -952,6 +976,222 @@ function EmployeeProfileView({
         </section>
       )}
     </div>
+  );
+}
+
+function OrganizationView({ token }: { token: string }) {
+  const [departments, setDepartments] = useState<OrgDepartment[]>([]);
+  const [staff, setStaff] = useState<StaffPosition[]>([]);
+  const [employees, setEmployees] = useState<EmployeeProfile[]>([]);
+  const [positions, setPositions] = useState<Position[]>([]);
+  const [selected, setSelected] = useState<number | null>(null);
+  const [departmentDialog, setDepartmentDialog] = useState<OrgDepartment | "new" | null>(null);
+  const [staffDialog, setStaffDialog] = useState<StaffPosition | "new" | null>(null);
+  const [departmentForm, setDepartmentForm] = useState({ name: "", code: "", parent: "", manager: "" });
+  const [staffForm, setStaffForm] = useState({ position: "", headcount: "1", note: "" });
+  const [error, setError] = useState("");
+
+  async function load() {
+    try {
+      const [nextDepartments, nextStaff, nextEmployees, nextPositions] = await Promise.all([
+        apiRequest<OrgDepartment[]>("/org/departments/", token),
+        apiRequest<StaffPosition[]>("/org/staff-positions/", token),
+        apiRequest<EmployeeProfile[]>("/employees/", token),
+        apiRequest<Position[]>("/positions/", token),
+      ]);
+      setDepartments(nextDepartments);
+      setStaff(nextStaff);
+      setEmployees(nextEmployees);
+      setPositions(nextPositions);
+      setSelected((current) => current && nextDepartments.some((item) => item.id === current)
+        ? current
+        : nextDepartments.find((item) => item.parent === null)?.id || nextDepartments[0]?.id || null);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось загрузить оргструктуру");
+    }
+  }
+
+  useEffect(() => { void load(); }, [token]);
+
+  const orderedDepartments: Array<OrgDepartment & { depth: number }> = [];
+  const appendChildren = (parent: number | null, depth: number) => {
+    departments.filter((item) => item.parent === parent).forEach((item) => {
+      orderedDepartments.push({ ...item, depth });
+      appendChildren(item.id, depth + 1);
+    });
+  };
+  appendChildren(null, 0);
+  departments.filter((item) => !orderedDepartments.some((row) => row.id === item.id))
+    .forEach((item) => orderedDepartments.push({ ...item, depth: 0 }));
+
+  const activeDepartment = departments.find((item) => item.id === selected) || null;
+  const visibleStaff = staff.filter((item) => item.department === selected);
+  const totals = departments.reduce((result, item) => ({
+    employees: result.employees + item.employee_count,
+    planned: result.planned + item.planned_headcount,
+    vacancies: result.vacancies + item.vacancies,
+  }), { employees: 0, planned: 0, vacancies: 0 });
+
+  function openDepartment(item?: OrgDepartment) {
+    setDepartmentDialog(item || "new");
+    setDepartmentForm(item ? {
+      name: item.name,
+      code: item.code,
+      parent: item.parent ? String(item.parent) : "",
+      manager: item.manager ? String(item.manager) : "",
+    } : { name: "", code: "", parent: selected ? String(selected) : "", manager: "" });
+  }
+
+  async function saveDepartment(event: FormEvent) {
+    event.preventDefault();
+    const editing = departmentDialog !== "new" && departmentDialog;
+    try {
+      await apiRequest(editing ? `/org/departments/${editing.id}/` : "/org/departments/", token, {
+        method: editing ? "PATCH" : "POST",
+        body: JSON.stringify({
+          name: departmentForm.name,
+          code: departmentForm.code,
+          parent: departmentForm.parent ? Number(departmentForm.parent) : null,
+          manager: departmentForm.manager ? Number(departmentForm.manager) : null,
+        }),
+      });
+      setDepartmentDialog(null);
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось сохранить подразделение");
+    }
+  }
+
+  function openStaff(item?: StaffPosition) {
+    setStaffDialog(item || "new");
+    setStaffForm(item ? {
+      position: String(item.position),
+      headcount: String(item.headcount),
+      note: item.note,
+    } : { position: "", headcount: "1", note: "" });
+  }
+
+  async function saveStaff(event: FormEvent) {
+    event.preventDefault();
+    if (!selected) return;
+    const editing = staffDialog !== "new" && staffDialog;
+    try {
+      await apiRequest(editing ? `/org/staff-positions/${editing.id}/` : "/org/staff-positions/", token, {
+        method: editing ? "PATCH" : "POST",
+        body: JSON.stringify({
+          department: selected,
+          position: Number(staffForm.position),
+          headcount: Number(staffForm.headcount),
+          note: staffForm.note,
+        }),
+      });
+      setStaffDialog(null);
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось сохранить штатную позицию");
+    }
+  }
+
+  return (
+    <>
+      <PageHeader
+        title="Оргструктура"
+        subtitle="Подразделения, руководители и штатное расписание"
+        action={<button className="primary-button" type="button" onClick={() => openDepartment()}><Plus /> Подразделение</button>}
+      />
+      <section className="organization-metrics">
+        <article><span>Подразделений</span><strong>{departments.length}</strong></article>
+        <article><span>Сотрудников</span><strong>{totals.employees}</strong></article>
+        <article><span>Штатных единиц</span><strong>{totals.planned}</strong></article>
+        <article><span>Открытых вакансий</span><strong>{totals.vacancies}</strong></article>
+      </section>
+      {error && <p className="form-error">{error}</p>}
+      <div className="organization-layout">
+        <section className="panel organization-tree">
+          <header><div><h2>Структура компании</h2><p>Выберите подразделение для просмотра штата</p></div></header>
+          <div className="organization-tree__list">
+            {orderedDepartments.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className={selected === item.id ? "organization-unit organization-unit--active" : "organization-unit"}
+                style={{ paddingLeft: `${14 + item.depth * 24}px` }}
+                onClick={() => setSelected(item.id)}
+              >
+                <Building2 />
+                <span><strong>{item.name}</strong><small>{item.manager_name || "Руководитель не назначен"}</small></span>
+                <i>{item.employee_count}</i>
+              </button>
+            ))}
+            {!departments.length && <div className="hcm-empty"><Building2 /><p>Создайте первое подразделение</p></div>}
+          </div>
+        </section>
+        <section className="panel organization-details">
+          {activeDepartment ? (
+            <>
+              <header className="organization-details__header">
+                <div>
+                  <span>{activeDepartment.parent_name || "Компания"}</span>
+                  <h2>{activeDepartment.name}</h2>
+                  <p>{activeDepartment.manager_name ? `Руководитель · ${activeDepartment.manager_name}` : "Руководитель не назначен"}</p>
+                </div>
+                <button className="icon-button" type="button" onClick={() => openDepartment(activeDepartment)} aria-label="Редактировать подразделение"><Pencil /></button>
+              </header>
+              <div className="organization-details__summary">
+                <span><strong>{activeDepartment.employee_count}</strong> сотрудников</span>
+                <span><strong>{activeDepartment.planned_headcount}</strong> штатных единиц</span>
+                <span><strong>{activeDepartment.vacancies}</strong> вакансий</span>
+              </div>
+              <div className="section-heading organization-staff-heading">
+                <div><h3>Штатные позиции</h3><p>Плановая и фактическая численность</p></div>
+                <button className="secondary-button" type="button" onClick={() => openStaff()}><Plus /> Позиция</button>
+              </div>
+              <div className="organization-staff-list">
+                {visibleStaff.map((item) => (
+                  <button key={item.id} type="button" onClick={() => openStaff(item)}>
+                    <span><strong>{item.position_name}</strong><small>{item.note || "Без комментария"}</small></span>
+                    <span><b>{item.filled_count} / {item.headcount}</b><small>{item.vacancies ? `${item.vacancies} вак.` : "Укомплектовано"}</small></span>
+                  </button>
+                ))}
+                {!visibleStaff.length && <div className="hcm-empty"><BriefcaseBusiness /><p>Штатные позиции ещё не добавлены</p></div>}
+              </div>
+            </>
+          ) : <div className="hcm-empty"><Building2 /><p>Выберите подразделение</p></div>}
+        </section>
+      </div>
+
+      {departmentDialog && (
+        <div className="hcm-dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setDepartmentDialog(null); }}>
+          <section className="hcm-dialog organization-dialog">
+            <header><div><h2>{departmentDialog === "new" ? "Новое подразделение" : "Настройки подразделения"}</h2><p>Укажите место в структуре и руководителя</p></div><button className="icon-button" type="button" onClick={() => setDepartmentDialog(null)}><X /></button></header>
+            <form className="hcm-form" onSubmit={saveDepartment}>
+              <div className="hcm-form__grid">
+                <label>Название<input value={departmentForm.name} onChange={(event) => setDepartmentForm({ ...departmentForm, name: event.target.value })} required /></label>
+                <label>Код<input value={departmentForm.code} onChange={(event) => setDepartmentForm({ ...departmentForm, code: event.target.value })} placeholder="Создастся автоматически" /></label>
+                <label>Вышестоящее подразделение<select value={departmentForm.parent} onChange={(event) => setDepartmentForm({ ...departmentForm, parent: event.target.value })}><option value="">Нет — верхний уровень</option>{departments.filter((item) => departmentDialog === "new" || item.id !== departmentDialog.id).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+                <label>Руководитель<select value={departmentForm.manager} onChange={(event) => setDepartmentForm({ ...departmentForm, manager: event.target.value })}><option value="">Не назначен</option>{employees.map((item) => <option key={item.user} value={item.user}>{item.full_name}</option>)}</select></label>
+              </div>
+              <footer><button className="secondary-button" type="button" onClick={() => setDepartmentDialog(null)}>Отмена</button><button className="primary-button" type="submit">Сохранить</button></footer>
+            </form>
+          </section>
+        </div>
+      )}
+      {staffDialog && (
+        <div className="hcm-dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setStaffDialog(null); }}>
+          <section className="hcm-dialog organization-dialog">
+            <header><div><h2>{staffDialog === "new" ? "Новая штатная позиция" : "Штатная позиция"}</h2><p>{activeDepartment?.name}</p></div><button className="icon-button" type="button" onClick={() => setStaffDialog(null)}><X /></button></header>
+            <form className="hcm-form" onSubmit={saveStaff}>
+              <div className="hcm-form__grid">
+                <label>Должность<select value={staffForm.position} onChange={(event) => setStaffForm({ ...staffForm, position: event.target.value })} required><option value="">Выберите должность</option>{positions.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+                <label>Штатных единиц<input type="number" min="1" value={staffForm.headcount} onChange={(event) => setStaffForm({ ...staffForm, headcount: event.target.value })} required /></label>
+                <label className="hcm-form__wide">Комментарий<input value={staffForm.note} onChange={(event) => setStaffForm({ ...staffForm, note: event.target.value })} /></label>
+              </div>
+              <footer><button className="secondary-button" type="button" onClick={() => setStaffDialog(null)}>Отмена</button><button className="primary-button" type="submit">Сохранить</button></footer>
+            </form>
+          </section>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -2824,7 +3064,7 @@ function Placeholder({ active }: { active: ViewId }) {
   const labels: Record<string, string> = {
     trajectory: "Траектория обучения", ranking: "Рейтинг", analytics: "Аналитика дэйликов",
     courses: "Курсы", settings: "Настройки", employees: "Сотрудники",
-    recruitment: "Подбор", hrAnalytics: "HR-аналитика",
+    organization: "Оргструктура", recruitment: "Подбор", hrAnalytics: "HR-аналитика",
   };
   return (
     <>
@@ -2911,6 +3151,8 @@ function App() {
           <UsersView token={token} />
         ) : active === "employees" ? (
           <EmployeesView token={token} user={user} />
+        ) : active === "organization" ? (
+          <OrganizationView token={token} />
         ) : active === "recruitment" ? (
           <RecruitmentView token={token} />
         ) : active === "hrAnalytics" ? (

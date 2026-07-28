@@ -9,6 +9,22 @@ from django.utils import timezone
 class Department(models.Model):
     name = models.CharField("Название", max_length=150, unique=True)
     code = models.SlugField("Код", max_length=80, unique=True)
+    parent = models.ForeignKey(
+        "self",
+        verbose_name="Вышестоящее подразделение",
+        related_name="children",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    manager = models.ForeignKey(
+        "User",
+        verbose_name="Руководитель",
+        related_name="managed_departments",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
     is_active = models.BooleanField("Активен", default=True)
     created_at = models.DateTimeField(auto_now_add=True)
 

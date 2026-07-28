@@ -1440,6 +1440,59 @@ th { font-size: 0.72rem; text-transform: none; letter-spacing: 0.02em; }
 .employee-document-list article > div { min-width: 0; display: grid; gap: 3px; }
 .employee-document-list article span, .employee-document-list article time { color: var(--muted); font-size: .75rem; }
 
+.organization-metrics {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+}
+.organization-metrics article { padding: 13px 18px; border-left: 1px solid var(--border); display: grid; gap: 3px; }
+.organization-metrics article:first-child { border-left: 0; }
+.organization-metrics span { color: var(--muted); font-size: .74rem; }
+.organization-metrics strong { font-size: 1.45rem; letter-spacing: -.03em; }
+.organization-layout { min-width: 0; display: grid; grid-template-columns: minmax(270px, .72fr) minmax(420px, 1.45fr); gap: 12px; }
+.organization-tree, .organization-details { min-height: 510px; padding: 0; overflow: hidden; }
+.organization-tree > header { padding: 17px 18px 13px; border-bottom: 1px solid var(--border); }
+.organization-tree > header p, .organization-staff-heading p { margin-top: 4px; color: var(--muted); font-size: .74rem; }
+.organization-tree__list { padding: 7px; display: grid; gap: 2px; }
+.organization-unit {
+  width: 100%; min-height: 52px; padding: 8px 12px; border: 0; border-radius: 6px;
+  display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: center; gap: 9px;
+  background: transparent; color: var(--foreground); text-align: left; cursor: pointer;
+}
+.organization-unit:hover { background: var(--surface-soft); }
+.organization-unit--active { background: color-mix(in srgb, var(--brand) 14%, var(--surface)); }
+.organization-unit > svg { width: 17px; color: var(--muted); }
+.organization-unit--active > svg { color: var(--brand-hover); }
+.organization-unit > span { min-width: 0; display: grid; gap: 3px; }
+.organization-unit strong, .organization-unit small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.organization-unit strong { font-size: .82rem; }
+.organization-unit small { color: var(--muted); font-size: .68rem; }
+.organization-unit > i {
+  min-width: 24px; padding: 3px 6px; border-radius: 5px; background: var(--surface-soft);
+  color: var(--muted); font-size: .68rem; font-style: normal; text-align: center;
+}
+.organization-details { padding: 20px; }
+.organization-details__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 15px; }
+.organization-details__header > div > span { color: var(--brand-hover); font-size: .68rem; font-weight: 700; text-transform: uppercase; }
+.organization-details__header h2 { margin-top: 5px; font-size: 1.35rem; }
+.organization-details__header p { margin-top: 4px; color: var(--muted); font-size: .78rem; }
+.organization-details__summary {
+  margin: 18px 0; padding: 12px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+  display: flex; gap: 24px; color: var(--muted); font-size: .73rem;
+}
+.organization-details__summary strong { margin-right: 4px; color: var(--foreground); font-size: .95rem; }
+.organization-staff-heading { margin-bottom: 8px; }
+.organization-staff-list { display: grid; }
+.organization-staff-list > button {
+  min-height: 62px; padding: 10px 8px; border: 0; border-top: 1px solid var(--border);
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 14px;
+  background: transparent; color: var(--foreground); text-align: left; cursor: pointer;
+}
+.organization-staff-list > button:hover { background: var(--surface-soft); }
+.organization-staff-list > button > span { min-width: 0; display: grid; gap: 4px; }
+.organization-staff-list > button > span:last-child { text-align: right; }
+.organization-staff-list small { color: var(--muted); font-size: .7rem; }
+.organization-dialog { width: min(620px, 100%); }
+
 @media (max-width: 980px) {
   .role-access-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .role-access-card:nth-child(odd) { border-left: 0; }
@@ -1450,6 +1503,8 @@ th { font-size: 0.72rem; text-transform: none; letter-spacing: 0.02em; }
   .hcm-analytics-grid { grid-template-columns: 1fr; }
   .employee-overview { grid-template-columns: 1fr; }
   .employee-competencies { grid-column: 1; }
+  .organization-layout { grid-template-columns: 1fr; }
+  .organization-tree, .organization-details { min-height: auto; }
 }
 
 @media (max-width: 620px) {
@@ -1474,6 +1529,10 @@ th { font-size: 0.72rem; text-transform: none; letter-spacing: 0.02em; }
   .employee-learning-card { grid-template-columns: 34px minmax(0, 1fr); }
   .employee-learning-card > select, .employee-learning-card > strong { grid-column: 2; }
   .employee-timeline article { grid-template-columns: 16px 80px minmax(0, 1fr); }
+  .organization-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .organization-metrics article:nth-child(3) { border-top: 1px solid var(--border); border-left: 0; }
+  .organization-metrics article:nth-child(4) { border-top: 1px solid var(--border); }
+  .organization-details__summary { align-items: flex-start; flex-direction: column; gap: 7px; }
 }
 
 @media (min-width: 621px) and (max-width: 760px) {

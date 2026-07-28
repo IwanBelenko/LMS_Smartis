@@ -17,6 +17,25 @@ class Position(models.Model):
         return self.name
 
 
+class StaffPosition(models.Model):
+    department = models.ForeignKey(Department, related_name="staff_positions", on_delete=models.CASCADE)
+    position = models.ForeignKey(Position, related_name="staff_positions", on_delete=models.PROTECT)
+    headcount = models.PositiveIntegerField("Штатных единиц", default=1)
+    note = models.CharField("Комментарий", max_length=240, blank=True)
+    is_active = models.BooleanField("Активна", default=True)
+
+    class Meta:
+        ordering = ["department__name", "position__name"]
+        constraints = [
+            models.UniqueConstraint(fields=["department", "position"], name="unique_department_staff_position"),
+        ]
+        verbose_name = "Штатная позиция"
+        verbose_name_plural = "Штатные позиции"
+
+    def __str__(self):
+        return f"{self.department}: {self.position}"
+
+
 class EmployeeProfile(models.Model):
     class Status(models.TextChoices):
         EMPLOYED = "employed", "Работает"
