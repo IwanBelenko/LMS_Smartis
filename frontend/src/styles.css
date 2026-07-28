@@ -194,11 +194,9 @@ svg { width: 20px; height: 20px; flex: 0 0 auto; }
 }
 .development-card__body { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(230px, .5fr); }
 .development-map {
-  height: clamp(520px, 48vw, 660px); min-height: 0; position: relative; overflow: hidden; cursor: crosshair; touch-action: pan-y;
-  background:
-    radial-gradient(ellipse at 50% 50%, color-mix(in srgb, var(--brand) 10%, transparent) 0 7%, transparent 38%),
-    radial-gradient(circle, color-mix(in srgb, var(--muted) 22%, transparent) 1px, transparent 1.2px);
-  background-size: auto, 22px 22px;
+  height: clamp(560px, 51vw, 700px); min-height: 0; position: relative; overflow: hidden; cursor: crosshair; touch-action: pan-y;
+  background: radial-gradient(circle, color-mix(in srgb, var(--muted) 22%, transparent) 1px, transparent 1.2px);
+  background-size: 22px 22px;
 }
 .development-map__hint {
   position: absolute; z-index: 6; top: 12px; left: 14px; padding: 5px 7px; border-radius: 5px;
@@ -208,22 +206,22 @@ svg { width: 20px; height: 20px; flex: 0 0 auto; }
 .development-map__hint > span { width: 5px; height: 5px; border-radius: 50%; background: var(--brand); box-shadow: 0 0 0 4px color-mix(in srgb, var(--brand) 12%, transparent); }
 .development-map__links { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 1; overflow: visible; }
 .development-web__thread, .development-web__ring {
-  fill: none; stroke: color-mix(in srgb, var(--muted) 32%, transparent); stroke-width: .38;
+  fill: none; stroke: color-mix(in srgb, var(--muted) 45%, transparent); stroke-width: .62;
   stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke;
   filter: drop-shadow(0 1px 0 color-mix(in srgb, var(--surface) 65%, transparent));
 }
-.development-web__thread--glint { stroke: color-mix(in srgb, var(--brand) 35%, var(--border)); stroke-width: .48; }
+.development-web__thread--glint { stroke: color-mix(in srgb, var(--muted) 58%, var(--border)); stroke-width: .72; }
+.development-web__thread--open, .development-web__ring--open {
+  stroke: var(--brand); stroke-width: 1.18; filter: none;
+}
 .development-web__segment { stroke: none; }
-.development-web__segment--1 { fill: color-mix(in srgb, var(--brand) 4%, transparent); }
-.development-web__segment--2 { fill: color-mix(in srgb, var(--brand) 6%, transparent); }
-.development-web__segment--3 { fill: color-mix(in srgb, var(--brand) 3%, transparent); }
-.development-web__segment--4 { fill: color-mix(in srgb, var(--brand) 5%, transparent); }
-.development-web__ring--1 { stroke: color-mix(in srgb, var(--brand) 42%, var(--border)); stroke-width: .54; }
-.development-web__ring--2 { stroke: color-mix(in srgb, var(--muted) 42%, transparent); }
-.development-web__ring--3 { stroke: color-mix(in srgb, var(--brand) 26%, var(--border)); }
-.development-web__ring--4 { stroke: color-mix(in srgb, var(--muted) 36%, transparent); }
-.development-web__ring--5 { stroke: color-mix(in srgb, var(--brand) 22%, var(--border)); }
-.development-web__ring--6 { stroke: color-mix(in srgb, var(--muted) 42%, transparent); stroke-width: .5; }
+.development-web__segment--1, .development-web__segment--2, .development-web__segment--3, .development-web__segment--4 { fill: transparent; }
+.development-web__ring--1 { stroke: color-mix(in srgb, var(--muted) 52%, var(--border)); stroke-width: .75; }
+.development-web__ring--2 { stroke: color-mix(in srgb, var(--muted) 46%, transparent); }
+.development-web__ring--3 { stroke: color-mix(in srgb, var(--muted) 50%, var(--border)); }
+.development-web__ring--4 { stroke: color-mix(in srgb, var(--muted) 44%, transparent); }
+.development-web__ring--5 { stroke: color-mix(in srgb, var(--muted) 48%, var(--border)); }
+.development-web__ring--6 { stroke: color-mix(in srgb, var(--muted) 55%, transparent); stroke-width: .78; }
 .development-web__dew circle { fill: color-mix(in srgb, var(--brand) 30%, var(--surface)); stroke: color-mix(in srgb, var(--muted) 35%, var(--surface)); stroke-width: .18; }
 .development-web__dew .development-web__dew-shine { fill: var(--surface); stroke: none; }
 .development-map__link {
@@ -252,10 +250,10 @@ svg { width: 20px; height: 20px; flex: 0 0 auto; }
   width: clamp(118px, 14vw, 148px); height: clamp(118px, 14vw, 148px); position: absolute; z-index: 3; left: 50%; top: 50%;
   transform: translate(-50%, -50%); border: 1px solid color-mix(in srgb, var(--brand) 45%, var(--border));
   border-radius: 50%; display: grid; place-content: center; justify-items: center; gap: 1px;
-  background: var(--surface); box-shadow: 0 12px 34px color-mix(in srgb, var(--brand) 18%, transparent);
+  background: var(--surface); box-shadow: 0 10px 26px rgba(20, 20, 18, .1);
 }
 .development-map__center::before {
-  content: ""; position: absolute; inset: -9px; border: 1px solid color-mix(in srgb, var(--brand) 20%, transparent);
+  content: ""; position: absolute; inset: -9px; border: 1px solid color-mix(in srgb, var(--muted) 28%, transparent);
   border-radius: inherit; animation: development-pulse 2.8s ease-in-out infinite;
 }
 .development-map__center strong { margin-top: 1px; font-size: 1.15rem; }
@@ -340,7 +338,7 @@ svg { width: 20px; height: 20px; flex: 0 0 auto; }
 .development-summary__focus { min-height: 104px; }
 .development-summary .secondary-button { width: 100%; margin-top: 16px; justify-content: center; }
 .development-card--compact .development-card__body { grid-template-columns: minmax(0, 1.7fr) minmax(220px, .5fr); }
-.development-card--compact .development-map { height: clamp(480px, 45vw, 590px); min-height: 0; }
+.development-card--compact .development-map { height: clamp(520px, 48vw, 640px); min-height: 0; }
 @keyframes development-spider-float {
   from { transform: translateY(1px) rotate(-1.5deg); }
   to { transform: translateY(-2px) rotate(1.5deg); }
@@ -2408,7 +2406,7 @@ button.vacancy-card { padding: 13px; display: grid; align-content: center; gap: 
 
 @media (max-width: 980px) {
   .development-card__body, .development-card--compact .development-card__body { grid-template-columns: 1fr; }
-  .development-map, .development-card--compact .development-map { height: clamp(500px, 72vw, 620px); }
+  .development-map, .development-card--compact .development-map { height: clamp(540px, 76vw, 660px); }
   .development-summary {
     border-top: 1px solid var(--border); border-left: 0;
     grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 18px;
@@ -2468,7 +2466,7 @@ button.vacancy-card { padding: 13px; display: grid; align-content: center; gap: 
   .offer-review dl > div:nth-child(odd), .offer-review dl > div:nth-child(even) { padding-right: 0; padding-left: 0; border-right: 0; }
   .offer-review__actions { align-items: stretch; flex-direction: column; }
   .development-card__heading { min-height: 0; align-items: flex-start; flex-direction: column; }
-  .development-map, .development-card--compact .development-map { height: clamp(410px, 112vw, 500px); min-height: 0; }
+  .development-map, .development-card--compact .development-map { height: clamp(440px, 118vw, 540px); min-height: 0; }
   .development-card__badges { justify-content: flex-start; }
   .development-segment-label { display: none; }
   .development-course-tooltip { width: 150px; }

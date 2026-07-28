@@ -901,8 +901,8 @@ const developmentNodePositions = Array.from({ length: 12 }, (_, index) => {
   const angle = -90 + index * 30;
   const radialVariation = [1, .95, 1.02, .97, 1.01, .94, 1, .96, 1.03, .95, 1.01, .96][index];
   return [
-    50 + Math.cos(angle * Math.PI / 180) * 43 * radialVariation,
-    50 + Math.sin(angle * Math.PI / 180) * 43 * radialVariation,
+    50 + Math.cos(angle * Math.PI / 180) * 46 * radialVariation,
+    50 + Math.sin(angle * Math.PI / 180) * 46 * radialVariation,
   ] as const;
 });
 
@@ -936,6 +936,23 @@ function developmentRingPath(ring: DevelopmentPoint[]) {
     path += ` Q ${control.x} ${control.y} ${next.x} ${next.y}`;
   });
   return `${path} Z`;
+}
+
+function developmentRingArcPath(ring: DevelopmentPoint[], segment: number) {
+  const startIndex = segment * 3;
+  const start = ring[startIndex];
+  let path = `M ${start.x} ${start.y}`;
+  for (let step = 0; step < 3; step += 1) {
+    const point = ring[(startIndex + step) % ring.length];
+    const next = ring[(startIndex + step + 1) % ring.length];
+    const midpoint = { x: (point.x + next.x) / 2, y: (point.y + next.y) / 2 };
+    const control = {
+      x: developmentCenter.x + (midpoint.x - developmentCenter.x) * .91,
+      y: developmentCenter.y + (midpoint.y - developmentCenter.y) * .91,
+    };
+    path += ` Q ${control.x} ${control.y} ${next.x} ${next.y}`;
+  }
+  return path;
 }
 
 const developmentDewPoints = [
@@ -1047,6 +1064,9 @@ function DevelopmentNetwork({
   ];
   const demoMode = actualDevelopmentCourses.length < 8;
   const networkCourses = demoMode ? demoDevelopmentCourses : actualDevelopmentCourses;
+  const segmentOpenCounts = developmentSegmentNames.map((_, segment) =>
+    networkCourses.filter((course) => course.segment === segment && course.status !== "locked").length,
+  );
   const completedCourses = networkCourses.filter((course) => course.status === "completed").length;
   const openCourses = networkCourses.filter((course) => course.status !== "locked").length;
   const averageProgress = networkCourses.length
@@ -1112,9 +1132,28 @@ function DevelopmentNetwork({
             <path className="development-web__segment development-web__segment--2" d="M50 50 92 50 50 93Z" />
             <path className="development-web__segment development-web__segment--3" d="M50 50 50 93 8 50Z" />
             <path className="development-web__segment development-web__segment--4" d="M50 50 8 50 50 7Z" />
-            {developmentNodePositions.map(([x, y], index) => (
-              <line className={`development-web__thread ${index % 3 === 1 ? "development-web__thread--glint" : ""}`} key={`spoke-${index}`} x1="50" y1="50" x2={x} y2={y} />
-            ))}
+            {developmentNodePositions.map(([x, y], index) => {
+              const adjacentSegments = [
+                Math.floor(((index - 1 + developmentNodePositions.length) % developmentNodePositions.length) / 3),
+                Math.floor(index / 3) % 4,
+              ];
+              const openRatio = Math.max(...adjacentSegments.map((segment) => segmentOpenCounts[segment] / 10));
+              const openFactor = Math.min(1, .16 + openRatio * .84);
+              return (
+                <g key={`spoke-${index}`}>
+                  <line className={`development-web__thread ${index % 3 === 1 ? "development-web__thread--glint" : ""}`} x1="50" y1="50" x2={x} y2={y} />
+                  {openRatio > 0 && (
+                    <line
+                      className="development-web__thread development-web__thread--open"
+                      x1="50"
+                      y1="50"
+                      x2={50 + (x - 50) * openFactor}
+                      y2={50 + (y - 50) * openFactor}
+                    />
+                  )}
+                </g>
+              );
+            })}
             {developmentRingPoints.map((ring, index) => (
               <path
                 className={`development-web__ring development-web__ring--${index + 1}`}
@@ -1122,6 +1161,15 @@ function DevelopmentNetwork({
                 d={developmentRingPath(ring)}
               />
             ))}
+            {developmentRingPoints.flatMap((ring, ringIndex) =>
+              segmentOpenCounts.map((count, segment) => ringIndex < Math.ceil((count / 10) * developmentRingPoints.length) && (
+                <path
+                  className="development-web__ring development-web__ring--open"
+                  d={developmentRingArcPath(ring, segment)}
+                  key={`open-ring-${ringIndex}-${segment}`}
+                />
+              )),
+            )}
             {developmentDewPoints.map((point, index) => (
               <g className="development-web__dew" key={`dew-${index}`}>
                 <circle cx={point.x} cy={point.y} r=".8" />
