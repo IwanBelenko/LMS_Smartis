@@ -275,6 +275,21 @@ type InboxItem = {
   action_label: string;
 };
 type Inbox = { total: number; urgent: number; items: InboxItem[] };
+type DailyTranscript = {
+  id: number; title: string; meeting_date: string; department: number | null;
+  department_name: string | null; source: "paste" | "file" | "api"; source_label: string;
+  original_filename: string; text_preview: string; coverage_percent: number;
+  created_by_name: string; created_at: string;
+  analysis: {
+    keywords: Array<{ term: string; count: number; covered: boolean }>;
+    course_matches: Array<{
+      course_id: number; course_title: string; coverage_percent: number;
+      matched_terms: string[]; lessons_count: number;
+    }>;
+    gaps: string[];
+    coverage_percent: number;
+  };
+};
 type OnboardingPlan = {
   id: number;
   template_name: string | null;
@@ -3599,6 +3614,135 @@ function CoursesView({ token, user }: { token: string; user: User }) {
   );
 }
 
+function DailyAnalyticsView({ token, user }: { token: string; user: User }) {
+  const canAnalyze = ["admin", "hr", "author"].includes(user.role);
+  const canChooseDepartment = user.role === "admin" || user.role === "hr";
+  const [items, setItems] = useState<DailyTranscript[]>([]);
+  const [selected, setSelected] = useState<DailyTranscript | null>(null);
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [showUpload, setShowUpload] = useState(false);
+  const [file, setFile] = useState<File | null>(null);
+  const [form, setForm] = useState({
+    title: "", meeting_date: localDateKey(new Date()), department: "", raw_text: "",
+  });
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function load(preferredId?: number) {
+    try {
+      const [transcripts, nextDepartments] = await Promise.all([
+        apiRequest<DailyTranscript[]>("/daily-transcripts/", token),
+        canChooseDepartment ? apiRequest<Department[]>("/departments/", token) : Promise.resolve([]),
+      ]);
+      setItems(transcripts);
+      setDepartments(nextDepartments);
+      setSelected(transcripts.find((item) => item.id === preferredId) || transcripts[0] || null);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось загрузить аналитику");
+    }
+  }
+
+  useEffect(() => { void load(); }, [token, canChooseDepartment]);
+
+  async function analyzeTranscript(event: FormEvent) {
+    event.preventDefault();
+    setSaving(true);
+    setError("");
+    try {
+      const body = new FormData();
+      body.append("title", form.title);
+      body.append("meeting_date", form.meeting_date);
+      if (form.department) body.append("department", form.department);
+      if (file) body.append("file", file);
+      else body.append("raw_text", form.raw_text);
+      const created = await apiUpload<DailyTranscript>("/daily-transcripts/", token, body);
+      setShowUpload(false);
+      setFile(null);
+      setForm({ title: "", meeting_date: localDateKey(new Date()), department: "", raw_text: "" });
+      await load(created.id);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось проанализировать дэйлик");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const matches = selected?.analysis.course_matches || [];
+  const gaps = selected?.analysis.gaps || [];
+  const coverage = selected?.coverage_percent || 0;
+
+  return (
+    <>
+      <PageHeader
+        title="Аналитика дэйликов"
+        subtitle="Сравнение рабочих обсуждений с содержанием текущих курсов"
+        action={canAnalyze ? <button className="primary-button" type="button" onClick={() => setShowUpload(true)}><Upload />Добавить расшифровку</button> : undefined}
+      />
+      {error && <div className="form-error">{error}</div>}
+      <section className="daily-metrics">
+        <article><span>Расшифровок</span><strong>{items.length}</strong></article>
+        <article><span>Покрытие курсами</span><strong>{selected ? `${coverage}%` : "—"}</strong></article>
+        <article><span>Подходящих курсов</span><strong>{matches.length}</strong></article>
+        <article className={gaps.length ? "daily-metric--attention" : ""}><span>Пробелов в материалах</span><strong>{gaps.length}</strong></article>
+      </section>
+
+      <div className="daily-layout">
+        <aside className="panel daily-history">
+          <header><span className="eyebrow">История</span><h2>Дэйлики</h2></header>
+          <div>
+            {items.map((item) => (
+              <button className={selected?.id === item.id ? "daily-history__item daily-history__item--active" : "daily-history__item"} type="button" onClick={() => setSelected(item)} key={item.id}>
+                <strong>{item.title}</strong>
+                <span>{displayDate(item.meeting_date)}{item.department_name ? ` · ${item.department_name}` : ""}</span>
+                <small>{item.coverage_percent}% покрытия</small>
+              </button>
+            ))}
+            {!items.length && <div className="daily-history__empty">Расшифровок пока нет.</div>}
+          </div>
+        </aside>
+
+        <section className="daily-analysis">
+          {selected ? <>
+            <section className="panel daily-overview">
+              <div className="daily-coverage" style={{ "--coverage": `${coverage}%` } as React.CSSProperties}><strong>{coverage}%</strong><span>покрыто</span></div>
+              <div><span className="eyebrow">{displayDate(selected.meeting_date)} · {selected.source_label}</span><h2>{selected.title}</h2><p>{selected.text_preview}</p></div>
+            </section>
+            <section className="panel daily-courses">
+              <header><div><span className="eyebrow">Сопоставление</span><h2>Курсы по темам дэйлика</h2></div><span>{matches.length}</span></header>
+              <div>
+                {matches.map((course) => <article key={course.course_id}><div><strong>{course.course_title}</strong><span>{course.lessons_count} уроков · {course.matched_terms.join(", ")}</span></div><div className="daily-course-progress"><span><i style={{ width: `${course.coverage_percent}%` }} /></span><strong>{course.coverage_percent}%</strong></div></article>)}
+                {!matches.length && <div className="daily-empty">Подходящих курсов пока не найдено.</div>}
+              </div>
+            </section>
+            <section className="daily-topics">
+              <article className="panel"><span className="eyebrow">Покрытые темы</span><div className="daily-chips">{selected.analysis.keywords.filter((item) => item.covered).map((item) => <span className="daily-chip daily-chip--covered" key={item.term}>{item.term}<small>{item.count}</small></span>)}</div></article>
+              <article className="panel"><span className="eyebrow">Пробелы в обучении</span><div className="daily-chips">{gaps.map((term) => <span className="daily-chip daily-chip--gap" key={term}>{term}</span>)}</div>{!gaps.length && <p>Все основные темы уже встречаются в курсах.</p>}</article>
+            </section>
+          </> : <section className="panel daily-welcome"><ChartNoAxesCombined /><h2>Добавьте первый дэйлик</h2><p>Система выделит темы, найдёт связанные курсы и покажет, каких материалов не хватает.</p></section>}
+        </section>
+      </div>
+
+      {showUpload && (
+        <div className="hcm-dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setShowUpload(false); }}>
+          <section className="hcm-dialog daily-dialog" role="dialog" aria-modal="true">
+            <header><div><span className="eyebrow">Новый анализ</span><h2>Добавить расшифровку дэйлика</h2></div><button className="icon-button" type="button" aria-label="Закрыть" onClick={() => setShowUpload(false)}><X /></button></header>
+            <form className="hcm-form" onSubmit={analyzeTranscript}>
+              <div className="hcm-form__grid">
+                <label className="hcm-form__wide">Название<input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} placeholder="Например, Дэйлик команды маркетинга" required /></label>
+                <label>Дата<input type="date" value={form.meeting_date} onChange={(event) => setForm({ ...form, meeting_date: event.target.value })} required /></label>
+                {canChooseDepartment && <label>Отдел<select value={form.department} onChange={(event) => setForm({ ...form, department: event.target.value })}><option value="">Все отделы</option>{departments.map((department) => <option value={department.id} key={department.id}>{department.name}</option>)}</select></label>}
+                <label className="hcm-form__wide">Расшифровка<textarea className="daily-transcript-input" value={form.raw_text} onChange={(event) => { setForm({ ...form, raw_text: event.target.value }); if (event.target.value) setFile(null); }} disabled={Boolean(file)} placeholder="Вставьте текст встречи…" required={!file} /></label>
+                <label className="hcm-form__wide document-file-field"><span>Или загрузите TXT, SRT либо VTT до 5 МБ</span><input type="file" accept=".txt,.srt,.vtt" onChange={(event) => { const next = event.target.files?.[0] || null; setFile(next); if (next) setForm({ ...form, raw_text: "" }); }} /></label>
+              </div>
+              <footer><button className="secondary-button" type="button" onClick={() => setShowUpload(false)}>Отмена</button><button className="primary-button" type="submit" disabled={saving}>{saving ? "Анализируем…" : "Проанализировать"}</button></footer>
+            </form>
+          </section>
+        </div>
+      )}
+    </>
+  );
+}
+
 const inboxCategoryLabels: Record<InboxItem["category"], string> = {
   documents: "Документы",
   performance: "Оценка",
@@ -4408,6 +4552,8 @@ function App() {
           <HomeView user={user} />
         ) : active === "tasks" ? (
           <TaskCenterView token={token} onNavigate={navigate} />
+        ) : active === "analytics" ? (
+          <DailyAnalyticsView token={token} user={user} />
         ) : active === "performance" ? (
           <PerformanceView token={token} user={user} />
         ) : active === "documents" ? (

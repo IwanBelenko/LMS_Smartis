@@ -320,6 +320,44 @@ class PerformanceScore(models.Model):
         verbose_name_plural = "Оценки компетенций"
 
 
+class DailyTranscript(models.Model):
+    class Source(models.TextChoices):
+        PASTE = "paste", "Вставлен текст"
+        FILE = "file", "Загружен файл"
+        API = "api", "Получено по API"
+
+    title = models.CharField("Название", max_length=220)
+    meeting_date = models.DateField("Дата дэйлика")
+    department = models.ForeignKey(
+        Department,
+        related_name="daily_transcripts",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    source = models.CharField("Источник", max_length=20, choices=Source.choices, default=Source.PASTE)
+    original_filename = models.CharField("Имя файла", max_length=255, blank=True)
+    raw_text = models.TextField("Расшифровка")
+    analysis = models.JSONField("Результат анализа", default=dict, blank=True)
+    coverage_percent = models.PositiveSmallIntegerField("Покрытие курсами, %", default=0)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="daily_transcripts",
+        null=True,
+        on_delete=models.SET_NULL,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-meeting_date", "-created_at"]
+        verbose_name = "Расшифровка дэйлика"
+        verbose_name_plural = "Расшифровки дэйликов"
+
+    def __str__(self):
+        return self.title
+
+
 class OnboardingTemplate(models.Model):
     name = models.CharField("Название", max_length=180)
     department = models.ForeignKey(

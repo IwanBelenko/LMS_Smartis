@@ -15,6 +15,8 @@ from .views import (
     DocumentDownloadView,
     DocumentListCreateView,
     DocumentSendView,
+    DailyTranscriptDetailView,
+    DailyTranscriptListCreateView,
     EmployeeDocumentListCreateView,
     EmployeeGoalDetailView,
     EmployeeGoalListCreateView,
@@ -46,6 +48,8 @@ from .views import (
 )
 
 urlpatterns = [
+    path("daily-transcripts/", DailyTranscriptListCreateView.as_view(), name="daily-transcripts"),
+    path("daily-transcripts/<int:pk>/", DailyTranscriptDetailView.as_view(), name="daily-transcript-detail"),
     path("inbox/", InboxView.as_view(), name="inbox"),
     path("performance/competencies/", CompetencyListCreateView.as_view(), name="performance-competencies"),
     path("performance/cycles/", PerformanceCycleListCreateView.as_view(), name="performance-cycles"),

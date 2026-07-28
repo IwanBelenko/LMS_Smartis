@@ -14,6 +14,7 @@ from .models import (
     Candidate,
     CandidateStage,
     Competency,
+    DailyTranscript,
     EmployeeDocument,
     EmployeeGoal,
     EmployeeLearning,
@@ -557,6 +558,30 @@ class PerformanceSubmissionSerializer(serializers.Serializer):
             if not item.get("competency") or not isinstance(item.get("score"), int) or not 1 <= item["score"] <= 5:
                 raise serializers.ValidationError("Для каждой компетенции укажите оценку от 1 до 5")
         return value
+
+
+class DailyTranscriptSerializer(serializers.ModelSerializer):
+    department_name = serializers.CharField(source="department.name", read_only=True)
+    source_label = serializers.CharField(source="get_source_display", read_only=True)
+    created_by_name = serializers.CharField(source="created_by.get_full_name", read_only=True)
+    text_preview = serializers.SerializerMethodField()
+
+    class Meta:
+        model = DailyTranscript
+        fields = [
+            "id", "title", "meeting_date", "department", "department_name", "source",
+            "source_label", "original_filename", "raw_text", "text_preview", "analysis",
+            "coverage_percent", "created_by", "created_by_name", "created_at", "updated_at",
+        ]
+        read_only_fields = [
+            "id", "source", "original_filename", "analysis", "coverage_percent",
+            "created_by", "created_at", "updated_at",
+        ]
+        extra_kwargs = {"raw_text": {"write_only": True}}
+
+    def get_text_preview(self, obj):
+        compact = " ".join(obj.raw_text.split())
+        return compact[:220] + ("…" if len(compact) > 220 else "")
 
 
 class OnboardingTemplateSerializer(serializers.ModelSerializer):

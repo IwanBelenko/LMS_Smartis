@@ -21,6 +21,7 @@ from .models import (
     Candidate,
     CandidateStage,
     Competency,
+    DailyTranscript,
     EmployeeDocument,
     EmployeeGoal,
     EmployeeLearning,
@@ -42,6 +43,7 @@ from .serializers import (
     CandidateHireSerializer,
     CandidateStageSerializer,
     CompetencySerializer,
+    DailyTranscriptSerializer,
     EmployeeDocumentSerializer,
     EmployeeGoalSerializer,
     EmployeeLearningSerializer,
@@ -58,7 +60,69 @@ from .serializers import (
     PerformanceReviewSerializer,
     PerformanceSubmissionSerializer,
 )
-from .services import assign_onboarding
+from .services import analyze_daily_transcript, assign_onboarding
+
+
+class DailyTranscriptListCreateView(generics.ListCreateAPIView):
+    serializer_class = DailyTranscriptSerializer
+    permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def get_queryset(self):
+        queryset = DailyTranscript.objects.select_related("department", "created_by")
+        user = self.request.user
+        if user.is_superuser or user.role in {User.Role.ADMIN, User.Role.HR}:
+            return queryset
+        return queryset.filter(created_by=user)
+
+    def create(self, request, *args, **kwargs):
+        if not (
+            request.user.is_superuser
+            or request.user.role in {User.Role.ADMIN, User.Role.HR, User.Role.AUTHOR}
+        ):
+            raise PermissionDenied("Добавлять расшифровки могут HR, администраторы и авторы курсов")
+        data = request.data.copy()
+        uploaded = request.FILES.get("file")
+        source = DailyTranscript.Source.PASTE
+        original_filename = ""
+        if uploaded:
+            suffix = uploaded.name.lower().rsplit(".", 1)[-1] if "." in uploaded.name else ""
+            if suffix not in {"txt", "srt", "vtt"}:
+                raise ValidationError({"file": "Поддерживаются текстовые файлы TXT, SRT и VTT"})
+            if uploaded.size > 5 * 1024 * 1024:
+                raise ValidationError({"file": "Файл превышает допустимый размер 5 МБ"})
+            data["raw_text"] = uploaded.read().decode("utf-8-sig", errors="replace")
+            source = DailyTranscript.Source.FILE
+            original_filename = uploaded.name
+        if not str(data.get("raw_text", "")).strip():
+            raise ValidationError({"raw_text": "Добавьте текст расшифровки или загрузите файл"})
+        serializer = self.get_serializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        analysis = analyze_daily_transcript(serializer.validated_data["raw_text"])
+        transcript = serializer.save(
+            created_by=request.user,
+            source=source,
+            original_filename=original_filename,
+            analysis=analysis,
+            coverage_percent=analysis["coverage_percent"],
+        )
+        AuditEvent.objects.create(
+            actor=request.user, entity_type="daily_transcript", entity_id=str(transcript.pk), action="analyzed"
+        )
+        return Response(
+            DailyTranscriptSerializer(transcript, context={"request": request}).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class DailyTranscriptDetailView(generics.RetrieveAPIView):
+    serializer_class = DailyTranscriptSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        queryset = DailyTranscript.objects.select_related("department", "created_by")
+        user = self.request.user
+        return queryset if user.is_superuser or user.role in {User.Role.ADMIN, User.Role.HR} else queryset.filter(created_by=user)
 
 
 def review_queryset_for(user):

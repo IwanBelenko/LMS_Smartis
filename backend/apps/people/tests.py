@@ -6,12 +6,13 @@ from django.test import TestCase
 from rest_framework.test import APIClient
 
 from apps.identity.models import Department, User
-from apps.learning.models import Course, LearningPath, LearningPathCourse
+from apps.learning.models import Course, LearningPath, LearningPathCourse, Lesson
 from .models import (
     AbsenceRequest,
     Candidate,
     CandidateStage,
     Competency,
+    DailyTranscript,
     EmployeeDocument,
     EmployeeGoal,
     EmployeeLearning,
@@ -727,3 +728,58 @@ class PeopleApiTests(TestCase):
         item = next(item for item in response.json()["items"] if item["id"] == f"onboarding-{plan.pk}")
         self.assertEqual(item["priority"], "danger")
         self.assertGreaterEqual(response.json()["urgent"], 1)
+
+    def test_admin_analyzes_daily_transcript_against_courses(self):
+        course = Course.objects.create(
+            title="Сквозная аналитика",
+            description="Атрибуция рекламных каналов и конверсия",
+            author=self.admin,
+            status=Course.Status.PUBLISHED,
+        )
+        Lesson.objects.create(
+            course=course,
+            title="Модели атрибуции",
+            content="<p>Аналитика источников, конверсия и рекламные кампании</p>",
+        )
+        self.client.force_authenticate(self.admin)
+        response = self.client.post(
+            "/api/v1/daily-transcripts/",
+            {
+                "title": "Дэйлик маркетинга",
+                "meeting_date": "2026-07-28",
+                "raw_text": "Обсудили сквозную аналитику, атрибуцию, конверсию и новый рекламный канал. Не хватает материала про когортный анализ.",
+            },
+            format="multipart",
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertGreater(response.json()["coverage_percent"], 0)
+        self.assertEqual(response.json()["analysis"]["course_matches"][0]["course_id"], course.pk)
+        self.assertIn("когортный", response.json()["analysis"]["gaps"])
+
+    def test_author_uploads_daily_transcript_text_file(self):
+        self.client.force_authenticate(self.author)
+        response = self.client.post(
+            "/api/v1/daily-transcripts/",
+            {
+                "title": "Дэйлик продукта",
+                "meeting_date": "2026-07-28",
+                "file": SimpleUploadedFile("daily.vtt", "WEBVTT\nОбсудили продуктовую аналитику".encode("utf-8"), content_type="text/vtt"),
+            },
+            format="multipart",
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["source"], DailyTranscript.Source.FILE)
+        self.assertEqual(response.json()["original_filename"], "daily.vtt")
+
+    def test_employee_cannot_add_daily_transcript(self):
+        self.client.force_authenticate(self.employee)
+        response = self.client.post(
+            "/api/v1/daily-transcripts/",
+            {
+                "title": "Личный дэйлик",
+                "meeting_date": "2026-07-28",
+                "raw_text": "Текст встречи",
+            },
+            format="multipart",
+        )
+        self.assertEqual(response.status_code, 403)

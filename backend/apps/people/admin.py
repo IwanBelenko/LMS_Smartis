@@ -3,6 +3,7 @@ from django.contrib import admin
 from .models import (
     AbsenceRequest,
     Competency,
+    DailyTranscript,
     AuditEvent,
     Candidate,
     CandidateStage,
@@ -23,6 +24,6 @@ from .models import (
 
 admin.site.register([
     Position, StaffPosition, EmployeeProfile, EmployeeGoal, EmploymentEvent, EmployeeLearning,
-    EmployeeDocument, AbsenceRequest, PerformanceCycle, Competency, PerformanceReview, PerformanceScore,
+    EmployeeDocument, AbsenceRequest, PerformanceCycle, Competency, PerformanceReview, PerformanceScore, DailyTranscript,
     OnboardingTemplate, OnboardingPlan, CandidateStage, Vacancy, Candidate, AuditEvent,
 ])
