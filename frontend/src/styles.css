@@ -1359,6 +1359,18 @@ button.vacancy-card { padding: 13px; display: grid; align-content: center; gap: 
 .candidate-card__edit:hover { background: var(--surface-soft); color: var(--foreground); }
 .candidate-card__edit svg { width: 15px; height: 15px; }
 .candidate-card footer { padding-top: 8px; border-top: 1px solid var(--border); display: grid; gap: 3px; color: var(--muted); font-size: 0.7rem; }
+.candidate-card__hire {
+  width: 100%; min-height: 32px; padding: 6px 9px; border: 1px solid var(--brand); border-radius: 5px;
+  background: color-mix(in srgb, var(--brand) 13%, var(--surface)); color: var(--foreground);
+  font-size: .72rem; font-weight: 700; cursor: pointer;
+}
+.candidate-card__hire:hover { background: var(--brand); color: var(--on-brand); }
+.candidate-card__hired {
+  padding: 7px 8px; border-radius: 5px; display: flex; align-items: center; gap: 6px;
+  background: color-mix(in srgb, var(--brand) 14%, var(--surface)); color: var(--brand-hover);
+  font-size: .7rem; font-weight: 700;
+}
+.candidate-card__hired svg { width: 14px; height: 14px; }
 .recruitment-empty { padding: 22px 6px; color: var(--muted); font-size: 0.78rem; text-align: center; }
 
 .hcm-dialog-backdrop {
@@ -1382,6 +1394,13 @@ button.vacancy-card { padding: 13px; display: grid; align-content: center; gap: 
   border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 8px;
   background: var(--surface);
 }
+.hire-dialog { width: min(620px, 100%); }
+.hire-dialog__notice {
+  padding: 11px 12px; border: 1px solid color-mix(in srgb, var(--brand) 35%, var(--border)); border-radius: 7px;
+  display: flex; align-items: flex-start; gap: 9px;
+  background: color-mix(in srgb, var(--brand) 9%, var(--surface)); color: var(--muted); font-size: .76rem; line-height: 1.45;
+}
+.hire-dialog__notice svg { width: 17px; min-width: 17px; color: var(--brand-hover); }
 
 .hcm-analytics-grid { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(260px, 0.7fr); gap: 14px; }
 .hcm-chart { min-height: 320px; }

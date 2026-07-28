@@ -177,8 +177,12 @@ class Command(BaseCommand):
         ):
             stage, _ = CandidateStage.objects.get_or_create(
                 name=stage_name,
-                defaults={"position": stage_position},
+                defaults={"position": stage_position, "is_terminal": stage_name == "Оффер"},
             )
+            should_be_terminal = stage_name == "Оффер"
+            if stage.is_terminal != should_be_terminal:
+                stage.is_terminal = should_be_terminal
+                stage.save(update_fields=["is_terminal"])
             stages.append(stage)
         for candidate_name, desired_position, stage in [
             ("Мария Котова", "Продуктовый аналитик", stages[0]),

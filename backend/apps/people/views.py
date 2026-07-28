@@ -21,6 +21,7 @@ from .models import (
 from .permissions import IsHcmUser, IsRecruiter
 from .serializers import (
     CandidateSerializer,
+    CandidateHireSerializer,
     CandidateStageSerializer,
     EmployeeDocumentSerializer,
     EmployeeGoalSerializer,
@@ -163,7 +164,7 @@ class CandidateListCreateView(generics.ListCreateAPIView):
     permission_classes = [IsRecruiter]
 
     def get_queryset(self):
-        queryset = Candidate.objects.select_related("stage", "department", "recruiter", "vacancy")
+        queryset = Candidate.objects.select_related("stage", "department", "recruiter", "vacancy", "hired_employee__user")
         stage = self.request.query_params.get("stage")
         vacancy = self.request.query_params.get("vacancy")
         if stage:
@@ -182,7 +183,7 @@ class CandidateListCreateView(generics.ListCreateAPIView):
 class CandidateDetailView(generics.RetrieveUpdateAPIView):
     serializer_class = CandidateSerializer
     permission_classes = [IsRecruiter]
-    queryset = Candidate.objects.select_related("stage", "department", "recruiter", "vacancy")
+    queryset = Candidate.objects.select_related("stage", "department", "recruiter", "vacancy", "hired_employee__user")
 
     def perform_update(self, serializer):
         candidate = serializer.save()
@@ -195,6 +196,37 @@ class CandidateStageListView(generics.ListAPIView):
     serializer_class = CandidateStageSerializer
     permission_classes = [IsRecruiter]
     queryset = CandidateStage.objects.annotate(candidates_count=Count("candidates")).order_by("position", "id")
+
+
+class CandidateHireView(APIView):
+    permission_classes = [IsRecruiter]
+
+    def post(self, request, pk):
+        candidate = get_object_or_404(
+            Candidate.objects.select_related("stage", "vacancy__department", "vacancy__position"),
+            pk=pk,
+        )
+        serializer = CandidateHireSerializer(
+            data=request.data,
+            context={"request": request, "candidate": candidate},
+        )
+        serializer.is_valid(raise_exception=True)
+        profile = serializer.save()
+        AuditEvent.objects.create(
+            actor=request.user,
+            entity_type="candidate",
+            entity_id=str(candidate.pk),
+            action="hired",
+            changes={"employee_id": profile.pk},
+        )
+        candidate.refresh_from_db()
+        return Response(
+            {
+                "candidate": CandidateSerializer(candidate, context={"request": request}).data,
+                "employee": EmployeeProfileSerializer(profile, context={"request": request}).data,
+            },
+            status=201,
+        )
 
 
 class VacancyListCreateView(generics.ListCreateAPIView):

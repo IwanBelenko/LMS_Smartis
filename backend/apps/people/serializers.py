@@ -1,6 +1,7 @@
 from datetime import date
 
 from django.db import transaction
+from django.utils import timezone
 from django.utils.text import slugify
 from rest_framework import serializers
 
@@ -333,8 +334,7 @@ class VacancySerializer(serializers.ModelSerializer):
         return attrs
 
     def get_hired_count(self, obj):
-        terminal_stages = CandidateStage.objects.filter(is_terminal=True)
-        return obj.candidates.filter(stage__in=terminal_stages).count()
+        return obj.candidates.filter(hired_employee__isnull=False).count()
 
 
 class CandidateSerializer(serializers.ModelSerializer):
@@ -342,6 +342,7 @@ class CandidateSerializer(serializers.ModelSerializer):
     department_name = serializers.CharField(source="department.name", read_only=True)
     recruiter_name = serializers.CharField(source="recruiter.get_full_name", read_only=True)
     vacancy_title = serializers.CharField(source="vacancy.title", read_only=True)
+    hired_employee_name = serializers.CharField(source="hired_employee.user.get_full_name", read_only=True)
 
     class Meta:
         model = Candidate
@@ -349,9 +350,10 @@ class CandidateSerializer(serializers.ModelSerializer):
             "id", "full_name", "email", "phone", "telegram", "desired_position", "desired_salary",
             "vacancy", "vacancy_title",
             "skills", "source", "stage", "stage_name", "department", "department_name",
-            "recruiter", "recruiter_name", "next_action_at", "comment", "created_at", "updated_at",
+            "recruiter", "recruiter_name", "hired_employee", "hired_employee_name", "hired_at",
+            "next_action_at", "comment", "created_at", "updated_at",
         ]
-        read_only_fields = ["id", "created_at", "updated_at", "recruiter"]
+        read_only_fields = ["id", "created_at", "updated_at", "recruiter", "hired_employee", "hired_at"]
 
     def validate(self, attrs):
         vacancy = attrs.get("vacancy", getattr(self.instance, "vacancy", None))
@@ -359,3 +361,73 @@ class CandidateSerializer(serializers.ModelSerializer):
             attrs["department"] = vacancy.department
             attrs["desired_position"] = vacancy.position.name
         return attrs
+
+
+class CandidateHireSerializer(serializers.Serializer):
+    corporate_email = serializers.EmailField()
+    first_name = serializers.CharField(max_length=150)
+    last_name = serializers.CharField(max_length=150)
+    employee_number = serializers.CharField(max_length=40)
+    hire_date = serializers.DateField(default=date.today)
+    grade = serializers.CharField(max_length=80, required=False, allow_blank=True)
+
+    def validate_corporate_email(self, value):
+        if User.objects.filter(email__iexact=value).exists():
+            raise serializers.ValidationError("Пользователь с такой почтой уже существует")
+        return value
+
+    def validate_employee_number(self, value):
+        if EmployeeProfile.objects.filter(employee_number=value).exists():
+            raise serializers.ValidationError("Такой табельный номер уже используется")
+        return value
+
+    def validate(self, attrs):
+        candidate = self.context["candidate"]
+        if candidate.hired_employee_id:
+            raise serializers.ValidationError("Кандидат уже оформлен")
+        if not candidate.vacancy_id:
+            raise serializers.ValidationError("Для оформления привяжите кандидата к вакансии")
+        if not candidate.stage.is_terminal:
+            raise serializers.ValidationError("Оформление доступно только на финальном этапе")
+        return attrs
+
+    @transaction.atomic
+    def create(self, validated_data):
+        candidate = self.context["candidate"]
+        actor = self.context["request"].user
+        vacancy = candidate.vacancy
+        user = User.objects.create_user(
+            email=validated_data["corporate_email"],
+            password=None,
+            first_name=validated_data["first_name"],
+            last_name=validated_data["last_name"],
+            role=User.Role.EMPLOYEE,
+            status=User.Status.INVITED,
+            department=vacancy.department,
+        )
+        user.set_unusable_password()
+        user.save(update_fields=["password"])
+        Invitation.objects.create(user=user, created_by=actor)
+        profile = EmployeeProfile.objects.create(
+            user=user,
+            employee_number=validated_data["employee_number"],
+            position=vacancy.position,
+            grade=validated_data.get("grade", ""),
+            hire_date=validated_data["hire_date"],
+            status=EmployeeProfile.Status.EMPLOYED,
+        )
+        EmploymentEvent.objects.create(
+            employee=profile,
+            event_type=EmploymentEvent.Type.HIRED,
+            title=f"Принят на должность «{vacancy.position.name}»",
+            note=f"Оформлен из вакансии «{vacancy.title}»",
+            effective_date=validated_data["hire_date"],
+            created_by=actor,
+        )
+        candidate.hired_employee = profile
+        candidate.hired_at = timezone.now()
+        candidate.save(update_fields=["hired_employee", "hired_at", "updated_at"])
+        if vacancy.candidates.filter(hired_employee__isnull=False).count() >= vacancy.openings:
+            vacancy.status = Vacancy.Status.CLOSED
+            vacancy.save(update_fields=["status", "updated_at"])
+        return profile

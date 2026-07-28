@@ -147,6 +147,9 @@ type Candidate = {
   stage_name: string;
   department: number | null;
   department_name: string | null;
+  hired_employee: number | null;
+  hired_employee_name: string | null;
+  hired_at: string | null;
   next_action_at: string | null;
   comment: string;
 };
@@ -1445,6 +1448,10 @@ const emptyVacancyForm = {
   title: "", staff_position: "", department: "", position: "", openings: "1",
   status: "open", deadline: "", description: "", requirements: "",
 };
+const emptyHireForm = {
+  corporate_email: "", first_name: "", last_name: "", employee_number: "",
+  hire_date: new Date().toISOString().slice(0, 10), grade: "",
+};
 
 function RecruitmentView({ token }: { token: string }) {
   const [stages, setStages] = useState<CandidateStage[]>([]);
@@ -1458,9 +1465,11 @@ function RecruitmentView({ token }: { token: string }) {
   const [editing, setEditing] = useState<Candidate | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [vacancyDialog, setVacancyDialog] = useState<Vacancy | "new" | null>(null);
+  const [hiring, setHiring] = useState<Candidate | null>(null);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(emptyCandidateForm);
   const [vacancyForm, setVacancyForm] = useState(emptyVacancyForm);
+  const [hireForm, setHireForm] = useState(emptyHireForm);
 
   async function load() {
     try {
@@ -1615,6 +1624,41 @@ function RecruitmentView({ token }: { token: string }) {
     }
   }
 
+  function openHire(candidate: Candidate) {
+    const nameParts = candidate.full_name.trim().split(/\s+/);
+    setError("");
+    setHiring(candidate);
+    setHireForm({
+      corporate_email: candidate.email || "",
+      first_name: nameParts[0] || "",
+      last_name: nameParts.slice(1).join(" "),
+      employee_number: "",
+      hire_date: new Date().toISOString().slice(0, 10),
+      grade: "",
+    });
+  }
+
+  async function hireCandidate(event: FormEvent) {
+    event.preventDefault();
+    if (!hiring) return;
+    setSaving(true);
+    setError("");
+    try {
+      await apiRequest(`/candidates/${hiring.id}/hire/`, token, {
+        method: "POST",
+        body: JSON.stringify(hireForm),
+      });
+      setHiring(null);
+      setHireForm(emptyHireForm);
+      setSelectedVacancy("all");
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось оформить сотрудника");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   const visibleCandidates = selectedVacancy === "all"
     ? candidates
     : candidates.filter((item) => item.vacancy === selectedVacancy);
@@ -1657,6 +1701,11 @@ function RecruitmentView({ token }: { token: string }) {
                   <p>{candidate.vacancy_title || candidate.desired_position}</p>
                   <label>Этап<select value={candidate.stage} onChange={(event) => void changeCandidateStage(candidate, event.target.value)}>{stages.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
                   <footer><span>{candidate.department_name || "Без отдела"}</span><small>{candidate.source || "Источник не указан"}</small></footer>
+                  {candidate.hired_employee ? (
+                    <div className="candidate-card__hired"><CheckCircle2 /> Оформлен как сотрудник</div>
+                  ) : stages.find((item) => item.id === candidate.stage)?.is_terminal && candidate.vacancy ? (
+                    <button className="candidate-card__hire" type="button" onClick={() => openHire(candidate)}>Оформить сотрудника</button>
+                  ) : null}
                 </article>
               ))}
               {!visibleCandidates.some((item) => item.stage === stage.id) && <p className="recruitment-empty">Нет кандидатов</p>}
@@ -1712,6 +1761,26 @@ function RecruitmentView({ token }: { token: string }) {
               </div>
               {error && <p className="form-error">{error}</p>}
               <footer><button className="secondary-button" type="button" onClick={() => setVacancyDialog(null)}>Отмена</button><button className="primary-button" type="submit" disabled={saving}>{saving ? "Сохраняем…" : "Сохранить вакансию"}</button></footer>
+            </form>
+          </section>
+        </div>
+      )}
+      {hiring && (
+        <div className="hcm-dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setHiring(null); }}>
+          <section className="hcm-dialog hire-dialog" role="dialog" aria-modal="true" aria-labelledby="hire-dialog-title">
+            <header><div><h2 id="hire-dialog-title">Оформление сотрудника</h2><p>{hiring.full_name} · {hiring.vacancy_title}</p></div><button className="icon-button" type="button" onClick={() => setHiring(null)} aria-label="Закрыть"><X /></button></header>
+            <div className="hire-dialog__notice"><CheckCircle2 /><span>Будут созданы учётная запись, карточка сотрудника и запись в кадровой истории.</span></div>
+            <form className="hcm-form" onSubmit={hireCandidate}>
+              <div className="hcm-form__grid">
+                <label>Имя<input value={hireForm.first_name} onChange={(event) => setHireForm({ ...hireForm, first_name: event.target.value })} required /></label>
+                <label>Фамилия<input value={hireForm.last_name} onChange={(event) => setHireForm({ ...hireForm, last_name: event.target.value })} required /></label>
+                <label className="hcm-form__wide">Корпоративная почта<input type="email" value={hireForm.corporate_email} onChange={(event) => setHireForm({ ...hireForm, corporate_email: event.target.value })} required /></label>
+                <label>Табельный номер<input value={hireForm.employee_number} onChange={(event) => setHireForm({ ...hireForm, employee_number: event.target.value })} required /></label>
+                <label>Дата выхода<input type="date" value={hireForm.hire_date} onChange={(event) => setHireForm({ ...hireForm, hire_date: event.target.value })} required /></label>
+                <label>Грейд<input value={hireForm.grade} onChange={(event) => setHireForm({ ...hireForm, grade: event.target.value })} placeholder="Junior, Middle, Senior" /></label>
+              </div>
+              {error && <p className="form-error">{error}</p>}
+              <footer><button className="secondary-button" type="button" onClick={() => setHiring(null)}>Отмена</button><button className="primary-button" type="submit" disabled={saving}>{saving ? "Оформляем…" : "Оформить и пригласить"}</button></footer>
             </form>
           </section>
         </div>

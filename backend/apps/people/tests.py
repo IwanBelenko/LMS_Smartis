@@ -293,3 +293,78 @@ class PeopleApiTests(TestCase):
             format="json",
         )
         self.assertEqual(response.status_code, 400)
+
+    def test_hr_hires_candidate_and_closes_filled_vacancy(self):
+        staff = StaffPosition.objects.create(
+            department=self.department,
+            position=self.position,
+            headcount=2,
+        )
+        vacancy = Vacancy.objects.create(
+            title="Аналитик",
+            staff_position=staff,
+            department=self.department,
+            position=self.position,
+            openings=1,
+            recruiter=self.hr,
+        )
+        offer = CandidateStage.objects.create(name="Оффер", position=4, is_terminal=True)
+        candidate = Candidate.objects.get(full_name="Мария Тестова")
+        candidate.vacancy = vacancy
+        candidate.stage = offer
+        candidate.save(update_fields=["vacancy", "stage"])
+        self.client.force_authenticate(self.hr)
+        response = self.client.post(
+            f"/api/v1/candidates/{candidate.pk}/hire/",
+            {
+                "corporate_email": "maria@smartis.local",
+                "first_name": "Мария",
+                "last_name": "Тестова",
+                "employee_number": "SM-300",
+                "hire_date": "2026-08-01",
+                "grade": "Middle",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201)
+        candidate.refresh_from_db()
+        vacancy.refresh_from_db()
+        self.assertIsNotNone(candidate.hired_employee_id)
+        self.assertEqual(candidate.hired_employee.position, self.position)
+        self.assertEqual(candidate.hired_employee.user.department, self.department)
+        self.assertEqual(candidate.hired_employee.user.status, User.Status.INVITED)
+        self.assertEqual(vacancy.status, Vacancy.Status.CLOSED)
+        self.assertTrue(
+            EmploymentEvent.objects.filter(
+                employee=candidate.hired_employee,
+                event_type=EmploymentEvent.Type.HIRED,
+            ).exists()
+        )
+
+    def test_candidate_cannot_be_hired_before_terminal_stage(self):
+        staff = StaffPosition.objects.create(
+            department=self.department,
+            position=self.position,
+            headcount=2,
+        )
+        vacancy = Vacancy.objects.create(
+            title="Аналитик",
+            staff_position=staff,
+            department=self.department,
+            position=self.position,
+        )
+        candidate = Candidate.objects.get(full_name="Мария Тестова")
+        candidate.vacancy = vacancy
+        candidate.save(update_fields=["vacancy"])
+        self.client.force_authenticate(self.admin)
+        response = self.client.post(
+            f"/api/v1/candidates/{candidate.pk}/hire/",
+            {
+                "corporate_email": "early@smartis.local",
+                "first_name": "Мария",
+                "last_name": "Тестова",
+                "employee_number": "SM-301",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400)

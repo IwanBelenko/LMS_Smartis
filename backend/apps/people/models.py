@@ -234,6 +234,15 @@ class Candidate(models.Model):
         blank=True,
         on_delete=models.SET_NULL,
     )
+    hired_employee = models.OneToOneField(
+        EmployeeProfile,
+        verbose_name="Оформленный сотрудник",
+        related_name="source_candidate",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    hired_at = models.DateTimeField("Оформлен", null=True, blank=True)
     next_action_at = models.DateTimeField("Следующее действие", null=True, blank=True)
     comment = models.TextField("Комментарий", blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
