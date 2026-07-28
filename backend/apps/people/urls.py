@@ -14,6 +14,7 @@ from .views import (
     EmployeeListCreateView,
     EmploymentEventListCreateView,
     HcmSummaryView,
+    HcmDashboardView,
     PositionListView,
     OrganizationDepartmentDetailView,
     OrganizationDepartmentListCreateView,
@@ -52,4 +53,5 @@ urlpatterns = [
     path("onboarding-templates/<int:pk>/", OnboardingTemplateDetailView.as_view(), name="onboarding-template-detail"),
     path("onboarding-options/", OnboardingOptionsView.as_view(), name="onboarding-options"),
     path("hcm/summary/", HcmSummaryView.as_view(), name="hcm-summary"),
+    path("hcm/dashboard/", HcmDashboardView.as_view(), name="hcm-dashboard"),
 ]

@@ -92,6 +92,11 @@ class Command(BaseCommand):
                     "salary_base": 120000 + index * 20000,
                 },
             )
+            if index == 3 and profile.status == EmployeeProfile.Status.PROBATION and (
+                not profile.hire_date or profile.hire_date < date.today() - timedelta(days=90)
+            ):
+                profile.hire_date = date.today() - timedelta(days=30)
+                profile.save(update_fields=["hire_date", "updated_at"])
             EmploymentEvent.objects.get_or_create(
                 employee=profile,
                 event_type=EmploymentEvent.Type.HIRED,

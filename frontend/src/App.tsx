@@ -178,6 +178,29 @@ type HcmSummary = {
   candidates_total: number;
   open_positions: number;
 };
+type HcmDashboard = {
+  metrics: {
+    active_onboarding: number;
+    overdue_onboarding: number;
+    probation: number;
+    open_vacancies: number;
+    active_candidates: number;
+  };
+  onboarding: Array<{
+    id: number; employee_id: number; employee_name: string; department_name: string;
+    responsible_name: string; due_date: string; days_left: number; progress: number;
+    severity: "danger" | "warning" | "normal";
+  }>;
+  probation: Array<{
+    id: number; employee_name: string; department_name: string; position_name: string;
+    end_date: string; days_left: number;
+  }>;
+  vacancies: Array<{
+    id: number; title: string; department_name: string; openings: number;
+    candidates_count: number; deadline: string | null; is_stale: boolean; recruiter_name: string;
+  }>;
+  funnel: Array<{ id: number; name: string; count: number }>;
+};
 type EmployeeGoal = {
   id: number; title: string; description: string; due_date: string | null; progress: number;
   status: "planned" | "in_progress" | "completed"; status_label: string;
@@ -1936,46 +1959,97 @@ function RecruitmentView({ token }: { token: string }) {
 function HrAnalyticsView({ token }: { token: string }) {
   const [employees, setEmployees] = useState<EmployeeProfile[]>([]);
   const [summary, setSummary] = useState<HcmSummary | null>(null);
+  const [dashboard, setDashboard] = useState<HcmDashboard | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
     Promise.all([
       apiRequest<EmployeeProfile[]>("/employees/", token),
       apiRequest<HcmSummary>("/hcm/summary/", token),
-    ]).then(([people, totals]) => {
+      apiRequest<HcmDashboard>("/hcm/dashboard/", token),
+    ]).then(([people, totals, nextDashboard]) => {
       setEmployees(people);
       setSummary(totals);
+      setDashboard(nextDashboard);
     }).catch((reason) => setError(reason instanceof Error ? reason.message : "Не удалось загрузить аналитику"));
   }, [token]);
 
   const departments = Array.from(new Set(employees.map((item) => item.department_name || "Без отдела")))
     .map((name) => ({ name, count: employees.filter((item) => (item.department_name || "Без отдела") === name).length }));
   const maxDepartment = Math.max(...departments.map((item) => item.count), 1);
+  const maxFunnel = Math.max(...(dashboard?.funnel.map((item) => item.count) || []), 1);
+  const dashboardMetrics = [
+    { label: "Активный онбординг", value: dashboard?.metrics.active_onboarding ?? "—", note: `${dashboard?.metrics.overdue_onboarding ?? 0} просрочено`, alert: Boolean(dashboard?.metrics.overdue_onboarding) },
+    { label: "Испытательный срок", value: dashboard?.metrics.probation ?? "—", note: "сотрудников" },
+    { label: "Открытые вакансии", value: dashboard?.metrics.open_vacancies ?? "—", note: `${dashboard?.metrics.active_candidates ?? 0} кандидатов` },
+    { label: "Развитие команды", value: summary ? `${summary.average_development_progress}%` : "—", note: "средний прогресс" },
+  ];
 
   return (
     <>
-      <PageHeader title="HR-аналитика" subtitle="Состояние команды, найма и развития сотрудников" />
-      <HcmMetricCards summary={summary} />
+      <PageHeader title="HR-дашборд" subtitle="Задачи и показатели, которые требуют внимания HR" />
+      <section className="hr-dashboard-metrics">
+        {dashboardMetrics.map((item) => (
+          <article key={item.label} className={item.alert ? "hr-dashboard-metric hr-dashboard-metric--alert" : "hr-dashboard-metric"}>
+            <span>{item.label}</span><strong>{item.value}</strong><small>{item.note}</small>
+          </article>
+        ))}
+      </section>
       {error && <p className="form-error">{error}</p>}
+      <section className="hr-dashboard-grid">
+        <article className="panel hr-attention-panel">
+          <div className="section-heading"><div><h2>Онбординг под контролем</h2><p>Ближайшие сроки и просроченные планы</p></div></div>
+          <div className="hr-attention-list">
+            {dashboard?.onboarding.map((item) => (
+              <div key={item.id} className={`hr-attention-row hr-attention-row--${item.severity}`}>
+                <span className="hr-attention-row__avatar">{item.employee_name.split(" ").map((part) => part[0]).slice(0, 2).join("")}</span>
+                <div><strong>{item.employee_name}</strong><small>{item.department_name} · {item.responsible_name || "Без ответственного"}</small></div>
+                <div className="hr-attention-row__progress"><span><i style={{ width: `${item.progress}%` }} /></span><small>{item.progress}%</small></div>
+                <b>{item.days_left < 0 ? `Просрочено ${Math.abs(item.days_left)} д.` : item.days_left === 0 ? "Сегодня" : `${item.days_left} д.`}</b>
+              </div>
+            ))}
+            {!dashboard?.onboarding.length && <div className="hcm-empty"><CheckCircle2 /><p>Активных планов адаптации нет</p></div>}
+          </div>
+        </article>
+        <article className="panel hr-funnel-panel">
+          <div className="section-heading"><div><h2>Воронка подбора</h2><p>Активные кандидаты по этапам</p></div></div>
+          <div className="hr-funnel">
+            {dashboard?.funnel.map((item) => (
+              <div key={item.id}><span>{item.name}</span><div><i style={{ width: `${item.count / maxFunnel * 100}%` }} /></div><strong>{item.count}</strong></div>
+            ))}
+          </div>
+        </article>
+      </section>
+      <section className="hr-dashboard-grid hr-dashboard-grid--lower">
+        <article className="panel">
+          <div className="section-heading"><div><h2>Испытательный срок</h2><p>Сотрудники и ближайшие контрольные даты</p></div></div>
+          <div className="hr-simple-list">
+            {dashboard?.probation.map((item) => (
+              <div key={item.id}><span><strong>{item.employee_name}</strong><small>{item.position_name} · {item.department_name}</small></span><b>{item.days_left < 0 ? "Срок истёк" : `${item.days_left} д.`}</b></div>
+            ))}
+            {!dashboard?.probation.length && <div className="hcm-empty"><CheckCircle2 /><p>Нет сотрудников на испытательном сроке</p></div>}
+          </div>
+        </article>
+        <article className="panel">
+          <div className="section-heading"><div><h2>Открытые вакансии</h2><p>Нагрузка и активность подбора</p></div></div>
+          <div className="hr-simple-list">
+            {dashboard?.vacancies.map((item) => (
+              <div key={item.id}><span><strong>{item.title}</strong><small>{item.department_name} · кандидаты: {item.candidates_count} · места: {item.openings}</small></span><b className={item.is_stale ? "hr-stale" : ""}>{item.is_stale ? "Нет движения" : item.deadline ? displayDate(item.deadline) : "В работе"}</b></div>
+            ))}
+            {!dashboard?.vacancies.length && <div className="hcm-empty"><BriefcaseBusiness /><p>Открытых вакансий нет</p></div>}
+          </div>
+        </article>
+      </section>
       <section className="hcm-analytics-grid">
         <article className="panel hcm-chart">
           <div className="section-heading"><div><h2>Команда по отделам</h2><p>Распределение активных сотрудников</p></div></div>
           <div className="hcm-bars">
-            {departments.map((department) => (
-              <div key={department.name}>
-                <span>{department.name}</span>
-                <div><i style={{ width: `${department.count / maxDepartment * 100}%` }} /></div>
-                <strong>{department.count}</strong>
-              </div>
-            ))}
+            {departments.map((department) => <div key={department.name}><span>{department.name}</span><div><i style={{ width: `${department.count / maxDepartment * 100}%` }} /></div><strong>{department.count}</strong></div>)}
           </div>
         </article>
         <article className="panel hcm-chart">
           <div className="section-heading"><div><h2>Развитие команды</h2><p>Среднее выполнение индивидуальных планов</p></div></div>
-          <div className="hcm-ring" style={{ "--progress": `${summary?.average_development_progress ?? 0}%` } as React.CSSProperties}>
-            <strong>{summary?.average_development_progress ?? 0}%</strong>
-            <span>выполнено</span>
-          </div>
+          <div className="hcm-ring" style={{ "--progress": `${summary?.average_development_progress ?? 0}%` } as React.CSSProperties}><strong>{summary?.average_development_progress ?? 0}%</strong><span>выполнено</span></div>
         </article>
       </section>
     </>

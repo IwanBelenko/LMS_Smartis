@@ -1,5 +1,8 @@
+from datetime import date, timedelta
+
 from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from rest_framework import generics
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -369,7 +372,7 @@ class HcmSummaryView(APIView):
 
     def get(self, request):
         employees = EmployeeProfile.objects.all()
-        candidates = Candidate.objects.all()
+        candidates = Candidate.objects.filter(hired_employee__isnull=True)
         return Response(
             {
                 "employees_total": employees.exclude(status=EmployeeProfile.Status.DISMISSED).count(),
@@ -379,5 +382,95 @@ class HcmSummaryView(APIView):
                 ),
                 "candidates_total": candidates.count(),
                 "open_positions": Vacancy.objects.filter(status=Vacancy.Status.OPEN).count(),
+            }
+        )
+
+
+class HcmDashboardView(APIView):
+    permission_classes = [IsHcmUser]
+
+    def get(self, request):
+        today = date.today()
+        onboarding = OnboardingPlan.objects.filter(status=OnboardingPlan.Status.ACTIVE).select_related(
+            "employee__user__department", "responsible"
+        )
+        probation = EmployeeProfile.objects.filter(
+            status=EmployeeProfile.Status.PROBATION
+        ).select_related("user__department", "position")
+        vacancies = Vacancy.objects.filter(status=Vacancy.Status.OPEN).select_related(
+            "department", "position", "recruiter"
+        ).prefetch_related("candidates")
+        stages = CandidateStage.objects.annotate(
+            active_count=Count("candidates", filter=Q(candidates__hired_employee__isnull=True))
+        ).order_by("position", "id")
+
+        onboarding_items = []
+        for plan in onboarding.order_by("due_date")[:12]:
+            progress = (
+                round(sum(bool(item.get("done")) for item in plan.checklist) / len(plan.checklist) * 100)
+                if plan.checklist else 0
+            )
+            days_left = (plan.due_date - today).days
+            onboarding_items.append(
+                {
+                    "id": plan.id,
+                    "employee_id": plan.employee_id,
+                    "employee_name": plan.employee.user.get_full_name() or plan.employee.user.email,
+                    "department_name": getattr(plan.employee.user.department, "name", ""),
+                    "responsible_name": plan.responsible.get_full_name() if plan.responsible else "",
+                    "due_date": plan.due_date,
+                    "days_left": days_left,
+                    "progress": progress,
+                    "severity": "danger" if days_left < 0 else "warning" if days_left <= 7 else "normal",
+                }
+            )
+
+        probation_items = []
+        for profile in probation.order_by("hire_date")[:12]:
+            end_date = (profile.hire_date or today) + timedelta(days=90)
+            probation_items.append(
+                {
+                    "id": profile.id,
+                    "employee_name": profile.user.get_full_name() or profile.user.email,
+                    "department_name": getattr(profile.user.department, "name", ""),
+                    "position_name": getattr(profile.position, "name", ""),
+                    "end_date": end_date,
+                    "days_left": (end_date - today).days,
+                }
+            )
+
+        vacancy_items = []
+        stale_before = timezone.now() - timedelta(days=14)
+        for vacancy in vacancies.order_by("deadline", "-updated_at")[:12]:
+            active_candidates = vacancy.candidates.filter(hired_employee__isnull=True).count()
+            vacancy_items.append(
+                {
+                    "id": vacancy.id,
+                    "title": vacancy.title,
+                    "department_name": vacancy.department.name,
+                    "openings": vacancy.openings,
+                    "candidates_count": active_candidates,
+                    "deadline": vacancy.deadline,
+                    "is_stale": vacancy.updated_at < stale_before,
+                    "recruiter_name": vacancy.recruiter.get_full_name() if vacancy.recruiter else "",
+                }
+            )
+
+        return Response(
+            {
+                "metrics": {
+                    "active_onboarding": onboarding.count(),
+                    "overdue_onboarding": onboarding.filter(due_date__lt=today).count(),
+                    "probation": probation.count(),
+                    "open_vacancies": vacancies.count(),
+                    "active_candidates": Candidate.objects.filter(hired_employee__isnull=True).count(),
+                },
+                "onboarding": onboarding_items,
+                "probation": probation_items,
+                "vacancies": vacancy_items,
+                "funnel": [
+                    {"id": stage.id, "name": stage.name, "count": stage.active_count}
+                    for stage in stages
+                ],
             }
         )

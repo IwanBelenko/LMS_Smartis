@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 
 from django.test import TestCase
 from rest_framework.test import APIClient
@@ -112,6 +112,29 @@ class PeopleApiTests(TestCase):
         self.assertEqual(stages.status_code, 200)
         self.assertEqual(stages.json()[0]["candidates_count"], 1)
         self.assertEqual(summary.json()["employees_total"], 2)
+
+    def test_hr_dashboard_highlights_overdue_onboarding_and_probation(self):
+        self.profile.status = EmployeeProfile.Status.PROBATION
+        self.profile.save(update_fields=["status"])
+        OnboardingPlan.objects.create(
+            employee=self.profile,
+            checklist=[{"id": "1", "title": "Получить доступы", "done": False}],
+            start_date=date.today() - timedelta(days=31),
+            due_date=date.today() - timedelta(days=1),
+        )
+        Vacancy.objects.create(
+            title="Аналитик",
+            department=self.department,
+            position=self.position,
+            recruiter=self.hr,
+        )
+        self.client.force_authenticate(self.hr)
+        response = self.client.get("/api/v1/hcm/dashboard/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["metrics"]["overdue_onboarding"], 1)
+        self.assertEqual(response.json()["metrics"]["probation"], 1)
+        self.assertEqual(response.json()["metrics"]["open_vacancies"], 1)
+        self.assertEqual(response.json()["onboarding"][0]["severity"], "danger")
 
     def test_admin_creates_and_updates_employee_card(self):
         self.client.force_authenticate(self.admin)
