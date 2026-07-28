@@ -616,7 +616,7 @@ function LoginPage({ onLogin }: { onLogin: (token: string, user: User) => void }
 const nav = [
   { id: "home" as const, label: "Главная", icon: Home },
   { id: "trajectory" as const, label: "Траектория", icon: Route },
-  { id: "ranking" as const, label: "Рейтинг", icon: Trophy },
+  { id: "ranking" as const, label: "Сеть развития", icon: Workflow },
   { id: "analytics" as const, label: "Аналитика", icon: BarChart3 },
   { id: "performance" as const, label: "Оценка", icon: CheckCircle2 },
 ];
@@ -862,12 +862,137 @@ function PageHeader({
   );
 }
 
-function Spider({ progress }: { progress: number }) {
+function SmartisSpiderMark() {
   return (
-    <svg className="spider" style={{ left: "calc(" + progress + "% - 19px)" }} viewBox="0 0 44 34" aria-hidden="true">
+    <svg className="development-spider" viewBox="0 0 44 34" aria-hidden="true">
       <path d="M15 13C10 11 8 7 6 4M13 17 3 14M15 21c-5 2-7 6-8 9M29 13c5-2 7-6 9-9M31 17l10-3M29 21c5 2 7 6 8 9" />
       <ellipse cx="22" cy="18" rx="12.5" ry="9" />
     </svg>
+  );
+}
+
+const developmentNodePositions = [
+  [50, 10],
+  [82, 29],
+  [82, 72],
+  [50, 89],
+  [18, 72],
+  [18, 29],
+] as const;
+
+function DevelopmentNetwork({
+  learning,
+  compact = false,
+  onNavigate,
+}: {
+  learning: MyLearning;
+  compact?: boolean;
+  onNavigate: (view: ViewId) => void;
+}) {
+  const courses = [...learning.paths.flatMap((path) => path.courses), ...learning.standalone];
+  const visibleCourses = courses.slice(0, developmentNodePositions.length);
+  const completedCourses = courses.filter((course) => course.status === "completed").length;
+  const averageProgress = courses.length
+    ? Math.round(courses.reduce((sum, course) => sum + course.progress, 0) / courses.length)
+    : 0;
+  const scoredCourses = courses.filter((course) => course.score !== null);
+  const averageScore = scoredCourses.length
+    ? Math.round(scoredCourses.reduce((sum, course) => sum + (course.score || 0), 0) / scoredCourses.length)
+    : null;
+  const currentCourse = courses.find((course) => course.status === "in_progress")
+    || courses.find((course) => course.status === "available");
+  const level = Math.max(1, completedCourses + 1);
+
+  return (
+    <section className={"panel development-card " + (compact ? "development-card--compact" : "")}>
+      <div className="section-heading development-card__heading">
+        <div>
+          <span className="eyebrow">Персональная карта</span>
+          <h2>Сеть развития</h2>
+          <p>Каждый завершённый курс укрепляет вашу профессиональную сеть</p>
+        </div>
+        {!compact && <span className="development-level">Уровень {level}</span>}
+      </div>
+      <div className="development-card__body">
+        <div className="development-map" aria-label="Карта назначенных курсов">
+          <svg className="development-map__links" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+            {visibleCourses.map((course, index) => (
+              <line
+                key={course.id}
+                className={course.progress > 0 ? "development-map__link development-map__link--active" : "development-map__link"}
+                x1="50"
+                y1="50"
+                x2={developmentNodePositions[index][0]}
+                y2={developmentNodePositions[index][1]}
+              />
+            ))}
+          </svg>
+          <div className="development-map__center">
+            <SmartisSpiderMark />
+            <strong>{averageProgress}%</strong>
+            <span>общий прогресс</span>
+          </div>
+          {visibleCourses.map((course, index) => {
+            const [left, top] = developmentNodePositions[index];
+            return (
+              <button
+                className={`development-node development-node--${course.status}`}
+                style={{ left: `${left}%`, top: `${top}%` }}
+                type="button"
+                key={course.id}
+                title={course.course_title}
+                onClick={() => onNavigate("trajectory")}
+              >
+                <span
+                  className="development-node__ring"
+                  style={{ background: `conic-gradient(var(--brand) ${course.progress}%, var(--surface-soft) 0)` }}
+                >
+                  <span>{course.status === "completed" ? <CheckCircle2 /> : `${course.progress}%`}</span>
+                </span>
+                <strong>{course.course_title}</strong>
+              </button>
+            );
+          })}
+          {!courses.length && (
+            <div className="development-map__empty">
+              <span />
+              <p>Первый узел появится после назначения курса</p>
+            </div>
+          )}
+        </div>
+        <aside className="development-summary">
+          <div>
+            <span>Освоено курсов</span>
+            <strong>{completedCourses} из {courses.length}</strong>
+          </div>
+          <div>
+            <span>Средний результат</span>
+            <strong>{averageScore === null ? "—" : `${averageScore}%`}</strong>
+          </div>
+          <div className="development-summary__focus">
+            <span>Текущий фокус</span>
+            <strong>{currentCourse?.course_title || (courses.length ? "Сеть завершена" : "Ожидает назначения")}</strong>
+            {currentCourse && <small>{currentCourse.progress}% · следующий узел уже формируется</small>}
+          </div>
+          <button className="secondary-button" type="button" onClick={() => onNavigate("trajectory")}>
+            Открыть обучение <ChevronRight />
+          </button>
+        </aside>
+      </div>
+    </section>
+  );
+}
+
+function DevelopmentNetworkView({ token, onNavigate }: { token: string; onNavigate: (view: ViewId) => void }) {
+  const [learning, setLearning] = useState<MyLearning>({ paths: [], standalone: [] });
+  useEffect(() => {
+    apiRequest<MyLearning>("/my-learning/", token).then(setLearning).catch(() => undefined);
+  }, [token]);
+  return (
+    <>
+      <PageHeader title="Сеть развития" subtitle="Ваши знания, курсы и достижения в одной карте" />
+      <DevelopmentNetwork learning={learning} onNavigate={onNavigate} />
+    </>
   );
 }
 
@@ -880,9 +1005,6 @@ function HomeView({ user, token, onNavigate }: { user: User; token: string; onNa
   const current = allCourses.find((item) => item.status === "in_progress")
     || allCourses.find((item) => item.status === "available");
   const completed = allCourses.filter((item) => item.status === "completed").length;
-  const ranking = [
-    ["Анна", 82], ["Вы", 54], ["Максим", 41], ["Ольга", 28],
-  ] as const;
   return (
     <>
       <PageHeader title={"Добрый день, " + (user.first_name || user.email)} subtitle={learning.paths[0] ? `Траектория «${learning.paths[0].title}»` : "Ваше обучение"} />
@@ -900,18 +1022,7 @@ function HomeView({ user, token, onNavigate }: { user: User; token: string; onNa
         <button className="primary-button" type="button" onClick={() => onNavigate("trajectory")}>{current ? "Продолжить" : "Открыть обучение"} <ChevronRight /></button>
         <div className="progress"><span style={{ width: `${current?.progress || 0}%` }} /></div>
       </section>
-      <section className="panel">
-        <div className="section-heading"><div><h2>Рейтинг</h2><p>Участники курса внутри вашего отдела</p></div><Trophy /></div>
-        <div className="ranking">
-          {ranking.map(([name, progress], index) => (
-            <div className="rank-row" key={name}>
-              <strong>{index + 1}</strong><span>{name}</span>
-              <div className="track"><Spider progress={progress} /><span>⚑</span></div>
-              <strong>{progress}%</strong>
-            </div>
-          ))}
-        </div>
-      </section>
+      <DevelopmentNetwork learning={learning} compact onNavigate={onNavigate} />
     </>
   );
 }
@@ -5236,7 +5347,7 @@ function AbsencesView({ token, user }: { token: string; user: User }) {
 
 function Placeholder({ active }: { active: ViewId }) {
   const labels: Record<string, string> = {
-    trajectory: "Траектория обучения", ranking: "Рейтинг", analytics: "Аналитика дэйликов",
+    trajectory: "Траектория обучения", ranking: "Сеть развития", analytics: "Аналитика дэйликов",
     tasks: "Задачи",
     absences: "Отпуска и отсутствия",
     documents: "Документы",
@@ -5327,6 +5438,8 @@ function App() {
           <HomeView user={user} token={token} onNavigate={navigate} />
         ) : active === "trajectory" ? (
           <TrajectoryView token={token} user={user} />
+        ) : active === "ranking" ? (
+          <DevelopmentNetworkView token={token} onNavigate={navigate} />
         ) : active === "tasks" ? (
           <TaskCenterView token={token} onNavigate={navigate} />
         ) : active === "analytics" ? (
