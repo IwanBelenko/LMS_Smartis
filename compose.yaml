@@ -56,6 +56,18 @@ services:
       MAX_SCORM_UPLOAD_SIZE: "${MAX_SCORM_UPLOAD_SIZE:-1073741824}"
       MAX_SCORM_UNPACKED_SIZE: "${MAX_SCORM_UNPACKED_SIZE:-2147483648}"
       MAX_SCORM_FILES: "${MAX_SCORM_FILES:-10000}"
+      APP_PUBLIC_URL: "${APP_PUBLIC_URL:-http://localhost}"
+      EMAIL_BACKEND: "${EMAIL_BACKEND:-django.core.mail.backends.console.EmailBackend}"
+      EMAIL_HOST: "${EMAIL_HOST:-smtp.yandex.ru}"
+      EMAIL_PORT: "${EMAIL_PORT:-465}"
+      EMAIL_HOST_USER: "${EMAIL_HOST_USER:-}"
+      EMAIL_HOST_PASSWORD: "${EMAIL_HOST_PASSWORD:-}"
+      EMAIL_USE_SSL: "${EMAIL_USE_SSL:-true}"
+      EMAIL_USE_TLS: "${EMAIL_USE_TLS:-false}"
+      DEFAULT_FROM_EMAIL: "${DEFAULT_FROM_EMAIL:-HCM / LMS Smartis <noreply@localhost>}"
+      LOGIN_THROTTLE_RATE: "${LOGIN_THROTTLE_RATE:-10/minute}"
+      PASSWORD_RESET_THROTTLE_RATE: "${PASSWORD_RESET_THROTTLE_RATE:-5/hour}"
+      INVITATION_THROTTLE_RATE: "${INVITATION_THROTTLE_RATE:-30/hour}"
     depends_on:
       db: { condition: service_healthy }
     volumes: ["media_data:/app/media"]

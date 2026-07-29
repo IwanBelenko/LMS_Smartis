@@ -1,12 +1,19 @@
 from unittest.mock import patch
+from urllib.parse import parse_qs, urlparse
+import re
 
 from django.core.management import call_command
-from django.test import TestCase
+from django.core import mail
+from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
 from .models import Department, Invitation, User
 
 
+@override_settings(
+    EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+    APP_PUBLIC_URL="http://lms.test",
+)
 class IdentityApiTests(TestCase):
     def setUp(self):
         self.department = Department.objects.create(name="Аналитика", code="analytics")
@@ -55,6 +62,9 @@ class IdentityApiTests(TestCase):
         self.assertEqual(user.status_code, 201)
         self.assertEqual(user.json()["status"], User.Status.INVITED)
         self.assertTrue(Invitation.objects.filter(user__email="employee@test.local").exists())
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn("HCM / LMS Smartis", mail.outbox[0].subject)
+        self.assertIn("?invite=", mail.outbox[0].body)
 
     def test_employee_cannot_manage_users(self):
         employee = User.objects.create_user(
@@ -96,3 +106,86 @@ class IdentityApiTests(TestCase):
         self.assertTrue(admin.is_staff)
         self.assertEqual(admin.role, User.Role.ADMIN)
         self.assertTrue(admin.check_password("TemporaryStrong123!"))
+
+    def test_invited_user_sets_password_and_activates_account(self):
+        invited = User.objects.create_user(
+            email="invitee@test.local",
+            password=None,
+            first_name="Анна",
+            status=User.Status.INVITED,
+        )
+        invited.set_unusable_password()
+        invited.save(update_fields=["password"])
+        invitation = Invitation.objects.create(user=invited, created_by=self.admin)
+
+        details = self.client.get(f"/api/v1/auth/invitations/{invitation.token}/")
+        self.assertEqual(details.status_code, 200)
+        accepted = self.client.post(
+            f"/api/v1/auth/invitations/{invitation.token}/",
+            {"password": "NewStrongPassword123!", "password_confirm": "NewStrongPassword123!"},
+            format="json",
+        )
+        self.assertEqual(accepted.status_code, 200)
+        invited.refresh_from_db()
+        invitation.refresh_from_db()
+        self.assertEqual(invited.status, User.Status.ACTIVE)
+        self.assertTrue(invited.check_password("NewStrongPassword123!"))
+        self.assertIsNotNone(invitation.accepted_at)
+        self.assertEqual(
+            self.client.get(f"/api/v1/auth/invitations/{invitation.token}/").status_code,
+            404,
+        )
+
+    def test_admin_resends_invitation_with_new_token(self):
+        invited = User.objects.create_user(
+            email="resend@test.local",
+            password=None,
+            status=User.Status.INVITED,
+        )
+        invited.set_unusable_password()
+        invited.save(update_fields=["password"])
+        invitation = Invitation.objects.create(user=invited, created_by=self.admin)
+        old_token = invitation.token
+        self.client.force_authenticate(self.admin)
+        response = self.client.post(f"/api/v1/users/{invited.pk}/resend-invitation/")
+        self.assertEqual(response.status_code, 200)
+        invitation.refresh_from_db()
+        self.assertNotEqual(invitation.token, old_token)
+        self.assertEqual(len(mail.outbox), 1)
+
+    def test_active_user_resets_password_from_email_link(self):
+        response = self.client.post(
+            "/api/v1/auth/password-reset/",
+            {"email": self.admin.email},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(mail.outbox), 1)
+        url = re.search(r"https?://\S+", mail.outbox[0].body).group(0)
+        query = parse_qs(urlparse(url).query)
+        uid = query["reset_uid"][0]
+        token = query["reset_token"][0]
+
+        valid = self.client.get(f"/api/v1/auth/password-reset/{uid}/{token}/")
+        self.assertEqual(valid.status_code, 200)
+        changed = self.client.post(
+            f"/api/v1/auth/password-reset/{uid}/{token}/",
+            {"password": "ChangedStrongPassword123!", "password_confirm": "ChangedStrongPassword123!"},
+            format="json",
+        )
+        self.assertEqual(changed.status_code, 200)
+        self.admin.refresh_from_db()
+        self.assertTrue(self.admin.check_password("ChangedStrongPassword123!"))
+        self.assertEqual(
+            self.client.get(f"/api/v1/auth/password-reset/{uid}/{token}/").status_code,
+            400,
+        )
+
+    def test_password_reset_does_not_disclose_unknown_email(self):
+        response = self.client.post(
+            "/api/v1/auth/password-reset/",
+            {"email": "unknown@test.local"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(mail.outbox), 0)

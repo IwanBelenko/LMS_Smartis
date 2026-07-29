@@ -668,12 +668,46 @@ function CurtainToggleIcon({ open }: { open: boolean }) {
 }
 
 function LoginPage({ onLogin }: { onLogin: (token: string, user: User) => void }) {
-  const [email, setEmail] = useState("admin@smartis.local");
-  const [password, setPassword] = useState("SmartisDemo123!");
+  const query = new URLSearchParams(window.location.search);
+  const invitationToken = query.get("invite") || "";
+  const resetUid = query.get("reset_uid") || "";
+  const resetToken = query.get("reset_token") || "";
+  const initialMode = invitationToken ? "invite" : resetUid && resetToken ? "reset" : "login";
+  const [mode, setMode] = useState<"login" | "forgot" | "invite" | "reset">(initialMode);
+  const [email, setEmail] = useState(import.meta.env.DEV ? "admin@smartis.local" : "");
+  const [password, setPassword] = useState(import.meta.env.DEV ? "SmartisDemo123!" : "");
+  const [passwordConfirm, setPasswordConfirm] = useState("");
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(false);
+  const [linkReady, setLinkReady] = useState(initialMode === "login");
 
-  async function submit(event: FormEvent) {
+  useEffect(() => {
+    if (mode !== "invite" && mode !== "reset") return;
+    const path = mode === "invite"
+      ? `/auth/invitations/${invitationToken}/`
+      : `/auth/password-reset/${resetUid}/${resetToken}/`;
+    setLinkReady(false);
+    setError("");
+    apiRequest<{ email: string; full_name?: string }>(path, null)
+      .then((data) => {
+        setEmail(data.email);
+        setLinkReady(true);
+      })
+      .catch((reason) => setError(reason instanceof Error ? reason.message : "Ссылка недействительна или устарела"));
+  }, [mode, invitationToken, resetUid, resetToken]);
+
+  function showLogin() {
+    window.history.replaceState({}, "", window.location.pathname);
+    setMode("login");
+    setPassword("");
+    setPasswordConfirm("");
+    setError("");
+    setNotice("");
+    setLinkReady(true);
+  }
+
+  async function submitLogin(event: FormEvent) {
     event.preventDefault();
     setLoading(true);
     setError("");
@@ -690,34 +724,96 @@ function LoginPage({ onLogin }: { onLogin: (token: string, user: User) => void }
     }
   }
 
+  async function requestPasswordReset(event: FormEvent) {
+    event.preventDefault();
+    setLoading(true);
+    setError("");
+    try {
+      const response = await apiRequest<{ detail: string }>("/auth/password-reset/", null, {
+        method: "POST",
+        body: JSON.stringify({ email }),
+      });
+      setNotice(response.detail);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось отправить письмо");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function setNewPassword(event: FormEvent) {
+    event.preventDefault();
+    setLoading(true);
+    setError("");
+    const path = mode === "invite"
+      ? `/auth/invitations/${invitationToken}/`
+      : `/auth/password-reset/${resetUid}/${resetToken}/`;
+    try {
+      await apiRequest<{ detail: string }>(path, null, {
+        method: "POST",
+        body: JSON.stringify({ password, password_confirm: passwordConfirm }),
+      });
+      window.history.replaceState({}, "", window.location.pathname);
+      setNotice(mode === "invite" ? "Учётная запись активирована. Теперь можно войти." : "Пароль изменён. Теперь можно войти.");
+      setMode("login");
+      setPassword("");
+      setPasswordConfirm("");
+      setLinkReady(true);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось сохранить пароль");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const titles = {
+    login: ["Управление и обучение персонала", "Единая корпоративная система HCM / LMS Smartis"],
+    forgot: ["Восстановление доступа", "Отправим одноразовую ссылку на корпоративную почту"],
+    invite: ["Добро пожаловать в Smartis", "Задайте пароль, чтобы активировать учётную запись"],
+    reset: ["Новый пароль", "Придумайте новый пароль для своей учётной записи"],
+  };
+
   return (
     <main className="login-page">
       <section className="login-card">
         <Brand login />
         <div className="login-intro">
-          <h1>Управление и обучение персонала</h1>
-          <p>Единая корпоративная система HCM / LMS Smartis</p>
+          <h1>{titles[mode][0]}</h1>
+          <p>{titles[mode][1]}</p>
         </div>
-        <form onSubmit={submit}>
-          <label>
-            Email
-            <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required />
-          </label>
-          <label>
-            Пароль
-            <input
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              required
-            />
-          </label>
-          {error && <p className="form-error">{error}</p>}
-          <button className="primary-button" type="submit" disabled={loading}>
-            {loading ? "Входим…" : "Войти"}
-          </button>
-        </form>
-        <p className="login-note">Демонстрационный вход уже заполнен</p>
+        {mode === "login" ? (
+          <form onSubmit={submitLogin}>
+            <label>Email<input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} required /></label>
+            <label>Пароль<input type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} required /></label>
+            {error && <p className="form-error">{error}</p>}
+            {notice && <p className="form-notice login-notice"><CheckCircle2 />{notice}</p>}
+            <button className="primary-button" type="submit" disabled={loading}>{loading ? "Входим…" : "Войти"}</button>
+            <button className="login-link" type="button" onClick={() => {
+              setMode("forgot");
+              setPassword("");
+              setError("");
+              setNotice("");
+            }}>Не помню пароль</button>
+          </form>
+        ) : mode === "forgot" ? (
+          <form onSubmit={requestPasswordReset}>
+            <label>Корпоративная почта<input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} required /></label>
+            {error && <p className="form-error">{error}</p>}
+            {notice && <p className="form-notice login-notice"><CheckCircle2 />{notice}</p>}
+            <button className="primary-button" type="submit" disabled={loading || Boolean(notice)}>{loading ? "Отправляем…" : "Получить ссылку"}</button>
+            <button className="login-link" type="button" onClick={showLogin}>Вернуться ко входу</button>
+          </form>
+        ) : (
+          <form onSubmit={setNewPassword}>
+            {email && <div className="login-account"><span>Учётная запись</span><strong>{email}</strong></div>}
+            <label>Новый пароль<input type="password" autoComplete="new-password" minLength={8} value={password} onChange={(event) => setPassword(event.target.value)} disabled={!linkReady} required /></label>
+            <label>Повторите пароль<input type="password" autoComplete="new-password" minLength={8} value={passwordConfirm} onChange={(event) => setPasswordConfirm(event.target.value)} disabled={!linkReady} required /></label>
+            {error && <p className="form-error">{error}</p>}
+            <button className="primary-button" type="submit" disabled={loading || !linkReady}>{loading ? "Сохраняем…" : mode === "invite" ? "Активировать доступ" : "Сохранить пароль"}</button>
+            <button className="login-link" type="button" onClick={showLogin}>Вернуться ко входу</button>
+          </form>
+        )}
+        {mode === "login" && import.meta.env.DEV && <p className="login-note">Демонстрационный вход заполнен только в локальной версии</p>}
       </section>
     </main>
   );
@@ -1447,6 +1543,8 @@ function UsersView({ token }: { token: string }) {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [resendingUser, setResendingUser] = useState<number | null>(null);
   const [form, setForm] = useState({
     email: "", first_name: "", last_name: "", role: "employee", department: "",
   });
@@ -1470,6 +1568,7 @@ function UsersView({ token }: { token: string }) {
   async function createUser(event: FormEvent) {
     event.preventDefault();
     setError("");
+    setNotice("");
     try {
       await apiRequest<User>("/users/", token, {
         method: "POST",
@@ -1480,9 +1579,24 @@ function UsersView({ token }: { token: string }) {
       });
       setForm({ email: "", first_name: "", last_name: "", role: "employee", department: "" });
       setShowForm(false);
+      setNotice("Пользователь создан, приглашение отправлено на корпоративную почту");
       await load();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Не удалось создать сотрудника");
+    }
+  }
+
+  async function resendInvitation(user: User) {
+    setResendingUser(user.id);
+    setError("");
+    setNotice("");
+    try {
+      const response = await apiRequest<{ detail: string }>(`/users/${user.id}/resend-invitation/`, token, { method: "POST" });
+      setNotice(`${response.detail}: ${user.email}`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось отправить приглашение");
+    } finally {
+      setResendingUser(null);
     }
   }
 
@@ -1553,16 +1667,22 @@ function UsersView({ token }: { token: string }) {
         <span>{departments.length} отделов</span>
       </section>
       {error && <p className="form-error">{error}</p>}
+      {notice && <p className="form-notice users-notice"><CheckCircle2 />{notice}</p>}
       <section className="panel table-panel">
         <div className="table-wrap">
           <table>
-            <thead><tr><th>Сотрудник</th><th>Отдел</th><th>Роль</th><th>Статус</th></tr></thead>
+            <thead><tr><th>Сотрудник</th><th>Отдел</th><th>Роль</th><th>Статус</th><th aria-label="Действия" /></tr></thead>
             <tbody>
               {users.map((item) => (
                 <tr key={item.id}>
                   <td><strong>{item.first_name} {item.last_name}</strong><span>{item.email}</span></td>
                   <td>{item.department_name || "—"}</td><td>{item.role_label}</td>
                   <td><span className={"status status--" + item.status}>{item.status_label}</span></td>
+                  <td>{item.status === "invited" && (
+                    <button className="secondary-button user-invite-button" type="button" disabled={resendingUser === item.id} onClick={() => void resendInvitation(item)}>
+                      <RefreshCw />{resendingUser === item.id ? "Отправляем…" : "Отправить снова"}
+                    </button>
+                  )}</td>
                 </tr>
               ))}
             </tbody>

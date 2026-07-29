@@ -1,4 +1,4 @@
-from django.contrib.auth import authenticate
+from django.contrib.auth import authenticate, password_validation
 from django.utils.text import slugify
 from rest_framework import serializers
 
@@ -59,7 +59,24 @@ class LoginSerializer(serializers.Serializer):
         user = authenticate(email=attrs["email"], password=attrs["password"])
         if not user:
             raise serializers.ValidationError("Неверный email или пароль")
+        if user.status == User.Status.INVITED:
+            raise serializers.ValidationError("Сначала активируйте учётную запись по ссылке из письма")
         if user.status == User.Status.BLOCKED:
             raise serializers.ValidationError("Учётная запись заблокирована")
         attrs["user"] = user
         return attrs
+
+
+class PasswordPairSerializer(serializers.Serializer):
+    password = serializers.CharField(trim_whitespace=False, write_only=True)
+    password_confirm = serializers.CharField(trim_whitespace=False, write_only=True)
+
+    def validate(self, attrs):
+        if attrs["password"] != attrs["password_confirm"]:
+            raise serializers.ValidationError({"password_confirm": "Пароли не совпадают"})
+        password_validation.validate_password(attrs["password"], self.context.get("user"))
+        return attrs
+
+
+class PasswordResetRequestSerializer(serializers.Serializer):
+    email = serializers.EmailField()

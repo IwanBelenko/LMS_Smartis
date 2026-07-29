@@ -1,16 +1,36 @@
+from datetime import timedelta
+import uuid
+
+from django.contrib.auth.tokens import default_token_generator
+from django.db import transaction
+from django.shortcuts import get_object_or_404
+from django.utils import timezone
+from django.utils.encoding import force_bytes, force_str
+from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
 from rest_framework import generics, status
 from rest_framework.authtoken.models import Token
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
-from .models import Department, User
+from .emails import send_invitation_email, send_password_reset_email
+from .models import Department, Invitation, User
 from .permissions import IsAdministrator
-from .serializers import DepartmentSerializer, LoginSerializer, UserCreateSerializer, UserSerializer
+from .serializers import (
+    DepartmentSerializer,
+    LoginSerializer,
+    PasswordPairSerializer,
+    PasswordResetRequestSerializer,
+    UserCreateSerializer,
+    UserSerializer,
+)
 
 
 class LoginView(APIView):
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "login"
 
     def post(self, request):
         serializer = LoginSerializer(data=request.data)
@@ -48,7 +68,125 @@ class UserListCreateView(generics.ListCreateAPIView):
         return UserCreateSerializer if self.request.method == "POST" else UserSerializer
 
     def create(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        user = serializer.save()
+        with transaction.atomic():
+            serializer = self.get_serializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            user = serializer.save()
+            send_invitation_email(user.invitation)
         return Response(UserSerializer(user).data, status=status.HTTP_201_CREATED)
+
+
+def _active_invitation(token):
+    return get_object_or_404(
+        Invitation.objects.select_related("user"),
+        token=token,
+        accepted_at__isnull=True,
+        expires_at__gt=timezone.now(),
+        user__status=User.Status.INVITED,
+    )
+
+
+class InvitationAcceptView(APIView):
+    permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "invitation"
+
+    def get(self, request, token):
+        invitation = _active_invitation(token)
+        return Response({
+            "email": invitation.user.email,
+            "full_name": invitation.user.get_full_name(),
+            "expires_at": invitation.expires_at,
+        })
+
+    @transaction.atomic
+    def post(self, request, token):
+        invitation = _active_invitation(token)
+        serializer = PasswordPairSerializer(
+            data=request.data,
+            context={"user": invitation.user},
+        )
+        serializer.is_valid(raise_exception=True)
+        user = invitation.user
+        user.set_password(serializer.validated_data["password"])
+        user.status = User.Status.ACTIVE
+        user.save(update_fields=["password", "status"])
+        invitation.accepted_at = timezone.now()
+        invitation.save(update_fields=["accepted_at"])
+        Token.objects.filter(user=user).delete()
+        return Response({"detail": "Учётная запись активирована"})
+
+
+class InvitationResendView(APIView):
+    permission_classes = [IsAdministrator]
+
+    def post(self, request, pk):
+        user = get_object_or_404(User, pk=pk)
+        if user.status != User.Status.INVITED:
+            return Response(
+                {"detail": "Повторное приглашение доступно только для пользователей со статусом «Приглашён»"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        invitation, _ = Invitation.objects.get_or_create(
+            user=user,
+            defaults={"created_by": request.user},
+        )
+        invitation.token = uuid.uuid4()
+        invitation.created_by = request.user
+        invitation.created_at = timezone.now()
+        invitation.expires_at = timezone.now() + timedelta(days=7)
+        invitation.accepted_at = None
+        invitation.save()
+        send_invitation_email(invitation)
+        return Response({"detail": "Приглашение отправлено повторно"})
+
+
+class PasswordResetRequestView(APIView):
+    permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "password_reset"
+
+    def post(self, request):
+        serializer = PasswordResetRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        email = serializer.validated_data["email"].lower()
+        user = User.objects.filter(email__iexact=email, status=User.Status.ACTIVE).first()
+        if user and user.has_usable_password():
+            uid = urlsafe_base64_encode(force_bytes(user.pk))
+            token = default_token_generator.make_token(user)
+            send_password_reset_email(user, uid, token)
+        return Response({
+            "detail": "Если активная учётная запись найдена, письмо для восстановления отправлено",
+        })
+
+
+def _password_reset_user(uid, token):
+    try:
+        user_id = force_str(urlsafe_base64_decode(uid))
+        user = User.objects.get(pk=user_id, status=User.Status.ACTIVE)
+    except (TypeError, ValueError, OverflowError, User.DoesNotExist):
+        return None
+    return user if default_token_generator.check_token(user, token) else None
+
+
+class PasswordResetConfirmView(APIView):
+    permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "password_reset"
+
+    def get(self, request, uid, token):
+        user = _password_reset_user(uid, token)
+        if not user:
+            return Response({"detail": "Ссылка недействительна или устарела"}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({"email": user.email})
+
+    def post(self, request, uid, token):
+        user = _password_reset_user(uid, token)
+        if not user:
+            return Response({"detail": "Ссылка недействительна или устарела"}, status=status.HTTP_400_BAD_REQUEST)
+        serializer = PasswordPairSerializer(data=request.data, context={"user": user})
+        serializer.is_valid(raise_exception=True)
+        user.set_password(serializer.validated_data["password"])
+        user.save(update_fields=["password"])
+        Token.objects.filter(user=user).delete()
+        return Response({"detail": "Пароль изменён"})
