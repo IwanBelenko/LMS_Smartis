@@ -70,7 +70,7 @@ function Brand({ login = false }: { login?: boolean }) {
 type ViewId =
   | "home" | "tasks" | "trajectory" | "ranking" | "analytics" | "absences" | "documents" | "performance"
   | "organization" | "employees" | "recruitment" | "hrAnalytics"
-  | "users" | "courses" | "updates" | "settings";
+  | "users" | "courses" | "updates" | "audit" | "settings";
 type User = {
   id: number;
   email: string;
@@ -220,6 +220,31 @@ type LearningImportBatch = {
   error_count: number;
   imported_by_name: string;
   completed_at: string;
+};
+type AuditEvent = {
+  id: number;
+  actor_id: number | null;
+  actor_name: string;
+  actor_email: string;
+  entity_type: string;
+  entity_label: string;
+  entity_id: string;
+  entity_title: string;
+  action: string;
+  action_label: string;
+  changes: Record<string, unknown>;
+  ip_address: string;
+  created_at: string;
+};
+type AuditResponse = {
+  total: number;
+  limit: number;
+  results: AuditEvent[];
+  filters: {
+    entity_types: Array<{ value: string; label: string }>;
+    actions: Array<{ value: string; label: string }>;
+    actors: Array<{ id: number; name: string }>;
+  };
 };
 type CandidateStage = { id: number; name: string; position: number; is_terminal: boolean; candidates_count: number };
 type Candidate = {
@@ -840,6 +865,7 @@ const adminNav = [
   { id: "users" as const, label: "Пользователи", icon: Users },
   { id: "courses" as const, label: "Курсы", icon: BookOpen },
   { id: "updates" as const, label: "Обновления", icon: RefreshCw },
+  { id: "audit" as const, label: "Журнал действий", icon: FileText },
   { id: "settings" as const, label: "Настройки", icon: Settings },
 ];
 
@@ -1775,6 +1801,124 @@ function UsersView({ token }: { token: string }) {
                 <div><button className="secondary-button" type="button" onClick={() => setEditingUser(null)}>Отмена</button><button className="primary-button" type="submit" disabled={userBusy}>{userBusy ? "Сохраняем…" : "Сохранить"}</button></div>
               </footer>
             </form>
+          </section>
+        </div>
+      )}
+    </>
+  );
+}
+
+const auditFieldLabels: Record<string, string> = {
+  email: "Почта",
+  role: "Роль",
+  status: "Статус",
+  department_id: "Отдел",
+  position_id: "Должность",
+  employee_name: "Сотрудник",
+  fields: "Изменённые поля",
+  compensation_changed: "Изменена оплата",
+  source: "Источник",
+  total: "Всего",
+  created: "Создано",
+  updated: "Обновлено",
+  row_number: "Строка импорта",
+  batch_id: "Пакет импорта",
+};
+
+function auditValue(value: unknown): string {
+  if (value === null || value === undefined || value === "") return "—";
+  if (typeof value === "boolean") return value ? "Да" : "Нет";
+  if (Array.isArray(value)) return value.map((item) => auditFieldLabels[String(item)] || String(item)).join(", ");
+  if (typeof value === "object") {
+    const pair = value as { before?: unknown; after?: unknown };
+    if ("before" in pair || "after" in pair) return `${auditValue(pair.before)} → ${auditValue(pair.after)}`;
+    return Object.entries(value as Record<string, unknown>).map(([key, item]) => `${auditFieldLabels[key] || key}: ${auditValue(item)}`).join(" · ");
+  }
+  return String(value);
+}
+
+function AuditLogView({ token }: { token: string }) {
+  const emptyFilters = { q: "", entity_type: "", action: "", actor: "", date_from: "", date_to: "" };
+  const [draft, setDraft] = useState(emptyFilters);
+  const [filters, setFilters] = useState(emptyFilters);
+  const [data, setData] = useState<AuditResponse | null>(null);
+  const [selected, setSelected] = useState<AuditEvent | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    const query = new URLSearchParams();
+    Object.entries(filters).forEach(([key, value]) => { if (value) query.set(key, value); });
+    setLoading(true);
+    setError("");
+    apiRequest<AuditResponse>(`/audit-events/?${query.toString()}`, token)
+      .then(setData)
+      .catch((reason) => setError(reason instanceof Error ? reason.message : "Не удалось загрузить журнал"))
+      .finally(() => setLoading(false));
+  }, [token, filters]);
+
+  function applyFilters(event: FormEvent) {
+    event.preventDefault();
+    setFilters({ ...draft });
+  }
+
+  const today = new Date().toDateString();
+  const todayCount = data?.results.filter((item) => new Date(item.created_at).toDateString() === today).length || 0;
+  const activeActors = new Set(data?.results.map((item) => item.actor_id).filter(Boolean)).size;
+
+  return (
+    <>
+      <PageHeader title="Журнал действий" subtitle="Изменения пользователей, персонала, обучения и документов" />
+      <section className="audit-metrics">
+        <article><span>Найдено событий</span><strong>{data?.total ?? "—"}</strong><small>с учётом фильтров</small></article>
+        <article><span>Сегодня</span><strong>{todayCount}</strong><small>в загруженной выборке</small></article>
+        <article><span>Участники</span><strong>{activeActors}</strong><small>в загруженной выборке</small></article>
+      </section>
+      <form className="panel audit-filters" onSubmit={applyFilters}>
+        <label className="audit-search"><Search /><input value={draft.q} onChange={(event) => setDraft({ ...draft, q: event.target.value })} placeholder="Пользователь, объект или номер" /></label>
+        <label>Раздел<select value={draft.entity_type} onChange={(event) => setDraft({ ...draft, entity_type: event.target.value })}><option value="">Все разделы</option>{data?.filters.entity_types.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
+        <label>Действие<select value={draft.action} onChange={(event) => setDraft({ ...draft, action: event.target.value })}><option value="">Все действия</option>{data?.filters.actions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
+        <label>Кто изменил<select value={draft.actor} onChange={(event) => setDraft({ ...draft, actor: event.target.value })}><option value="">Все пользователи</option>{data?.filters.actors.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+        <label>С даты<input type="date" value={draft.date_from} onChange={(event) => setDraft({ ...draft, date_from: event.target.value })} /></label>
+        <label>По дату<input type="date" value={draft.date_to} onChange={(event) => setDraft({ ...draft, date_to: event.target.value })} /></label>
+        <div className="audit-filter-actions">
+          <button className="secondary-button" type="button" onClick={() => { setDraft(emptyFilters); setFilters(emptyFilters); }}>Сбросить</button>
+          <button className="primary-button" type="submit">Применить</button>
+        </div>
+      </form>
+      {error && <p className="form-error">{error}</p>}
+      <section className="panel audit-log">
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>Дата и время</th><th>Кто</th><th>Раздел</th><th>Действие</th><th>Объект</th><th aria-label="Подробнее" /></tr></thead>
+            <tbody>
+              {data?.results.map((event) => (
+                <tr key={event.id}>
+                  <td><strong>{new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short" }).format(new Date(event.created_at))}</strong><span>{event.ip_address || "IP не записан"}</span></td>
+                  <td><strong>{event.actor_name || "Система"}</strong><span>{event.actor_email}</span></td>
+                  <td><span className="audit-entity">{event.entity_label}</span></td>
+                  <td><strong>{event.action_label}</strong></td>
+                  <td><strong>{event.entity_title}</strong><span>#{event.entity_id}</span></td>
+                  <td><button className="icon-button" type="button" onClick={() => setSelected(event)} aria-label={`Подробнее о событии ${event.id}`}><Eye /></button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {!loading && !data?.results.length && <div className="audit-empty"><Search /><strong>События не найдены</strong><span>Измените параметры фильтра</span></div>}
+        {loading && <div className="audit-empty"><RefreshCw /><strong>Загружаем журнал…</strong></div>}
+        {!!data && data.total > data.results.length && <footer className="audit-limit-note">Показаны последние {data.results.length} из {data.total} событий. Уточните фильтры для поиска.</footer>}
+      </section>
+      {selected && (
+        <div className="hcm-dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setSelected(null); }}>
+          <section className="hcm-dialog audit-detail-dialog" role="dialog" aria-modal="true" aria-labelledby="audit-detail-title">
+            <header><div><span className="eyebrow">{selected.entity_label}</span><h2 id="audit-detail-title">{selected.action_label}</h2><p>{new Intl.DateTimeFormat("ru-RU", { dateStyle: "long", timeStyle: "medium" }).format(new Date(selected.created_at))}</p></div><button className="icon-button" type="button" onClick={() => setSelected(null)} aria-label="Закрыть"><X /></button></header>
+            <div className="audit-detail-summary"><div><span>Кто</span><strong>{selected.actor_name || "Система"}</strong><small>{selected.actor_email}</small></div><div><span>Объект</span><strong>{selected.entity_title}</strong><small>{selected.entity_type} #{selected.entity_id}</small></div><div><span>IP-адрес</span><strong>{selected.ip_address || "Не записан"}</strong></div></div>
+            <section className="audit-changes">
+              <div className="section-heading"><div><h3>Что изменилось</h3><p>Секретные значения автоматически скрываются</p></div></div>
+              {Object.entries(selected.changes).filter(([, value]) => value !== null).map(([key, value]) => <div key={key}><span>{auditFieldLabels[key] || key.replaceAll("_", " ")}</span><strong>{auditValue(value)}</strong></div>)}
+              {!Object.keys(selected.changes).length && <p>Дополнительных данных нет</p>}
+            </section>
           </section>
         </div>
       )}
@@ -6548,7 +6692,7 @@ function Placeholder({ active }: { active: ViewId }) {
     absences: "Отпуска и отсутствия",
     documents: "Документы",
     performance: "Оценка и развитие",
-    courses: "Курсы", updates: "Обновления продукта", settings: "Настройки", employees: "Сотрудники",
+    courses: "Курсы", updates: "Обновления продукта", audit: "Журнал действий", settings: "Настройки", employees: "Сотрудники",
     organization: "Оргструктура", recruitment: "Подбор", hrAnalytics: "HR-аналитика",
   };
   return (
@@ -6660,6 +6804,8 @@ function App() {
           <CoursesView token={token} user={user} />
         ) : active === "updates" ? (
           <ProductUpdatesView token={token} />
+        ) : active === "audit" ? (
+          <AuditLogView token={token} />
         ) : (
           <Placeholder active={active} />
         )}

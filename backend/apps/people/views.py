@@ -15,6 +15,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.identity.models import Department, User
+from apps.core.audit import record_audit, safe_audit_changes
+from apps.identity.permissions import IsAdministrator
 from apps.learning.models import Course, LearningPath, Lesson
 from .models import (
     AbsenceRequest,
@@ -78,6 +80,148 @@ from .learning_import import commit_learning_import, parse_learning_import_file,
 
 def is_product_update_admin(user):
     return user.is_superuser or user.role == User.Role.ADMIN
+
+
+AUDIT_ENTITY_LABELS = {
+    "user": "Пользователи",
+    "employee": "Сотрудники",
+    "course": "Курсы",
+    "employee_import": "Импорт сотрудников",
+    "learning_import": "Импорт обучения",
+    "employee_goal": "Цели",
+    "employment_event": "Кадровая история",
+    "employee_learning": "Обучение",
+    "employee_document": "Документы",
+    "document": "Документы",
+    "absence": "Отсутствия",
+    "candidate": "Подбор",
+    "vacancy": "Вакансии",
+    "interview": "Собеседования",
+    "offer": "Офферы",
+    "performance": "Оценка",
+    "onboarding": "Онбординг",
+    "onboarding_plan": "Онбординг",
+    "product_update": "Обновления продукта",
+}
+
+AUDIT_ACTION_LABELS = {
+    "created": "Создание",
+    "updated": "Изменение",
+    "deleted": "Удаление",
+    "published": "Публикация",
+    "unpublished": "Снятие с публикации",
+    "scorm_imported": "Импорт SCORM",
+    "scorm_replaced": "Замена SCORM",
+    "scorm_converted": "Преобразование SCORM",
+    "scheduled": "Планирование",
+    "feedback_submitted": "Оценка собеседования",
+    "blocked": "Блокировка доступа",
+    "restored": "Восстановление доступа",
+    "invitation_resent": "Повторное приглашение",
+    "invitation_accepted": "Активация учётной записи",
+    "password_reset": "Смена пароля",
+    "completed": "Завершение",
+    "sent": "Отправка",
+    "signed": "Подтверждение",
+    "declined": "Отклонение",
+    "archived": "Архивация",
+    "approved": "Согласование",
+    "rejected": "Отклонение",
+    "cancelled": "Отмена",
+}
+
+
+class AuditEventListView(APIView):
+    permission_classes = [IsAdministrator]
+
+    def get(self, request):
+        queryset = AuditEvent.objects.select_related("actor")
+        entity_type = request.query_params.get("entity_type", "").strip()
+        action = request.query_params.get("action", "").strip()
+        actor_id = request.query_params.get("actor", "").strip()
+        query = request.query_params.get("q", "").strip()
+        date_from = request.query_params.get("date_from", "").strip()
+        date_to = request.query_params.get("date_to", "").strip()
+        if entity_type:
+            queryset = queryset.filter(entity_type=entity_type)
+        if action:
+            queryset = queryset.filter(action=action)
+        if actor_id.isdigit():
+            queryset = queryset.filter(actor_id=int(actor_id))
+        if query:
+            queryset = queryset.filter(
+                Q(actor__email__icontains=query)
+                | Q(actor__first_name__icontains=query)
+                | Q(actor__last_name__icontains=query)
+                | Q(entity_type__icontains=query)
+                | Q(action__icontains=query)
+                | Q(entity_id__icontains=query)
+            )
+        try:
+            if date_from:
+                queryset = queryset.filter(created_at__date__gte=date.fromisoformat(date_from))
+            if date_to:
+                queryset = queryset.filter(created_at__date__lte=date.fromisoformat(date_to))
+        except ValueError as exc:
+            raise ValidationError({"date": "Укажите корректный диапазон дат"}) from exc
+
+        total = queryset.count()
+        try:
+            limit = min(max(int(request.query_params.get("limit", 100)), 1), 250)
+        except ValueError as exc:
+            raise ValidationError({"limit": "Укажите числовой лимит"}) from exc
+        events = list(queryset[:limit])
+        all_events = AuditEvent.objects.select_related("actor")
+        actors = {}
+        for event in all_events.exclude(actor=None).only(
+            "actor_id", "actor__first_name", "actor__last_name", "actor__email",
+        ).distinct():
+            actors[event.actor_id] = event.actor.get_full_name() or event.actor.email
+
+        results = []
+        for event in events:
+            changes = safe_audit_changes(event.changes)
+            context = changes.pop("_context", {}) if isinstance(changes, dict) else {}
+            title = (
+                changes.get("employee_name")
+                or changes.get("email")
+                or changes.get("title")
+                or f"Объект #{event.entity_id}"
+            )
+            results.append({
+                "id": event.pk,
+                "actor_id": event.actor_id,
+                "actor_name": event.actor.get_full_name() if event.actor else "Система",
+                "actor_email": event.actor.email if event.actor else "",
+                "entity_type": event.entity_type,
+                "entity_label": AUDIT_ENTITY_LABELS.get(event.entity_type, event.entity_type.replace("_", " ").title()),
+                "entity_id": event.entity_id,
+                "entity_title": title,
+                "action": event.action,
+                "action_label": AUDIT_ACTION_LABELS.get(event.action, event.action.replace("_", " ").title()),
+                "changes": changes,
+                "ip_address": context.get("ip", ""),
+                "created_at": event.created_at,
+            })
+        return Response({
+            "total": total,
+            "limit": limit,
+            "results": results,
+            "filters": {
+                "entity_types": [
+                    {"value": value, "label": AUDIT_ENTITY_LABELS.get(value, value.replace("_", " ").title())}
+                    for value in AuditEvent.objects.order_by("entity_type").values_list("entity_type", flat=True).distinct()
+                ],
+                "actions": [
+                    {"value": value, "label": AUDIT_ACTION_LABELS.get(value, value.replace("_", " ").title())}
+                    for value in AuditEvent.objects.order_by("action").values_list("action", flat=True).distinct()
+                ],
+                "actors": [
+                    {"id": actor_id, "name": name}
+                    for actor_id, name in sorted(actors.items(), key=lambda item: item[1])
+                ],
+            },
+        })
 
 
 class ProductUpdateListCreateView(generics.ListCreateAPIView):
@@ -961,11 +1105,34 @@ class EmployeeDetailView(generics.RetrieveUpdateAPIView):
 
     def update(self, request, *args, **kwargs):
         profile = self.get_object()
+        before = {
+            "status": profile.status,
+            "department_id": profile.user.department_id,
+            "position_id": profile.position_id,
+        }
         serializer = self.get_serializer(profile, data=request.data, partial=request.method == "PATCH")
         serializer.is_valid(raise_exception=True)
         serializer.save()
-        AuditEvent.objects.create(
-            actor=request.user, entity_type="employee", entity_id=str(profile.pk), action="updated"
+        changed_fields = sorted(set(request.data.keys()))
+        record_audit(
+            actor=request.user,
+            entity_type="employee",
+            entity_id=profile.pk,
+            action="updated",
+            changes={
+                "employee_name": profile.user.get_full_name(),
+                "fields": changed_fields,
+                "status": {"before": before["status"], "after": profile.status}
+                if before["status"] != profile.status else None,
+                "department_id": {"before": before["department_id"], "after": profile.user.department_id}
+                if before["department_id"] != profile.user.department_id else None,
+                "position_id": {"before": before["position_id"], "after": profile.position_id}
+                if before["position_id"] != profile.position_id else None,
+                "compensation_changed": bool(
+                    {"salary_base", "monthly_bonus", "quarterly_bonus"}.intersection(changed_fields)
+                ),
+            },
+            request=request,
         )
         return Response(EmployeeProfileSerializer(profile, context={"request": request}).data)
 

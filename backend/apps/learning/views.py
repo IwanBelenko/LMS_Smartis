@@ -18,6 +18,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from apps.identity.models import User
+from apps.core.audit import record_audit
 
 from .models import (
     ContentFolder,
@@ -353,7 +354,39 @@ class CourseViewSet(viewsets.ModelViewSet):
         return queryset.filter(status=Course.Status.PUBLISHED)
 
     def perform_create(self, serializer):
-        serializer.save(author=self.request.user)
+        course = serializer.save(author=self.request.user)
+        record_audit(
+            actor=self.request.user,
+            entity_type="course",
+            entity_id=course.pk,
+            action="created",
+            changes={"title": course.title, "source_format": course.source_format},
+            request=self.request,
+        )
+
+    def perform_update(self, serializer):
+        course = serializer.save()
+        record_audit(
+            actor=self.request.user,
+            entity_type="course",
+            entity_id=course.pk,
+            action="updated",
+            changes={"title": course.title, "fields": sorted(self.request.data.keys())},
+            request=self.request,
+        )
+
+    def perform_destroy(self, instance):
+        course_id = instance.pk
+        title = instance.title
+        instance.delete()
+        record_audit(
+            actor=self.request.user,
+            entity_type="course",
+            entity_id=course_id,
+            action="deleted",
+            changes={"title": title},
+            request=self.request,
+        )
 
     @action(
         detail=False,
@@ -411,6 +444,14 @@ class CourseViewSet(viewsets.ModelViewSet):
         except Exception:
             course.delete()
             raise
+        record_audit(
+            actor=request.user,
+            entity_type="course",
+            entity_id=course.pk,
+            action="scorm_imported",
+            changes={"title": course.title, "filename": course.scorm_original_name},
+            request=request,
+        )
         return Response(self.get_serializer(course).data, status=status.HTTP_201_CREATED)
 
     @action(
@@ -475,6 +516,14 @@ class CourseViewSet(viewsets.ModelViewSet):
         if course.status == Course.Status.PUBLISHED:
             course.status = Course.Status.DRAFT
         course.save(update_fields=["version", "status", "updated_at"])
+        record_audit(
+            actor=request.user,
+            entity_type="course",
+            entity_id=course.pk,
+            action="scorm_replaced",
+            changes={"title": course.title, "version": course.version, "filename": course.scorm_original_name},
+            request=request,
+        )
         return Response(self.get_serializer(course).data)
 
     @action(detail=True, methods=["post"], url_path="convert-to-native")
@@ -495,6 +544,14 @@ class CourseViewSet(viewsets.ModelViewSet):
             converted = convert_ispring_scorm_to_native(course, request.user)
         except serializers.ValidationError as exc:
             return Response({"detail": exc.detail}, status=status.HTTP_400_BAD_REQUEST)
+        record_audit(
+            actor=request.user,
+            entity_type="course",
+            entity_id=converted.pk,
+            action="scorm_converted",
+            changes={"title": converted.title, "source_course_id": course.pk},
+            request=request,
+        )
         return Response(self.get_serializer(converted).data, status=status.HTTP_201_CREATED)
 
     @staticmethod
@@ -544,6 +601,14 @@ class CourseViewSet(viewsets.ModelViewSet):
         course.status = Course.Status.PUBLISHED
         course.published_at = timezone.now()
         course.save(update_fields=["status", "published_at", "updated_at"])
+        record_audit(
+            actor=request.user,
+            entity_type="course",
+            entity_id=course.pk,
+            action="published",
+            changes={"title": course.title, "version": course.version},
+            request=request,
+        )
         return Response(self.get_serializer(course).data)
 
     @action(detail=True, methods=["post"])
@@ -551,6 +616,14 @@ class CourseViewSet(viewsets.ModelViewSet):
         course = self.get_object()
         course.status = Course.Status.DRAFT
         course.save(update_fields=["status", "updated_at"])
+        record_audit(
+            actor=request.user,
+            entity_type="course",
+            entity_id=course.pk,
+            action="unpublished",
+            changes={"title": course.title, "version": course.version},
+            request=request,
+        )
         return Response(self.get_serializer(course).data)
 
     @action(

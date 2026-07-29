@@ -8,6 +8,7 @@ from django.test import TestCase, override_settings
 from rest_framework.authtoken.models import Token
 from rest_framework.test import APIClient
 
+from apps.people.models import AuditEvent
 from .models import Department, Invitation, User
 
 
@@ -222,6 +223,12 @@ class IdentityApiTests(TestCase):
         employee.refresh_from_db()
         self.assertEqual(employee.status, User.Status.BLOCKED)
         self.assertFalse(Token.objects.filter(pk=token.pk).exists())
+        self.assertTrue(AuditEvent.objects.filter(
+            actor=self.admin,
+            entity_type="user",
+            entity_id=str(employee.pk),
+            action="blocked",
+        ).exists())
 
         restored = self.client.post(f"/api/v1/users/{employee.pk}/restore/")
         self.assertEqual(restored.status_code, 200)

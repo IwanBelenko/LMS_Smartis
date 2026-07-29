@@ -2,6 +2,7 @@ from django.urls import path
 
 from .views import (
     AbsenceCancelView,
+    AuditEventListView,
     AbsenceDecisionView,
     AbsenceDetailView,
     AbsenceListCreateView,
@@ -64,6 +65,7 @@ from .views import (
 )
 
 urlpatterns = [
+    path("audit-events/", AuditEventListView.as_view(), name="audit-events"),
     path("product-updates/", ProductUpdateListCreateView.as_view(), name="product-updates"),
     path("product-updates/<int:pk>/", ProductUpdateDetailView.as_view(), name="product-update-detail"),
     path("product-updates/<int:pk>/apply/", ProductUpdateApplyView.as_view(), name="product-update-apply"),

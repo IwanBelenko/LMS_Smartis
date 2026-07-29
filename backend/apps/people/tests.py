@@ -12,6 +12,7 @@ from apps.identity.models import Department, User
 from apps.learning.models import Course, LearningPath, LearningPathCourse, Lesson
 from .models import (
     AbsenceRequest,
+    AuditEvent,
     Candidate,
     CandidateOffer,
     CandidateStage,
@@ -150,6 +151,26 @@ class PeopleApiTests(TestCase):
         self.assertEqual(response.json()["metrics"]["probation"], 1)
         self.assertEqual(response.json()["metrics"]["open_vacancies"], 1)
         self.assertEqual(response.json()["onboarding"][0]["severity"], "danger")
+
+    def test_only_admin_reads_filtered_audit_log_and_secrets_are_hidden(self):
+        AuditEvent.objects.create(
+            actor=self.admin,
+            entity_type="user",
+            entity_id=str(self.employee.pk),
+            action="updated",
+            changes={"email": self.employee.email, "password": "must-not-leak"},
+        )
+        self.client.force_authenticate(self.hr)
+        self.assertEqual(self.client.get("/api/v1/audit-events/").status_code, 403)
+
+        self.client.force_authenticate(self.admin)
+        response = self.client.get("/api/v1/audit-events/?entity_type=user&action=updated")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["total"], 1)
+        self.assertEqual(payload["results"][0]["entity_label"], "Пользователи")
+        self.assertEqual(payload["results"][0]["changes"]["password"], "[скрыто]")
+        self.assertTrue(payload["filters"]["entity_types"])
 
     def test_admin_creates_and_updates_employee_card(self):
         self.client.force_authenticate(self.admin)

@@ -9,6 +9,7 @@ from django.test import TestCase
 from rest_framework.test import APIClient
 
 from apps.identity.models import User
+from apps.people.models import AuditEvent
 
 from .models import ContentProject, Course, CourseEnrollment, LearningPath, Lesson
 
@@ -80,6 +81,14 @@ class CourseApiTests(TestCase):
         response = self.client.post(f"/api/v1/courses/{response.data['id']}/publish/")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["status"], Course.Status.PUBLISHED)
+        self.assertEqual(
+            list(
+                AuditEvent.objects.filter(entity_type="course", entity_id=str(response.data["id"]))
+                .order_by("created_at")
+                .values_list("action", flat=True)
+            ),
+            ["created", "published"],
+        )
 
     def test_empty_course_cannot_be_published(self):
         self.client.force_authenticate(self.admin)

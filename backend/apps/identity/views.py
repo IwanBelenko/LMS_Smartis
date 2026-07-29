@@ -14,6 +14,7 @@ from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
+from apps.core.audit import record_audit
 from .emails import send_invitation_email, send_password_reset_email
 from .models import Department, Invitation, User
 from .permissions import IsAdministrator
@@ -74,6 +75,14 @@ class UserListCreateView(generics.ListCreateAPIView):
             serializer.is_valid(raise_exception=True)
             user = serializer.save()
             send_invitation_email(user.invitation)
+            record_audit(
+                actor=request.user,
+                entity_type="user",
+                entity_id=user.pk,
+                action="created",
+                changes={"email": user.email, "role": user.role, "department_id": user.department_id},
+                request=request,
+            )
         return Response(UserSerializer(user).data, status=status.HTTP_201_CREATED)
 
 
@@ -87,9 +96,35 @@ class UserDetailView(generics.RetrieveUpdateAPIView):
     def update(self, request, *args, **kwargs):
         partial = kwargs.pop("partial", False)
         user = self.get_object()
+        before = {
+            "email": user.email,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "role": user.role,
+            "department_id": user.department_id,
+        }
         serializer = self.get_serializer(user, data=request.data, partial=partial)
         serializer.is_valid(raise_exception=True)
         serializer.save()
+        after = {
+            "email": user.email,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "role": user.role,
+            "department_id": user.department_id,
+        }
+        record_audit(
+            actor=request.user,
+            entity_type="user",
+            entity_id=user.pk,
+            action="updated",
+            changes={
+                key: {"before": before[key], "after": value}
+                for key, value in after.items()
+                if before[key] != value
+            },
+            request=request,
+        )
         return Response(UserSerializer(user).data)
 
 
@@ -118,6 +153,14 @@ class UserBlockView(APIView):
         user.status = User.Status.BLOCKED
         user.save(update_fields=["status"])
         Token.objects.filter(user=user).delete()
+        record_audit(
+            actor=request.user,
+            entity_type="user",
+            entity_id=user.pk,
+            action="blocked",
+            changes={"email": user.email, "role": user.role},
+            request=request,
+        )
         return Response(UserSerializer(user).data)
 
 
@@ -134,6 +177,14 @@ class UserRestoreView(APIView):
             )
         user.status = User.Status.ACTIVE if user.has_usable_password() else User.Status.INVITED
         user.save(update_fields=["status"])
+        record_audit(
+            actor=request.user,
+            entity_type="user",
+            entity_id=user.pk,
+            action="restored",
+            changes={"email": user.email, "status": user.status},
+            request=request,
+        )
         return Response(UserSerializer(user).data)
 
 
@@ -175,6 +226,14 @@ class InvitationAcceptView(APIView):
         invitation.accepted_at = timezone.now()
         invitation.save(update_fields=["accepted_at"])
         Token.objects.filter(user=user).delete()
+        record_audit(
+            actor=user,
+            entity_type="user",
+            entity_id=user.pk,
+            action="invitation_accepted",
+            changes={"email": user.email},
+            request=request,
+        )
         return Response({"detail": "Учётная запись активирована"})
 
 
@@ -199,6 +258,14 @@ class InvitationResendView(APIView):
         invitation.accepted_at = None
         invitation.save()
         send_invitation_email(invitation)
+        record_audit(
+            actor=request.user,
+            entity_type="user",
+            entity_id=user.pk,
+            action="invitation_resent",
+            changes={"email": user.email},
+            request=request,
+        )
         return Response({"detail": "Приглашение отправлено повторно"})
 
 
@@ -250,4 +317,12 @@ class PasswordResetConfirmView(APIView):
         user.set_password(serializer.validated_data["password"])
         user.save(update_fields=["password"])
         Token.objects.filter(user=user).delete()
+        record_audit(
+            actor=user,
+            entity_type="user",
+            entity_id=user.pk,
+            action="password_reset",
+            changes={},
+            request=request,
+        )
         return Response({"detail": "Пароль изменён"})
