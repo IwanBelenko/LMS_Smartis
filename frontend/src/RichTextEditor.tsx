@@ -12,6 +12,7 @@ import {
   AlignRight,
   Bold,
   Braces,
+  ChevronRight,
   Copy,
   Columns2,
   Eraser,
@@ -30,10 +31,12 @@ import {
   Plus,
   Quote,
   Redo2,
+  Sparkles,
   Strikethrough,
   Table2,
   Trash2,
   Undo2,
+  X,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -353,6 +356,21 @@ export default function RichTextEditor({
     });
   }
 
+  function insertHeading(level: 1 | 2 | 3) {
+    insertAfterCurrent({
+      type: "heading",
+      attrs: { level },
+      content: [{ type: "text", text: `Новый заголовок ${level}` }],
+    });
+  }
+
+  function insertOrderedList() {
+    insertAfterCurrent({
+      type: "orderedList",
+      content: [{ type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "Новый пункт" }] }] }],
+    });
+  }
+
   function insertColumns() {
     insertAfterCurrent({
       type: "columns",
@@ -614,13 +632,73 @@ export default function RichTextEditor({
       {variant === "longread" && showToolbar && (
         <div className="longread-insert-shell">
           {insertMenuOpen && (
-            <div className="longread-insert-menu" role="menu">
-              <span>Добавить в лонгрид</span>
-              <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => insertText("heading")}><Heading2 /> Заголовок</button>
-              <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => insertText("bulletList")}><List /> Список</button>
-              <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => insertText("blockquote")}><Quote /> Цитата</button>
-              <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => insertText("codeBlock")}><Braces /> Код</button>
-            </div>
+            <aside className="longread-block-library" aria-label="Библиотека блоков">
+              <header>
+                <h2>Блоки</h2>
+                <button type="button" aria-label="Закрыть библиотеку блоков" onClick={() => setInsertMenuOpen(false)}><X /></button>
+              </header>
+              <details>
+                <summary><span><Sparkles />AI</span><ChevronRight /></summary>
+                <div className="longread-block-library__options">
+                  <button type="button" disabled><Sparkles /><span><strong>AI-помощник</strong><small>Появится после подключения AI API</small></span></button>
+                </div>
+              </details>
+              <details open>
+                <summary><span><Pilcrow />Текст и заголовки</span><ChevronRight /></summary>
+                <div className="longread-block-library__options">
+                  <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => insertText("paragraph")}><Pilcrow /><span><strong>Текст</strong><small>Обычный абзац</small></span></button>
+                  <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => insertHeading(1)}><Heading1 /><span><strong>Заголовок 1</strong><small>Новый крупный раздел</small></span></button>
+                  <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => insertHeading(2)}><Heading2 /><span><strong>Заголовок 2</strong><small>Подраздел</small></span></button>
+                  <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => insertHeading(3)}><Heading3 /><span><strong>Заголовок 3</strong><small>Вложенный подраздел</small></span></button>
+                </div>
+              </details>
+              <details>
+                <summary><span><List />Списки</span><ChevronRight /></summary>
+                <div className="longread-block-library__options">
+                  <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => insertText("bulletList")}><List /><span><strong>Маркированный список</strong><small>Список с маркерами</small></span></button>
+                  <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={insertOrderedList}><ListOrdered /><span><strong>Нумерованный список</strong><small>Последовательность шагов</small></span></button>
+                </div>
+              </details>
+              <details>
+                <summary><span><Quote />Цитаты и выноски</span><ChevronRight /></summary>
+                <div className="longread-block-library__options">
+                  <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => insertText("blockquote")}><Quote /><span><strong>Цитата</strong><small>Выделенный текст</small></span></button>
+                  <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => insertText("codeBlock")}><Braces /><span><strong>Фрагмент кода</strong><small>Моноширинный блок</small></span></button>
+                </div>
+              </details>
+              <details>
+                <summary><span><ImagePlus />Медиа</span><ChevronRight /></summary>
+                <div className="longread-block-library__options">
+                  <label className="longread-library-upload">
+                    <ImagePlus /><span><strong>{imageUploading ? "Загружаем…" : "Изображение"}</strong><small>JPG, PNG или WebP</small></span>
+                    <input type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" disabled={imageUploading} onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (file) void uploadAndInsertImage(file);
+                      event.currentTarget.value = "";
+                    }} />
+                  </label>
+                </div>
+              </details>
+              <details>
+                <summary><span><Columns2 />Колонки и таблицы</span><ChevronRight /></summary>
+                <div className="longread-block-library__options">
+                  <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={insertColumns}><Columns2 /><span><strong>Две колонки</strong><small>Текст рядом</small></span></button>
+                  <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={insertTable}><Table2 /><span><strong>Таблица</strong><small>3 × 3, можно редактировать</small></span></button>
+                </div>
+              </details>
+              <details>
+                <summary><span><Table2 />Инфографика</span><ChevronRight /></summary>
+                <div className="longread-block-library__options">
+                  <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={insertColumns}><Columns2 /><span><strong>Карточки показателей</strong><small>Две редактируемые колонки</small></span></button>
+                </div>
+              </details>
+              <details>
+                <summary><span><Braces />Интерактивности</span><ChevronRight /></summary>
+                <div className="longread-block-library__options">
+                  <button type="button" disabled><Braces /><span><strong>Аккордеон и вкладки</strong><small>Добавим следующим этапом</small></span></button>
+                </div>
+              </details>
+            </aside>
           )}
           <div className="longread-insert-bar" role="toolbar" aria-label="Добавить элемент">
             <button

@@ -348,6 +348,48 @@ class LearningPathViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         serializer.save(author=self.request.user)
 
+    @action(detail=True, methods=["post"])
+    def publish(self, request, pk=None):
+        learning_path = self.get_object()
+        path_courses = learning_path.path_courses.select_related("course").order_by("position")
+        if not path_courses.exists():
+            return Response(
+                {"detail": "Добавьте хотя бы один курс перед публикацией"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        draft_courses = [item.course.title for item in path_courses if item.course.status != Course.Status.PUBLISHED]
+        if draft_courses:
+            return Response(
+                {"detail": f"Сначала опубликуйте курсы: {', '.join(draft_courses[:3])}"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        learning_path.status = LearningPath.Status.PUBLISHED
+        learning_path.save(update_fields=["status", "updated_at"])
+        record_audit(
+            actor=request.user,
+            entity_type="learning_path",
+            entity_id=learning_path.pk,
+            action="published",
+            changes={"title": learning_path.title, "course_count": path_courses.count()},
+            request=request,
+        )
+        return Response(self.get_serializer(learning_path).data)
+
+    @action(detail=True, methods=["post"])
+    def unpublish(self, request, pk=None):
+        learning_path = self.get_object()
+        learning_path.status = LearningPath.Status.DRAFT
+        learning_path.save(update_fields=["status", "updated_at"])
+        record_audit(
+            actor=request.user,
+            entity_type="learning_path",
+            entity_id=learning_path.pk,
+            action="unpublished",
+            changes={"title": learning_path.title},
+            request=request,
+        )
+        return Response(self.get_serializer(learning_path).data)
+
 
 class CourseViewSet(viewsets.ModelViewSet):
     serializer_class = CourseSerializer

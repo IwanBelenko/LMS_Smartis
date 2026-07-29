@@ -523,6 +523,44 @@ class CourseApiTests(TestCase):
         self.assertEqual(projects.data[0]["folder_count"], 1)
         self.assertEqual(projects.data[0]["path_count"], 1)
 
+    def test_learning_path_preserves_course_order_and_can_be_published(self):
+        self.client.force_authenticate(self.author)
+        first = self.client.post("/api/v1/courses/", self.course_payload("Первый"), format="json")
+        second = self.client.post("/api/v1/courses/", self.course_payload("Второй"), format="json")
+        learning_path = self.client.post(
+            "/api/v1/learning-paths/",
+            {
+                "title": "Путь специалиста",
+                "description": "Два курса по порядку",
+                "course_ids": [first.data["id"], second.data["id"]],
+            },
+            format="json",
+        )
+        self.assertEqual(learning_path.status_code, 201)
+
+        reordered = self.client.patch(
+            f"/api/v1/learning-paths/{learning_path.data['id']}/",
+            {"course_ids": [second.data["id"], first.data["id"]]},
+            format="json",
+        )
+        self.assertEqual(reordered.status_code, 200)
+        self.assertEqual(reordered.data["course_ids"], [second.data["id"], first.data["id"]])
+        self.assertEqual(
+            self.client.get(f"/api/v1/learning-paths/{learning_path.data['id']}/").data["course_ids"],
+            [second.data["id"], first.data["id"]],
+        )
+
+        blocked = self.client.post(f"/api/v1/learning-paths/{learning_path.data['id']}/publish/")
+        self.assertEqual(blocked.status_code, 400)
+        self.client.post(f"/api/v1/courses/{first.data['id']}/publish/")
+        self.client.post(f"/api/v1/courses/{second.data['id']}/publish/")
+        published = self.client.post(f"/api/v1/learning-paths/{learning_path.data['id']}/publish/")
+        self.assertEqual(published.status_code, 200)
+        self.assertEqual(published.data["status"], LearningPath.Status.PUBLISHED)
+        unpublished = self.client.post(f"/api/v1/learning-paths/{learning_path.data['id']}/unpublish/")
+        self.assertEqual(unpublished.status_code, 200)
+        self.assertEqual(unpublished.data["status"], LearningPath.Status.DRAFT)
+
     def test_author_cannot_move_content_to_another_owners_project(self):
         foreign_project = ContentProject.objects.create(name="Проект администратора", owner=self.admin)
         own_course = Course.objects.create(title="Курс автора", author=self.author)

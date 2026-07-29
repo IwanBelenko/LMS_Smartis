@@ -5092,6 +5092,17 @@ function CoursesView({ token, user }: { token: string; user: User }) {
   const [createDescription, setCreateDescription] = useState("");
   const [creatingContent, setCreatingContent] = useState(false);
   const [editingId, setEditingId] = useState<number | null | "new">(null);
+  const [editingPathId, setEditingPathId] = useState<number | null>(null);
+  const [pathForm, setPathForm] = useState({
+    title: "",
+    description: "",
+    project: null as number | null,
+    folder: null as number | null,
+    course_ids: [] as number[],
+  });
+  const [pathSearch, setPathSearch] = useState("");
+  const [pathSaving, setPathSaving] = useState(false);
+  const [draggedPathCourseIndex, setDraggedPathCourseIndex] = useState<number | null>(null);
   const [form, setForm] = useState({
     title: "",
     description: "",
@@ -5175,6 +5186,22 @@ function CoursesView({ token, user }: { token: string; user: User }) {
     setSelectedProject(project);
     setSelectedFolder(null);
     setEditingId(null);
+    setEditingPathId(null);
+  }
+
+  function openPathEditor(path: LearningPath) {
+    setEditingId(null);
+    setEditingPathId(path.id);
+    setPathForm({
+      title: path.title,
+      description: path.description,
+      project: path.project,
+      folder: path.folder,
+      course_ids: [...path.course_ids],
+    });
+    setPathSearch("");
+    setError("");
+    setNotice("");
   }
 
   function openCreateDialog(type: "project" | "folder" | "path") {
@@ -5220,6 +5247,7 @@ function CoursesView({ token, user }: { token: string; user: User }) {
           }),
         });
         setNotice(`Траектория «${path.title}» создана`);
+        openPathEditor(path);
       }
       setCreateDialog(null);
       await load();
@@ -5266,6 +5294,73 @@ function CoursesView({ token, user }: { token: string; user: User }) {
       await load();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Не удалось переместить траекторию");
+    }
+  }
+
+  function addCourseToPath(courseId: number) {
+    if (pathForm.course_ids.includes(courseId)) return;
+    setPathForm((current) => ({ ...current, course_ids: [...current.course_ids, courseId] }));
+  }
+
+  function removeCourseFromPath(courseId: number) {
+    setPathForm((current) => ({ ...current, course_ids: current.course_ids.filter((id) => id !== courseId) }));
+  }
+
+  function movePathCourse(from: number, to: number) {
+    if (from === to) return;
+    setPathForm((current) => {
+      const courseIds = [...current.course_ids];
+      const [moved] = courseIds.splice(from, 1);
+      courseIds.splice(to, 0, moved);
+      return { ...current, course_ids: courseIds };
+    });
+  }
+
+  async function persistPath() {
+    if (editingPathId === null) throw new Error("Траектория не выбрана");
+    if (!pathForm.title.trim()) throw new Error("Укажите название траектории");
+    return apiRequest<LearningPath>(`/learning-paths/${editingPathId}/`, token, {
+      method: "PATCH",
+      body: JSON.stringify({ ...pathForm, title: pathForm.title.trim(), description: pathForm.description.trim() }),
+    });
+  }
+
+  async function savePath(event?: FormEvent) {
+    event?.preventDefault();
+    setPathSaving(true);
+    setError("");
+    try {
+      const saved = await persistPath();
+      setPathForm({
+        title: saved.title,
+        description: saved.description,
+        project: saved.project,
+        folder: saved.folder,
+        course_ids: [...saved.course_ids],
+      });
+      setNotice(`Траектория «${saved.title}» сохранена`);
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось сохранить траекторию");
+    } finally {
+      setPathSaving(false);
+    }
+  }
+
+  async function changePathPublication() {
+    if (editingPathId === null) return;
+    setPathSaving(true);
+    setError("");
+    try {
+      const saved = await persistPath();
+      const action = saved.status === "published" ? "unpublish" : "publish";
+      const updated = await apiRequest<LearningPath>(`/learning-paths/${saved.id}/${action}/`, token, { method: "POST" });
+      setNotice(updated.status === "published" ? "Траектория опубликована" : "Траектория возвращена в черновики");
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось изменить публикацию траектории");
+    } finally {
+      setPathSaving(false);
     }
   }
 
@@ -5789,6 +5884,122 @@ function CoursesView({ token, user }: { token: string; user: User }) {
     />
   ) : null;
 
+  const editingPath = editingPathId === null
+    ? null
+    : learningPaths.find((path) => path.id === editingPathId) || null;
+  const selectedPathCourses = pathForm.course_ids
+    .map((courseId) => courses.find((course) => course.id === courseId))
+    .filter((course): course is Course => Boolean(course));
+  const availablePathCourses = courses.filter((course) => (
+    !pathForm.course_ids.includes(course.id)
+    && (!pathSearch.trim() || `${course.title} ${course.description}`.toLowerCase().includes(pathSearch.trim().toLowerCase()))
+  ));
+
+  if (editingPathId !== null) {
+    return (
+      <form className="path-editor" onSubmit={(event) => void savePath(event)}>
+        <header className="longread-editor__topbar path-editor__topbar">
+          <button className="longread-back" type="button" onClick={() => setEditingPathId(null)}>
+            <ChevronLeft /> К курсам
+          </button>
+          <div className="longread-editor__identity">
+            <span className="longread-editor__crumb"><Route /> Траектория обучения</span>
+            <div className="longread-editor__title-row">
+              <strong>{pathForm.title || "Новая траектория"}</strong>
+              <span className={`status status--${editingPath?.status || "draft"}`}>{editingPath?.status_label || "Черновик"}</span>
+            </div>
+          </div>
+          <div className="longread-editor__actions">
+            <button className="secondary-button" type="button" disabled={pathSaving} onClick={() => void changePathPublication()}>
+              {editingPath?.status === "published" ? "Снять с публикации" : "Опубликовать"}
+            </button>
+            <button className="primary-button" type="submit" disabled={pathSaving}>
+              <Save />{pathSaving ? "Сохраняем…" : "Сохранить"}
+            </button>
+          </div>
+        </header>
+        {error && <p className="form-error longread-message">{error}</p>}
+        {notice && <p className="form-notice longread-message"><CheckCircle2 />{notice}</p>}
+        <div className="path-editor__workspace">
+          <aside className="path-editor__settings">
+            <div className="path-editor__section-heading">
+              <span>Параметры</span>
+              <h2>Траектория</h2>
+            </div>
+            <div className="path-editor__fields">
+              <label>Название<input value={pathForm.title} onChange={(event) => setPathForm({ ...pathForm, title: event.target.value })} required /></label>
+              <label>Описание<textarea value={pathForm.description} onChange={(event) => setPathForm({ ...pathForm, description: event.target.value })} placeholder="Цель и результат траектории" /></label>
+              <label>Проект<select value={pathForm.project ?? ""} onChange={(event) => setPathForm({ ...pathForm, project: event.target.value ? Number(event.target.value) : null, folder: null })}>
+                <option value="">Без проекта</option>
+                {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+              </select></label>
+              <label>Папка<select value={pathForm.folder ?? ""} disabled={pathForm.project === null} onChange={(event) => setPathForm({ ...pathForm, folder: event.target.value ? Number(event.target.value) : null })}>
+                <option value="">Корень проекта</option>
+                {folders.filter((folder) => folder.project === pathForm.project).map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
+              </select></label>
+            </div>
+          </aside>
+          <main className="path-builder">
+            <header className="path-builder__heading">
+              <div>
+                <span>Последовательность обучения</span>
+                <h1>Курсы траектории</h1>
+                <p>Следующий курс откроется сотруднику после завершения предыдущего.</p>
+              </div>
+              <strong>{selectedPathCourses.length} {selectedPathCourses.length === 1 ? "курс" : selectedPathCourses.length >= 2 && selectedPathCourses.length <= 4 ? "курса" : "курсов"}</strong>
+            </header>
+            <div className="path-builder__columns">
+              <section className="path-course-library">
+                <header><div><span>Библиотека</span><h2>Доступные курсы</h2></div></header>
+                <label className="path-course-search"><Search /><input value={pathSearch} onChange={(event) => setPathSearch(event.target.value)} placeholder="Найти курс" aria-label="Найти курс для траектории" /></label>
+                <div className="path-course-library__list">
+                  {availablePathCourses.map((course) => (
+                    <article className="path-course-option" key={course.id}>
+                      <div className={course.cover_url ? "path-course-option__cover path-course-option__cover--image" : "path-course-option__cover"}>
+                        {course.cover_url ? <img src={course.cover_url} alt="" /> : <BookOpen />}
+                      </div>
+                      <div><strong>{course.title}</strong><span>{course.estimated_minutes} мин · {course.status_label}</span></div>
+                      <button type="button" aria-label={`Добавить курс ${course.title}`} title="Добавить в траекторию" onClick={() => addCourseToPath(course.id)}><Plus /></button>
+                    </article>
+                  ))}
+                  {!availablePathCourses.length && <div className="path-course-empty"><BookOpen /><span>Все подходящие курсы уже добавлены</span></div>}
+                </div>
+              </section>
+              <section className="path-sequence">
+                <header><div><span>Порядок</span><h2>Программа траектории</h2></div><small>Перетаскивайте курсы мышкой</small></header>
+                <div className="path-sequence__list">
+                  {selectedPathCourses.map((course, index) => (
+                    <article
+                      className={draggedPathCourseIndex === index ? "path-sequence-item path-sequence-item--dragging" : "path-sequence-item"}
+                      key={course.id}
+                      draggable
+                      onDragStart={() => setDraggedPathCourseIndex(index)}
+                      onDragEnd={() => setDraggedPathCourseIndex(null)}
+                      onDragOver={(event) => event.preventDefault()}
+                      onDrop={(event) => {
+                        event.preventDefault();
+                        if (draggedPathCourseIndex !== null) movePathCourse(draggedPathCourseIndex, index);
+                        setDraggedPathCourseIndex(null);
+                      }}
+                    >
+                      <span className="path-sequence-item__grip"><GripVertical /></span>
+                      <span className="path-sequence-item__number">{index + 1}</span>
+                      <div><strong>{course.title}</strong><span>{course.lessons_count} шагов · {course.estimated_minutes} мин · {course.status_label}</span></div>
+                      <button type="button" aria-label={`Убрать курс ${course.title}`} title="Убрать из траектории" onClick={() => removeCourseFromPath(course.id)}><X /></button>
+                    </article>
+                  ))}
+                  {!selectedPathCourses.length && (
+                    <div className="path-sequence-empty"><Route /><h3>Добавьте первый курс</h3><p>Нажмите «+» рядом с курсом в библиотеке. Порядок можно изменить перетаскиванием.</p></div>
+                  )}
+                </div>
+              </section>
+            </div>
+          </main>
+        </div>
+      </form>
+    );
+  }
+
   if (editingId !== null) {
     return (
       <form className="longread-editor" onSubmit={saveCourse}>
@@ -6287,6 +6498,7 @@ function CoursesView({ token, user }: { token: string; user: User }) {
                     <p>{path.description || "Описание пока не добавлено"}</p>
                     <span>{path.course_count} курсов · {path.author_name}</span>
                   </div>
+                  <button className="learning-path-card__edit" type="button" onClick={() => openPathEditor(path)}><Pencil /> Редактировать</button>
                   <label className="content-placement">Расположение<select aria-label={`Расположение траектории ${path.title}`} value={placementValue(path.project, path.folder)} onChange={(event) => void moveLearningPath(path, event.target.value)}>
                     <option value="unassigned">Без проекта</option>
                     {projects.map((project) => <option key={`path-project-${project.id}`} value={`p:${project.id}`}>{project.name} · корень</option>)}

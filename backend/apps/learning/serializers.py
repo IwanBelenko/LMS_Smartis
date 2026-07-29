@@ -362,6 +362,13 @@ class LearningPathSerializer(serializers.ModelSerializer):
     def get_course_count(self, obj):
         return obj.courses.count()
 
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data["course_ids"] = list(
+            instance.path_courses.order_by("position").values_list("course_id", flat=True)
+        )
+        return data
+
     def validate(self, attrs):
         project = attrs.get("project", getattr(self.instance, "project", None))
         folder = attrs.get("folder", getattr(self.instance, "folder", None))
