@@ -2,6 +2,7 @@ import Highlight from "@tiptap/extension-highlight";
 import { TextAlign } from "@tiptap/extension-text-align";
 import { TextStyleKit } from "@tiptap/extension-text-style";
 import Image from "@tiptap/extension-image";
+import DragHandle from "@tiptap/extension-drag-handle-react";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import {
@@ -20,6 +21,7 @@ import {
   Link2,
   List,
   ListOrdered,
+  GripVertical,
   MoreHorizontal,
   Pilcrow,
   Quote,
@@ -28,7 +30,7 @@ import {
   Trash2,
   Undo2,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 type RichTextEditorProps = {
@@ -54,9 +56,16 @@ export default function RichTextEditor({
 }: RichTextEditorProps) {
   const [highlightColor, setHighlightColor] = useState("#fff1a8");
   const [blockMenuOpen, setBlockMenuOpen] = useState(false);
+  const [activeNodePos, setActiveNodePos] = useState<number | null>(null);
+  const blockMenuOpenRef = useRef(false);
   const [, refreshSelection] = useState(0);
   const editorRootRef = useRef<HTMLDivElement>(null);
   const blockMenuRef = useRef<HTMLDivElement>(null);
+  const hoveredBlockRef = useRef<HTMLElement | null>(null);
+  const manualDragRef = useRef<{ from: number; startX: number; startY: number; moved: boolean } | null>(null);
+  const dragReferenceRef = useRef({
+    getBoundingClientRect: () => hoveredBlockRef.current?.getBoundingClientRect() || new DOMRect(),
+  });
   const editor = useEditor({
     extensions: [
       StarterKit,
@@ -75,6 +84,7 @@ export default function RichTextEditor({
       },
     },
   });
+  blockMenuOpenRef.current = blockMenuOpen;
 
   useEffect(() => {
     if (editor && editor.getHTML() !== value) {
@@ -107,6 +117,80 @@ export default function RichTextEditor({
       heading.setAttribute("data-outline-heading", "true");
     });
   }, [documentId, editor, value]);
+
+  useEffect(() => {
+    const root = editorRootRef.current;
+    if (!root) return;
+    const rememberHoveredBlock = (event: MouseEvent) => {
+      let candidate = event.target as HTMLElement | null;
+      while (candidate && !candidate.parentElement?.classList.contains("rich-editor__content")) {
+        candidate = candidate.parentElement;
+      }
+      if (candidate?.parentElement?.classList.contains("rich-editor__content")) hoveredBlockRef.current = candidate;
+    };
+    root.addEventListener("mousemove", rememberHoveredBlock, true);
+    return () => root.removeEventListener("mousemove", rememberHoveredBlock, true);
+  }, [editor]);
+
+  const getDragReference = useCallback(() => dragReferenceRef.current, []);
+  const handleDragNodeChange = useCallback(({ pos }: { pos: number }) => {
+    if (!editor) return;
+    if (pos >= 0) {
+      const nodeDom = editor.view.nodeDOM(pos);
+      if (nodeDom instanceof HTMLElement) {
+        hoveredBlockRef.current = nodeDom;
+        requestAnimationFrame(() => {
+          const dragHandle = blockMenuRef.current?.parentElement;
+          if (!dragHandle) return;
+          const rect = nodeDom.getBoundingClientRect();
+          dragHandle.style.position = "fixed";
+          dragHandle.style.left = `${Math.max(8, rect.left - dragHandle.offsetWidth - 8)}px`;
+          dragHandle.style.top = `${rect.top}px`;
+          dragHandle.style.visibility = "";
+        });
+      }
+    }
+    if (!blockMenuOpenRef.current) setActiveNodePos(pos >= 0 ? pos : null);
+  }, [editor]);
+
+  useEffect(() => {
+    if (!editor) return;
+    const trackDrag = (event: MouseEvent) => {
+      const drag = manualDragRef.current;
+      if (!drag) return;
+      if (Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) > 6) drag.moved = true;
+    };
+    const finishDrag = (event: MouseEvent) => {
+      const drag = manualDragRef.current;
+      manualDragRef.current = null;
+      document.documentElement.classList.remove("is-dragging-longread");
+      if (!drag?.moved) return;
+      const sourceNode = editor.state.doc.nodeAt(drag.from);
+      const coordinates = editor.view.posAtCoords({ left: event.clientX, top: event.clientY });
+      if (!sourceNode || !coordinates) return;
+      const resolved = editor.state.doc.resolve(coordinates.pos);
+      const targetFrom = resolved.depth >= 1 ? resolved.before(1) : 0;
+      const targetNode = editor.state.doc.nodeAt(targetFrom);
+      if (!targetNode) return;
+      const targetDom = editor.view.nodeDOM(targetFrom);
+      const dropAfter = targetDom instanceof HTMLElement
+        ? event.clientY > targetDom.getBoundingClientRect().top + targetDom.getBoundingClientRect().height / 2
+        : false;
+      let insertion = targetFrom + (dropAfter ? targetNode.nodeSize : 0);
+      if (insertion === drag.from || insertion === drag.from + sourceNode.nodeSize) return;
+      const transaction = editor.state.tr.delete(drag.from, drag.from + sourceNode.nodeSize);
+      if (insertion > drag.from) insertion -= sourceNode.nodeSize;
+      transaction.insert(insertion, sourceNode);
+      editor.view.dispatch(transaction);
+      editor.commands.focus(insertion + 1);
+    };
+    document.addEventListener("mousemove", trackDrag);
+    document.addEventListener("mouseup", finishDrag);
+    return () => {
+      document.removeEventListener("mousemove", trackDrag);
+      document.removeEventListener("mouseup", finishDrag);
+    };
+  }, [editor]);
 
   if (!editor) return <div className="rich-editor rich-editor--loading">Загружаем редактор…</div>;
   const currentEditor = editor;
@@ -141,7 +225,8 @@ export default function RichTextEditor({
   }
 
   function transformBlock(type: "paragraph" | "h1" | "h2" | "h3" | "bullet" | "ordered" | "quote" | "code") {
-    const chain = currentEditor.chain().focus();
+    const targetPos = activeNodePos ?? currentEditor.state.selection.$from.pos;
+    const chain = currentEditor.chain().focus().setTextSelection(Math.min(targetPos + 1, currentEditor.state.doc.content.size));
     if (type === "paragraph") chain.setParagraph().run();
     if (type === "h1") chain.setHeading({ level: 1 }).run();
     if (type === "h2") chain.setHeading({ level: 2 }).run();
@@ -154,6 +239,10 @@ export default function RichTextEditor({
   }
 
   function currentTopLevelBlock() {
+    if (activeNodePos !== null) {
+      const activeNode = currentEditor.state.doc.nodeAt(activeNodePos);
+      if (activeNode) return { from: activeNodePos, node: activeNode };
+    }
     const { $from } = currentEditor.state.selection;
     const index = $from.index(0);
     let from = 0;
@@ -177,8 +266,9 @@ export default function RichTextEditor({
 
   async function copyBlockLink() {
     if (!documentId) return;
-    const { $from } = currentEditor.state.selection;
-    const currentIndex = $from.index(0);
+    const targetPos = activeNodePos ?? currentEditor.state.selection.$from.pos;
+    const resolved = currentEditor.state.doc.resolve(Math.min(targetPos + 1, currentEditor.state.doc.content.size));
+    const currentIndex = resolved.index(0);
     let headingIndex = -1;
     for (let index = 0; index <= currentIndex; index += 1) {
       if (currentEditor.state.doc.child(index).type.name === "heading") headingIndex += 1;
@@ -336,40 +426,60 @@ export default function RichTextEditor({
     >
       {showToolbar && (toolbarContainer ? createPortal(toolbar, toolbarContainer) : toolbar)}
       {variant === "longread" && (
-        <div className="rich-editor__block-menu" ref={blockMenuRef}>
-          <button
-            className={blockMenuOpen ? "block-menu-trigger block-menu-trigger--active" : "block-menu-trigger"}
-            type="button"
-            title="Меню блока"
-            aria-label="Открыть меню текущего блока"
-            aria-expanded={blockMenuOpen}
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={() => {
-              currentEditor.commands.focus();
-              setBlockMenuOpen((current) => !current);
-            }}
-          >
-            <MoreHorizontal />
-          </button>
-          {blockMenuOpen && (
-            <div className="block-menu-popover" role="menu">
-              <span className="block-menu-label">Изменить тип</span>
-              {blockTypeButton("Текст", <Pilcrow />, "paragraph", editor.isActive("paragraph"))}
-              {blockTypeButton("Заголовок 1", <Heading1 />, "h1", editor.isActive("heading", { level: 1 }))}
-              {blockTypeButton("Заголовок 2", <Heading2 />, "h2", editor.isActive("heading", { level: 2 }))}
-              {blockTypeButton("Заголовок 3", <Heading3 />, "h3", editor.isActive("heading", { level: 3 }))}
-              <span className="block-menu-divider" />
-              {blockTypeButton("Маркированный список", <List />, "bullet", editor.isActive("bulletList"))}
-              {blockTypeButton("Нумерованный список", <ListOrdered />, "ordered", editor.isActive("orderedList"))}
-              {blockTypeButton("Цитата", <Quote />, "quote", editor.isActive("blockquote"))}
-              {blockTypeButton("Фрагмент кода", <Braces />, "code", editor.isActive("codeBlock"))}
-              <span className="block-menu-divider" />
-              <button className="block-type-option" type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => void copyBlockLink()} disabled={!documentId}><span><Link2 /></span>Скопировать ссылку</button>
-              <button className="block-type-option" type="button" onMouseDown={(event) => event.preventDefault()} onClick={duplicateBlock}><span><Copy /></span>Дублировать</button>
-              <button className="block-type-option block-type-option--danger" type="button" onMouseDown={(event) => event.preventDefault()} onClick={deleteBlock}><span><Trash2 /></span>Удалить</button>
-            </div>
-          )}
-        </div>
+        <DragHandle
+          editor={currentEditor}
+          getReferencedVirtualElement={getDragReference}
+          onNodeChange={handleDragNodeChange}
+        >
+          <div className="rich-editor__block-menu" ref={blockMenuRef}>
+            <span
+              className="block-drag-grip"
+              title="Перетащить элемент"
+              aria-label="Перетащить элемент"
+              onMouseDown={(event) => {
+                if (activeNodePos === null) return;
+                manualDragRef.current = {
+                  from: activeNodePos,
+                  startX: event.clientX,
+                  startY: event.clientY,
+                  moved: false,
+                };
+                document.documentElement.classList.add("is-dragging-longread");
+              }}
+            >
+              <GripVertical />
+            </span>
+            <button
+              className={blockMenuOpen ? "block-menu-trigger block-menu-trigger--active" : "block-menu-trigger"}
+              type="button"
+              title="Изменить элемент"
+              aria-label="Изменить выбранный элемент"
+              aria-expanded={blockMenuOpen}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => setBlockMenuOpen((current) => !current)}
+            >
+              <MoreHorizontal />
+            </button>
+            {blockMenuOpen && (
+              <div className="block-menu-popover" role="menu">
+                <span className="block-menu-label">Изменить тип</span>
+                {blockTypeButton("Текст", <Pilcrow />, "paragraph", editor.isActive("paragraph"))}
+                {blockTypeButton("Заголовок 1", <Heading1 />, "h1", editor.isActive("heading", { level: 1 }))}
+                {blockTypeButton("Заголовок 2", <Heading2 />, "h2", editor.isActive("heading", { level: 2 }))}
+                {blockTypeButton("Заголовок 3", <Heading3 />, "h3", editor.isActive("heading", { level: 3 }))}
+                <span className="block-menu-divider" />
+                {blockTypeButton("Маркированный список", <List />, "bullet", editor.isActive("bulletList"))}
+                {blockTypeButton("Нумерованный список", <ListOrdered />, "ordered", editor.isActive("orderedList"))}
+                {blockTypeButton("Цитата", <Quote />, "quote", editor.isActive("blockquote"))}
+                {blockTypeButton("Фрагмент кода", <Braces />, "code", editor.isActive("codeBlock"))}
+                <span className="block-menu-divider" />
+                <button className="block-type-option" type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => void copyBlockLink()} disabled={!documentId}><span><Link2 /></span>Скопировать ссылку</button>
+                <button className="block-type-option" type="button" onMouseDown={(event) => event.preventDefault()} onClick={duplicateBlock}><span><Copy /></span>Дублировать</button>
+                <button className="block-type-option block-type-option--danger" type="button" onMouseDown={(event) => event.preventDefault()} onClick={deleteBlock}><span><Trash2 /></span>Удалить</button>
+              </div>
+            )}
+          </div>
+        </DragHandle>
       )}
       <EditorContent editor={editor} />
     </div>

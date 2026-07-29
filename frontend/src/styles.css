@@ -3342,3 +3342,85 @@ button.vacancy-card { padding: 13px; display: grid; align-content: center; gap: 
   .rich-editor__block-menu { left: -25px; }
   .block-menu-popover { position: fixed; top: 84px; right: 12px; left: auto; width: min(280px, calc(100vw - 24px)); }
 }
+
+/* Desktop-first document canvas and compact course catalogue */
+@media (min-width: 1181px) {
+  .longread-workspace { grid-template-columns: 220px minmax(680px, 1fr) 260px; }
+  .longread-canvas-wrap { padding: 30px clamp(24px, 3vw, 52px); }
+  .longread-page { width: min(940px, 100%); }
+  .course-grid--cards { grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+}
+
+.course-grid--list .course-card {
+  min-height: 82px; height: auto; padding: 9px 6px;
+  grid-template-columns: 104px minmax(0, 1fr);
+}
+.course-grid--list .course-card__visual { width: 104px; min-height: 66px; max-height: 66px; }
+.course-grid--list .course-card__body {
+  min-height: 66px; padding: 0 8px 0 0;
+  grid-template-columns: minmax(220px, 1fr) minmax(145px, auto) minmax(250px, 300px);
+}
+.course-grid--list .course-card__body .course-card__title h2 { margin: 0; font-size: .94rem; }
+.course-grid--list .course-card__body .course-meta { gap: 10px; white-space: nowrap; }
+.course-grid--list .course-card__actions .primary-button,
+.course-grid--list .course-card__actions .secondary-button { min-height: 36px; }
+
+.longread-page--document { padding: 54px clamp(52px, 6vw, 88px) 82px; }
+.longread-document-section--text {
+  padding: 0; border: 0;
+}
+.longread-document-section--text + .longread-document-section--text { padding-top: 0; }
+.longread-document-section--text.longread-document-section--active::before { display: none; }
+.longread-document-section:not(.longread-document-section--text) {
+  margin: 42px 0; padding: 24px 0 44px;
+  border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+}
+.longread-embed-heading {
+  margin-bottom: 18px; display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; gap: 10px;
+}
+.longread-embed-drag {
+  width: 30px; height: 34px; border-radius: 7px; display: grid; place-items: center;
+  color: var(--muted); cursor: grab;
+}
+.longread-embed-drag:hover { background: var(--surface-soft); color: var(--foreground); }
+.longread-embed-drag:active { cursor: grabbing; }
+.longread-embed-drag svg { width: 18px; height: 18px; }
+.longread-title-input--embed {
+  width: 100%; min-height: 42px; margin: 0; font-size: 1.45rem; font-weight: 720; line-height: 1.2;
+}
+.longread-embed-heading > span:last-child { color: var(--muted); font-size: .72rem; white-space: nowrap; }
+
+.rich-editor__block-menu {
+  position: relative; top: auto; left: auto; z-index: 18;
+  display: flex; align-items: center; padding: 2px; border: 1px solid transparent; border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 94%, transparent); box-shadow: 0 5px 18px rgba(24, 31, 20, .1);
+}
+.block-drag-grip,
+.block-menu-trigger {
+  width: 28px; height: 28px; border: 0; border-radius: 6px; display: grid; place-items: center;
+  background: transparent; color: var(--muted);
+}
+.block-drag-grip { cursor: grab; }
+.block-drag-grip:active { cursor: grabbing; }
+.is-dragging-longread,
+.is-dragging-longread * { cursor: grabbing !important; user-select: none !important; }
+.block-drag-grip svg,
+.block-menu-trigger svg { width: 16px; height: 16px; }
+.block-menu-trigger { opacity: 1; cursor: pointer; }
+.block-drag-grip:hover,
+.block-menu-trigger:hover,
+.block-menu-trigger--active { background: var(--surface-soft); color: var(--foreground); }
+.block-menu-popover { top: 36px; left: 28px; }
+.rich-editor--longread .rich-editor__content {
+  min-height: 520px; padding: 12px 4px 56px 12px; font-size: 1.04rem; line-height: 1.72;
+}
+.rich-editor--longread .rich-editor__content > * { position: relative; }
+.rich-editor--longread .rich-editor__content h1 { margin-top: 1.4em; font-size: clamp(2rem, 2.5vw, 2.65rem); letter-spacing: -.035em; line-height: 1.12; }
+.rich-editor--longread .rich-editor__content h2 { margin-top: 1.35em; font-size: clamp(1.55rem, 2vw, 2rem); letter-spacing: -.025em; line-height: 1.2; }
+.rich-editor--longread .rich-editor__content h3 { margin-top: 1.25em; font-size: clamp(1.2rem, 1.55vw, 1.48rem); line-height: 1.3; }
+.rich-editor--longread .rich-editor__content > :first-child { margin-top: 0; }
+
+@media (max-width: 1180px) {
+  .course-grid--list .course-card__body { grid-template-columns: minmax(180px, 1fr) minmax(210px, 270px); }
+  .course-grid--list .course-card__body .course-meta { display: none; }
+}
