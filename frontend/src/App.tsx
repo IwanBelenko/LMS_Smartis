@@ -156,12 +156,28 @@ type EmployeeImportReview = {
   rows: EmployeeImportRow[];
 };
 type EmployeeImportPreview = {
+  batch_id: number;
+  source: "manual" | "one_c";
+  effective_date: string | null;
   filename: string;
   headers: string[];
   rows: Array<Record<string, string>>;
   mapping: Record<string, string>;
   fields: EmployeeImportField[];
   review: EmployeeImportReview;
+};
+type EmployeeImportBatch = {
+  id: number;
+  source: "manual" | "one_c";
+  source_label: string;
+  filename: string;
+  effective_date: string | null;
+  total_rows: number;
+  created_count: number;
+  updated_count: number;
+  error_count: number;
+  imported_by_name: string;
+  completed_at: string;
 };
 type CandidateStage = { id: number; name: string; position: number; is_terminal: boolean; candidates_count: number };
 type Candidate = {
@@ -2135,6 +2151,9 @@ function EmployeesView({ token, user }: { token: string; user: User }) {
   const [importReview, setImportReview] = useState<EmployeeImportReview | null>(null);
   const [importBusy, setImportBusy] = useState(false);
   const [importNotice, setImportNotice] = useState("");
+  const [importSource, setImportSource] = useState<"manual" | "one_c">("manual");
+  const [importEffectiveDate, setImportEffectiveDate] = useState(new Date().toISOString().slice(0, 10));
+  const [importHistory, setImportHistory] = useState<EmployeeImportBatch[]>([]);
 
   async function load() {
     try {
@@ -2219,6 +2238,9 @@ function EmployeesView({ token, user }: { token: string; user: User }) {
     setImportReview(null);
     setImportNotice("");
     setShowImport(true);
+    void apiRequest<EmployeeImportBatch[]>("/employees/import/", token)
+      .then(setImportHistory)
+      .catch(() => setImportHistory([]));
   }
 
   async function uploadEmployeeImport(file: File) {
@@ -2228,6 +2250,8 @@ function EmployeesView({ token, user }: { token: string; user: User }) {
     try {
       const body = new FormData();
       body.append("file", file);
+      body.append("source", importSource);
+      if (importSource === "one_c") body.append("effective_date", importEffectiveDate);
       const preview = await apiUpload<EmployeeImportPreview>("/employees/import/", token, body);
       setImportData(preview);
       setImportMapping(preview.mapping);
@@ -2246,7 +2270,7 @@ function EmployeesView({ token, user }: { token: string; user: User }) {
     try {
       const review = await apiRequest<EmployeeImportReview>("/employees/import/", token, {
         method: "POST",
-        body: JSON.stringify({ rows: importData.rows, mapping: importMapping, commit: false }),
+        body: JSON.stringify({ batch_id: importData.batch_id, rows: importData.rows, mapping: importMapping, commit: false }),
       });
       setImportReview(review);
     } catch (reason) {
@@ -2263,9 +2287,11 @@ function EmployeesView({ token, user }: { token: string; user: User }) {
     try {
       const result = await apiRequest<{ total: number; created: number; updated: number }>("/employees/import/", token, {
         method: "POST",
-        body: JSON.stringify({ rows: importData.rows, mapping: importMapping, commit: true }),
+        body: JSON.stringify({ batch_id: importData.batch_id, rows: importData.rows, mapping: importMapping, commit: true }),
       });
       setImportNotice(`Импорт завершён: создано ${result.created}, обновлено ${result.updated}`);
+      const history = await apiRequest<EmployeeImportBatch[]>("/employees/import/", token);
+      setImportHistory(history);
       await load();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Не удалось импортировать сотрудников");
@@ -2357,21 +2383,52 @@ function EmployeesView({ token, user }: { token: string; user: User }) {
               <button className="icon-button" type="button" disabled={importBusy} onClick={() => setShowImport(false)} aria-label="Закрыть"><X /></button>
             </header>
             {!importData ? (
-              <label className={importBusy ? "employee-import-upload employee-import-upload--busy" : "employee-import-upload"}>
-                <Upload />
-                <strong>{importBusy ? "Читаем таблицу…" : "Выберите CSV или XLSX"}</strong>
-                <span>Первая строка должна содержать названия колонок · до 1000 сотрудников и 5 МБ</span>
-                <input
-                  type="file"
-                  accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                  disabled={importBusy}
-                  onChange={(event) => {
-                    const file = event.target.files?.[0];
-                    if (file) void uploadEmployeeImport(file);
-                    event.target.value = "";
-                  }}
-                />
-              </label>
+              <>
+                <div className="employee-import-mode" role="group" aria-label="Тип кадрового импорта">
+                  <button className={importSource === "manual" ? "employee-import-mode__active" : ""} type="button" onClick={() => setImportSource("manual")}>
+                    <Upload /><span><strong>Список сотрудников</strong><small>Разовая загрузка или обновление</small></span>
+                  </button>
+                  <button className={importSource === "one_c" ? "employee-import-mode__active" : ""} type="button" onClick={() => setImportSource("one_c")}>
+                    <RefreshCw /><span><strong>Выгрузка из 1С</strong><small>Ежемесячные кадровые изменения</small></span>
+                  </button>
+                </div>
+                {importSource === "one_c" && (
+                  <label className="employee-import-effective-date">
+                    Дата кадрового среза
+                    <input type="date" value={importEffectiveDate} onChange={(event) => setImportEffectiveDate(event.target.value)} required />
+                    <span>Эта дата попадёт в историю переводов и смен должности</span>
+                  </label>
+                )}
+                <label className={importBusy ? "employee-import-upload employee-import-upload--busy" : "employee-import-upload"}>
+                  <Upload />
+                  <strong>{importBusy ? "Читаем таблицу…" : importSource === "one_c" ? "Выберите выгрузку 1С" : "Выберите CSV или XLSX"}</strong>
+                  <span>Первая строка должна содержать названия колонок · до 1000 сотрудников и 5 МБ</span>
+                  <input
+                    type="file"
+                    accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    disabled={importBusy || (importSource === "one_c" && !importEffectiveDate)}
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (file) void uploadEmployeeImport(file);
+                      event.target.value = "";
+                    }}
+                  />
+                </label>
+                {!!importHistory.length && (
+                  <section className="employee-import-history">
+                    <div className="section-heading"><div><h3>Последние импорты</h3><p>Завершённые операции и кадровые срезы</p></div></div>
+                    <div>
+                      {importHistory.slice(0, 5).map((batch) => (
+                        <article key={batch.id}>
+                          <span className={batch.source === "one_c" ? "employee-import-history__source employee-import-history__source--one-c" : "employee-import-history__source"}>{batch.source_label}</span>
+                          <div><strong>{batch.filename}</strong><small>{batch.effective_date ? `Срез ${displayDate(batch.effective_date)}` : new Intl.DateTimeFormat("ru-RU").format(new Date(batch.completed_at))} · {batch.imported_by_name || "Администратор"}</small></div>
+                          <span>{batch.created_count} создано · {batch.updated_count} обновлено</span>
+                        </article>
+                      ))}
+                    </div>
+                  </section>
+                )}
+              </>
             ) : importNotice ? (
               <div className="employee-import-complete">
                 <CheckCircle2 />
@@ -2383,7 +2440,7 @@ function EmployeesView({ token, user }: { token: string; user: User }) {
               <>
                 <div className="employee-import-file">
                   <FileText />
-                  <div><strong>{importData.filename}</strong><span>{importData.rows.length} строк · сопоставьте колонки перед импортом</span></div>
+                  <div><strong>{importData.filename}</strong><span>{importData.source === "one_c" ? `Выгрузка 1С · срез ${displayDate(importData.effective_date)}` : "Список сотрудников"} · {importData.rows.length} строк</span></div>
                   <button className="text-button" type="button" onClick={() => {
                     setImportData(null);
                     setImportReview(null);

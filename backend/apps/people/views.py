@@ -31,6 +31,7 @@ from .models import (
     EmploymentEvent,
     Interview,
     InterviewFeedback,
+    HrImportBatch,
     Position,
     StaffPosition,
     Vacancy,
@@ -797,17 +798,84 @@ class EmployeeImportView(APIView):
     permission_classes = [IsHcmUser]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
+    def get(self, request):
+        batches = HrImportBatch.objects.filter(status=HrImportBatch.Status.COMPLETED).select_related("imported_by")[:20]
+        return Response([
+            {
+                "id": batch.pk,
+                "source": batch.source,
+                "source_label": batch.get_source_display(),
+                "status": batch.status,
+                "filename": batch.filename,
+                "effective_date": batch.effective_date,
+                "total_rows": batch.total_rows,
+                "created_count": batch.created_count,
+                "updated_count": batch.updated_count,
+                "error_count": batch.error_count,
+                "imported_by_name": batch.imported_by.get_full_name() if batch.imported_by else "",
+                "completed_at": batch.completed_at,
+            }
+            for batch in batches
+        ])
+
     def post(self, request):
         if request.content_type and request.content_type.startswith("multipart/"):
             parsed = parse_employee_import_file(request.FILES.get("file"))
-            review = preview_employee_import(parsed["rows"], parsed["mapping"], request)
+            source = request.data.get("source", HrImportBatch.Source.MANUAL)
+            if source not in HrImportBatch.Source.values:
+                raise ValidationError({"source": "Неизвестный источник импорта"})
+            effective_date = None
+            if request.data.get("effective_date"):
+                try:
+                    effective_date = date.fromisoformat(request.data["effective_date"])
+                except ValueError as exc:
+                    raise ValidationError({"effective_date": "Укажите корректную дату среза"}) from exc
+            if source == HrImportBatch.Source.ONE_C and not effective_date:
+                raise ValidationError({"effective_date": "Для выгрузки 1С укажите дату среза"})
+            if source == HrImportBatch.Source.ONE_C and HrImportBatch.objects.filter(
+                source=HrImportBatch.Source.ONE_C,
+                status=HrImportBatch.Status.COMPLETED,
+                file_sha256=parsed["file_sha256"],
+            ).exists():
+                raise ValidationError({"detail": "Эта выгрузка 1С уже была импортирована"})
+            review = preview_employee_import(parsed["rows"], parsed["mapping"], request, source, effective_date)
+            batch = HrImportBatch.objects.create(
+                source=source,
+                filename=parsed["filename"],
+                file_sha256=parsed["file_sha256"],
+                payload_sha256=parsed["payload_sha256"],
+                effective_date=effective_date,
+                mapping=parsed["mapping"],
+                total_rows=review["total"],
+                error_count=review["error_count"],
+                imported_by=request.user,
+            )
+            parsed["batch_id"] = batch.pk
+            parsed["source"] = source
+            parsed["effective_date"] = effective_date
+            parsed.pop("file_sha256", None)
+            parsed.pop("payload_sha256", None)
             parsed["review"] = {key: value for key, value in review.items() if not key.startswith("_")}
             return Response(parsed)
         rows = request.data.get("rows", [])
         mapping = request.data.get("mapping", {})
+        batch_id = request.data.get("batch_id")
+        batch = get_object_or_404(HrImportBatch, pk=batch_id) if batch_id else None
         if request.data.get("commit"):
-            return Response(commit_employee_import(rows, mapping, request), status=status.HTTP_201_CREATED)
-        review = preview_employee_import(rows, mapping, request)
+            if not batch:
+                raise ValidationError({"batch_id": "Загрузите файл ещё раз"})
+            return Response(commit_employee_import(rows, mapping, request, batch.pk), status=status.HTTP_201_CREATED)
+        review = preview_employee_import(
+            rows,
+            mapping,
+            request,
+            batch.source if batch else HrImportBatch.Source.MANUAL,
+            batch.effective_date if batch else None,
+        )
+        if batch:
+            batch.mapping = mapping
+            batch.error_count = review["error_count"]
+            batch.save(update_fields=["mapping", "error_count"])
         return Response({key: value for key, value in review.items() if not key.startswith("_")})
 
 

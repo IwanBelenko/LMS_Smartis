@@ -1778,8 +1778,30 @@ button.vacancy-card { padding: 13px; display: grid; align-content: center; gap: 
 .hcm-dialog > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .hcm-dialog > header p { margin-top: 4px; color: var(--muted); font-size: 0.82rem; }
 .employee-import-dialog { width: min(980px, 100%); }
+.employee-import-mode { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+.employee-import-mode > button {
+  min-height: 68px; padding: 11px 13px; border: 1px solid var(--border); border-radius: 8px;
+  display: grid; grid-template-columns: 28px minmax(0, 1fr); align-items: center; gap: 10px;
+  background: var(--surface); color: var(--foreground); text-align: left; cursor: pointer;
+}
+.employee-import-mode > button:hover { border-color: color-mix(in srgb, var(--brand) 55%, var(--border)); }
+.employee-import-mode > button.employee-import-mode__active {
+  border-color: var(--brand); background: color-mix(in srgb, var(--brand) 9%, var(--surface));
+  box-shadow: inset 3px 0 0 var(--brand);
+}
+.employee-import-mode svg { width: 22px; color: var(--brand-hover); }
+.employee-import-mode span { min-width: 0; display: grid; gap: 3px; }
+.employee-import-mode strong { font-size: .76rem; }
+.employee-import-mode small { color: var(--muted); font-size: .64rem; }
+.employee-import-effective-date {
+  padding: 10px 12px; border: 1px solid var(--border); border-radius: 7px;
+  grid-template-columns: minmax(150px, 1fr) 170px; align-items: center; gap: 5px 12px;
+  background: var(--surface-soft); color: var(--foreground); font-size: .72rem;
+}
+.employee-import-effective-date input { min-height: 36px; grid-column: 2; grid-row: 1 / 3; }
+.employee-import-effective-date span { color: var(--muted); font-size: .62rem; font-weight: 400; }
 .employee-import-upload {
-  min-height: 290px; padding: 32px; border: 1px dashed color-mix(in srgb, var(--brand) 58%, var(--border)); border-radius: 9px;
+  min-height: 220px; padding: 28px; border: 1px dashed color-mix(in srgb, var(--brand) 58%, var(--border)); border-radius: 9px;
   place-content: center; justify-items: center; gap: 9px; background: color-mix(in srgb, var(--brand) 4%, var(--surface));
   color: var(--foreground); text-align: center; cursor: pointer;
 }
@@ -1839,6 +1861,20 @@ button.vacancy-card { padding: 13px; display: grid; align-content: center; gap: 
 .employee-import-complete > svg { width: 48px; height: 48px; color: var(--brand); }
 .employee-import-complete h3 { font-size: 1.08rem; }
 .employee-import-complete p { max-width: 480px; color: var(--muted); font-size: .75rem; line-height: 1.5; }
+.employee-import-history { display: grid; gap: 8px; }
+.employee-import-history .section-heading { min-height: 0; }
+.employee-import-history .section-heading h3 { font-size: .82rem; }
+.employee-import-history .section-heading p { margin-top: 2px; font-size: .66rem; }
+.employee-import-history > div:last-child { border-top: 1px solid var(--border); display: grid; }
+.employee-import-history article {
+  min-height: 54px; padding: 8px 4px; border-bottom: 1px solid var(--border);
+  display: grid; grid-template-columns: 92px minmax(0, 1fr) auto; align-items: center; gap: 10px;
+}
+.employee-import-history__source { color: var(--muted); font-size: .61rem; font-weight: 700; }
+.employee-import-history__source--one-c { color: var(--brand-hover); }
+.employee-import-history article > div { min-width: 0; display: grid; gap: 2px; }
+.employee-import-history article > div strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .7rem; }
+.employee-import-history article small, .employee-import-history article > span:last-child { color: var(--muted); font-size: .6rem; }
 .hcm-form { display: grid; gap: 16px; }
 .hcm-form__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .hcm-form__wide { grid-column: 1 / -1; }
@@ -2594,6 +2630,10 @@ button.vacancy-card { padding: 13px; display: grid; align-content: center; gap: 
 }
 
 @media (max-width: 620px) {
+  .employee-import-mode { grid-template-columns: 1fr; }
+  .employee-import-effective-date { grid-template-columns: 1fr; }
+  .employee-import-effective-date input { grid-column: 1; grid-row: auto; }
+  .employee-import-history article { grid-template-columns: 1fr; gap: 4px; }
   .employee-import-file { grid-template-columns: 34px minmax(0, 1fr); }
   .employee-import-file .text-button { grid-column: 2; justify-self: start; }
   .employee-import-mapping > div:last-child { grid-template-columns: 1fr; }

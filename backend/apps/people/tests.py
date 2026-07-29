@@ -22,6 +22,7 @@ from .models import (
     EmployeeProfile,
     EmploymentEvent,
     Interview,
+    HrImportBatch,
     Position,
     StaffPosition,
     Vacancy,
@@ -198,7 +199,7 @@ class PeopleApiTests(TestCase):
         self.assertEqual(payload["review"]["error_count"], 0)
         committed = self.client.post(
             "/api/v1/employees/import/",
-            {"rows": payload["rows"], "mapping": payload["mapping"], "commit": True},
+            {"batch_id": payload["batch_id"], "rows": payload["rows"], "mapping": payload["mapping"], "commit": True},
             format="json",
         )
         self.assertEqual(committed.status_code, 201)
@@ -231,6 +232,7 @@ class PeopleApiTests(TestCase):
             {
                 "rows": preview.json()["rows"],
                 "mapping": preview.json()["mapping"],
+                "batch_id": preview.json()["batch_id"],
                 "commit": True,
             },
             format="json",
@@ -289,6 +291,48 @@ class PeopleApiTests(TestCase):
         self.assertEqual(response.json()["review"]["create_count"], 1)
         self.assertEqual(response.json()["review"]["error_count"], 1)
         self.assertIn("Дубликат строки", response.json()["review"]["rows"][1]["errors"]["duplicate"][0])
+
+    def test_one_c_import_uses_cutoff_date_and_rejects_same_file_twice(self):
+        self.client.force_authenticate(self.hr)
+        content = (
+            "ФИО;Email;Табельный номер;Отдел;Должность\n"
+            "Соколова Анна;employee@test.local;SM-101;Продукт;Аналитик\n"
+        )
+        upload = SimpleUploadedFile("one-c-june.csv", content.encode("utf-8"), content_type="text/csv")
+        preview = self.client.post(
+            "/api/v1/employees/import/",
+            {"file": upload, "source": "one_c", "effective_date": "2026-06-30"},
+            format="multipart",
+        )
+        self.assertEqual(preview.status_code, 200)
+        payload = preview.json()
+        committed = self.client.post(
+            "/api/v1/employees/import/",
+            {
+                "batch_id": payload["batch_id"],
+                "rows": payload["rows"],
+                "mapping": payload["mapping"],
+                "commit": True,
+            },
+            format="json",
+        )
+        self.assertEqual(committed.status_code, 201)
+        event = EmploymentEvent.objects.get(employee=self.profile, event_type=EmploymentEvent.Type.TRANSFER)
+        self.assertEqual(event.effective_date, date(2026, 6, 30))
+        self.assertIn("1С", event.note)
+        batch = HrImportBatch.objects.get(pk=payload["batch_id"])
+        self.assertEqual(batch.status, HrImportBatch.Status.COMPLETED)
+        duplicate = self.client.post(
+            "/api/v1/employees/import/",
+            {
+                "file": SimpleUploadedFile("one-c-june.csv", content.encode("utf-8"), content_type="text/csv"),
+                "source": "one_c",
+                "effective_date": "2026-06-30",
+            },
+            format="multipart",
+        )
+        self.assertEqual(duplicate.status_code, 400)
+        self.assertIn("уже была импортирована", duplicate.json()["detail"])
 
     def test_admin_moves_candidate_to_another_stage(self):
         next_stage = CandidateStage.objects.create(name="Интервью", position=2)

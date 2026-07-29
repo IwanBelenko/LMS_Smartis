@@ -3,16 +3,19 @@ from __future__ import annotations
 import csv
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
+import hashlib
 from io import BytesIO, StringIO
+import json
 import re
 from zipfile import BadZipFile, ZipFile
 from xml.etree import ElementTree
 
 from django.db import transaction
+from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
 from apps.identity.models import Department
-from .models import AuditEvent, EmployeeProfile, EmploymentEvent, Position
+from .models import AuditEvent, EmployeeProfile, EmploymentEvent, HrImportBatch, Position
 from .serializers import EmployeeProfileWriteSerializer
 
 
@@ -208,11 +211,18 @@ def parse_employee_import_file(uploaded_file):
         raise ValidationError({"file": "Поддерживаются только файлы CSV и XLSX"})
     return {
         "filename": filename,
+        "file_sha256": hashlib.sha256(data).hexdigest(),
+        "payload_sha256": employee_import_payload_hash(rows),
         "headers": headers,
         "rows": rows,
         "mapping": suggest_mapping(headers),
         "fields": IMPORT_FIELDS,
     }
+
+
+def employee_import_payload_hash(rows):
+    canonical = json.dumps(rows, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _mapped_value(row, mapping, field):
@@ -283,7 +293,7 @@ def _flatten_serializer_errors(error):
     return result
 
 
-def _prepare_row(row, mapping, request, row_number):
+def _prepare_row(row, mapping, request, row_number, source=HrImportBatch.Source.MANUAL, effective_date=None):
     errors = {}
     employee_number = _mapped_value(row, mapping, "employee_number")
     email = _mapped_value(row, mapping, "email").lower()
@@ -345,7 +355,11 @@ def _prepare_row(row, mapping, request, row_number):
         instance,
         data=payload,
         partial=instance is not None,
-        context={"request": request},
+        context={
+            "request": request,
+            "change_source": "Источник: ежемесячная выгрузка 1С" if source == HrImportBatch.Source.ONE_C else "",
+            "change_effective_date": effective_date,
+        },
     )
     if not errors and not serializer.is_valid():
         errors.update(_flatten_serializer_errors(serializer.errors))
@@ -367,14 +381,17 @@ def _prepare_row(row, mapping, request, row_number):
     }
 
 
-def preview_employee_import(rows, mapping, request):
+def preview_employee_import(rows, mapping, request, source=HrImportBatch.Source.MANUAL, effective_date=None):
     if not isinstance(rows, list) or not rows:
         raise ValidationError({"rows": "Нет строк для импорта"})
     if len(rows) > MAX_IMPORT_ROWS:
         raise ValidationError({"rows": f"За один раз можно импортировать не более {MAX_IMPORT_ROWS} сотрудников"})
     if not isinstance(mapping, dict):
         raise ValidationError({"mapping": "Настройте сопоставление колонок"})
-    prepared = [_prepare_row(row, mapping, request, index + 2) for index, row in enumerate(rows)]
+    prepared = [
+        _prepare_row(row, mapping, request, index + 2, source, effective_date)
+        for index, row in enumerate(rows)
+    ]
     seen_numbers = {}
     seen_emails = {}
     for item in prepared:
@@ -403,9 +420,26 @@ def preview_employee_import(rows, mapping, request):
 
 
 @transaction.atomic
-def commit_employee_import(rows, mapping, request):
-    review = preview_employee_import(rows, mapping, request)
+def commit_employee_import(rows, mapping, request, batch_id):
+    try:
+        batch = HrImportBatch.objects.select_for_update().get(pk=batch_id)
+    except HrImportBatch.DoesNotExist as exc:
+        raise ValidationError({"batch_id": "Сессия импорта не найдена. Загрузите файл ещё раз"}) from exc
+    if batch.status == HrImportBatch.Status.COMPLETED:
+        raise ValidationError({"detail": "Эта выгрузка уже была импортирована"})
+    if employee_import_payload_hash(rows) != batch.payload_sha256:
+        raise ValidationError("Данные изменились после предварительной проверки. Загрузите файл ещё раз")
+    if batch.source == HrImportBatch.Source.ONE_C and HrImportBatch.objects.filter(
+        source=HrImportBatch.Source.ONE_C,
+        status=HrImportBatch.Status.COMPLETED,
+        file_sha256=batch.file_sha256,
+    ).exclude(pk=batch.pk).exists():
+        raise ValidationError({"detail": "Эта выгрузка 1С уже была импортирована"})
+    review = preview_employee_import(rows, mapping, request, batch.source, batch.effective_date)
     if review["error_count"]:
+        batch.mapping = mapping
+        batch.error_count = review["error_count"]
+        batch.save(update_fields=["mapping", "error_count"])
         raise ValidationError({
             "detail": "Исправьте ошибки перед импортом",
             "rows": review["rows"],
@@ -428,14 +462,27 @@ def commit_employee_import(rows, mapping, request):
             entity_type="employee",
             entity_id=str(profile.pk),
             action=f"import_{item['action']}",
-            changes={"row_number": item["row_number"]},
+            changes={"row_number": item["row_number"], "source": batch.source, "batch_id": batch.pk},
         )
+    batch.status = HrImportBatch.Status.COMPLETED
+    batch.mapping = mapping
+    batch.total_rows = review["total"]
+    batch.created_count = review["create_count"]
+    batch.updated_count = review["update_count"]
+    batch.error_count = 0
+    batch.completed_at = timezone.now()
+    batch.save(update_fields=[
+        "status", "mapping", "total_rows", "created_count", "updated_count",
+        "error_count", "completed_at",
+    ])
     AuditEvent.objects.create(
         actor=request.user,
         entity_type="employee_import",
-        entity_id=str(datetime.now().timestamp()),
+        entity_id=str(batch.pk),
         action="completed",
         changes={
+            "source": batch.source,
+            "effective_date": batch.effective_date.isoformat() if batch.effective_date else None,
             "total": review["total"],
             "created": review["create_count"],
             "updated": review["update_count"],

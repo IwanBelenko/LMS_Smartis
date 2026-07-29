@@ -239,13 +239,15 @@ class EmployeeProfileWriteSerializer(serializers.ModelSerializer):
             instance.user.save(update_fields=list(user_data))
         instance = super().update(instance, validated_data)
         actor = self.context.get("request").user if self.context.get("request") else None
-        today = date.today()
+        change_source = self.context.get("change_source", "")
+        today = self.context.get("change_effective_date") or date.today()
         new_department = instance.user.department
         if old_department != new_department:
             EmploymentEvent.objects.create(
                 employee=instance,
                 event_type=EmploymentEvent.Type.TRANSFER,
                 title=f"Перевод: {old_department or 'Без отдела'} → {new_department or 'Без отдела'}",
+                note=change_source,
                 effective_date=today,
                 created_by=actor,
             )
@@ -254,6 +256,7 @@ class EmployeeProfileWriteSerializer(serializers.ModelSerializer):
                 employee=instance,
                 event_type=EmploymentEvent.Type.PROMOTION,
                 title=f"Смена должности: {old_position or 'Не указана'} → {instance.position or 'Не указана'}",
+                note=change_source,
                 effective_date=today,
                 created_by=actor,
             )

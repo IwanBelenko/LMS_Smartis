@@ -715,6 +715,41 @@ class InterviewFeedback(models.Model):
         verbose_name_plural = "Оценки собеседований"
 
 
+class HrImportBatch(models.Model):
+    class Source(models.TextChoices):
+        MANUAL = "manual", "Ручной импорт"
+        ONE_C = "one_c", "Выгрузка 1С"
+
+    class Status(models.TextChoices):
+        PREVIEW = "preview", "На проверке"
+        COMPLETED = "completed", "Завершён"
+
+    source = models.CharField("Источник", max_length=20, choices=Source.choices, default=Source.MANUAL)
+    status = models.CharField("Статус", max_length=20, choices=Status.choices, default=Status.PREVIEW)
+    filename = models.CharField("Имя файла", max_length=255)
+    file_sha256 = models.CharField("Хэш файла", max_length=64)
+    payload_sha256 = models.CharField("Хэш данных", max_length=64)
+    effective_date = models.DateField("Дата среза", null=True, blank=True)
+    mapping = models.JSONField("Сопоставление колонок", default=dict, blank=True)
+    total_rows = models.PositiveIntegerField("Всего строк", default=0)
+    created_count = models.PositiveIntegerField("Создано", default=0)
+    updated_count = models.PositiveIntegerField("Обновлено", default=0)
+    error_count = models.PositiveIntegerField("Ошибок", default=0)
+    imported_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="hr_import_batches",
+        null=True,
+        on_delete=models.SET_NULL,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "Кадровый импорт"
+        verbose_name_plural = "Кадровые импорты"
+
+
 class AuditEvent(models.Model):
     actor = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL)
     entity_type = models.CharField(max_length=80)
