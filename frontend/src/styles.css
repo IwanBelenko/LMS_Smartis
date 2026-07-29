@@ -1875,6 +1875,14 @@ button.vacancy-card { padding: 13px; display: grid; align-content: center; gap: 
 .employee-import-history article > div { min-width: 0; display: grid; gap: 2px; }
 .employee-import-history article > div strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .7rem; }
 .employee-import-history article small, .employee-import-history article > span:last-child { color: var(--muted); font-size: .6rem; }
+.learning-import-note {
+  padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--brand) 32%, var(--border)); border-radius: 8px;
+  display: flex; align-items: flex-start; gap: 11px; background: color-mix(in srgb, var(--brand) 7%, var(--surface));
+}
+.learning-import-note > svg { width: 19px; min-width: 19px; margin-top: 1px; color: var(--brand-hover); }
+.learning-import-note > div { display: grid; gap: 4px; }
+.learning-import-note strong { font-size: .75rem; }
+.learning-import-note p { color: var(--muted); font-size: .67rem; line-height: 1.45; }
 .hcm-form { display: grid; gap: 16px; }
 .hcm-form__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .hcm-form__wide { grid-column: 1 / -1; }

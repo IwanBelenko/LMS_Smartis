@@ -23,6 +23,7 @@ from .models import (
     EmploymentEvent,
     Interview,
     HrImportBatch,
+    LearningImportBatch,
     Position,
     StaffPosition,
     Vacancy,
@@ -333,6 +334,69 @@ class PeopleApiTests(TestCase):
         )
         self.assertEqual(duplicate.status_code, 400)
         self.assertIn("уже была импортирована", duplicate.json()["detail"])
+
+    def test_hr_previews_and_commits_ispring_learning_report(self):
+        course = Course.objects.create(title="Основы аналитики", author=self.admin)
+        self.client.force_authenticate(self.hr)
+        content = (
+            "Email;Курс;Статус;Прогресс;Результат;Дата завершения\n"
+            "employee@test.local;Основы аналитики;Завершён;100%;92;28.07.2026\n"
+        )
+        preview = self.client.post(
+            "/api/v1/learning-imports/ispring/",
+            {"file": SimpleUploadedFile("ispring.csv", content.encode("utf-8"), content_type="text/csv")},
+            format="multipart",
+        )
+        self.assertEqual(preview.status_code, 200)
+        payload = preview.json()
+        self.assertEqual(payload["review"]["create_count"], 1)
+        self.assertEqual(payload["review"]["error_count"], 0)
+
+        committed = self.client.post(
+            "/api/v1/learning-imports/ispring/",
+            {
+                "batch_id": payload["batch_id"],
+                "rows": payload["rows"],
+                "mapping": payload["mapping"],
+                "commit": True,
+            },
+            format="json",
+        )
+        self.assertEqual(committed.status_code, 201)
+        assignment = EmployeeLearning.objects.get(employee=self.profile, course=course)
+        self.assertEqual(assignment.status, EmployeeLearning.Status.COMPLETED)
+        self.assertEqual(assignment.progress, 100)
+        self.assertEqual(assignment.score, 92)
+        self.assertIsNotNone(assignment.completed_at)
+        self.assertEqual(
+            LearningImportBatch.objects.get(pk=payload["batch_id"]).status,
+            LearningImportBatch.Status.COMPLETED,
+        )
+
+        duplicate = self.client.post(
+            "/api/v1/learning-imports/ispring/",
+            {"file": SimpleUploadedFile("ispring.csv", content.encode("utf-8"), content_type="text/csv")},
+            format="multipart",
+        )
+        self.assertEqual(duplicate.status_code, 400)
+        self.assertIn("уже был импортирован", duplicate.json()["detail"])
+
+    def test_ispring_report_marks_unknown_employee_and_course(self):
+        self.client.force_authenticate(self.hr)
+        content = (
+            "Email;Курс;Статус\n"
+            "unknown@test.local;Несуществующий курс;В процессе\n"
+        )
+        response = self.client.post(
+            "/api/v1/learning-imports/ispring/",
+            {"file": SimpleUploadedFile("unknown.csv", content.encode("utf-8"), content_type="text/csv")},
+            format="multipart",
+        )
+        self.assertEqual(response.status_code, 200)
+        row = response.json()["review"]["rows"][0]
+        self.assertEqual(row["action"], "error")
+        self.assertIn("не найден", row["errors"]["employee_email"][0])
+        self.assertIn("не найден", row["errors"]["course_title"][0])
 
     def test_admin_moves_candidate_to_another_stage(self):
         next_stage = CandidateStage.objects.create(name="Интервью", position=2)

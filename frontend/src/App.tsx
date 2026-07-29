@@ -179,6 +179,47 @@ type EmployeeImportBatch = {
   imported_by_name: string;
   completed_at: string;
 };
+type LearningImportRow = {
+  row_number: number;
+  action: "create" | "update" | "error";
+  errors: Record<string, string[]>;
+  preview: {
+    employee_email: string;
+    employee_name: string;
+    course_title: string;
+    status: string;
+    progress: number;
+    score: number | null;
+  };
+};
+type LearningImportReview = {
+  total: number;
+  create_count: number;
+  update_count: number;
+  error_count: number;
+  rows: LearningImportRow[];
+};
+type LearningImportPreview = {
+  batch_id: number;
+  filename: string;
+  headers: string[];
+  rows: Array<Record<string, string>>;
+  mapping: Record<string, string>;
+  fields: EmployeeImportField[];
+  review: LearningImportReview;
+};
+type LearningImportBatch = {
+  id: number;
+  source: "ispring_file" | "ispring_api";
+  source_label: string;
+  filename: string;
+  total_rows: number;
+  created_count: number;
+  updated_count: number;
+  error_count: number;
+  imported_by_name: string;
+  completed_at: string;
+};
 type CandidateStage = { id: number; name: string; position: number; is_terminal: boolean; candidates_count: number };
 type Candidate = {
   id: number;
@@ -3255,6 +3296,13 @@ function HrAnalyticsView({ token }: { token: string }) {
   const [summary, setSummary] = useState<HcmSummary | null>(null);
   const [dashboard, setDashboard] = useState<HcmDashboard | null>(null);
   const [error, setError] = useState("");
+  const [showLearningImport, setShowLearningImport] = useState(false);
+  const [learningImport, setLearningImport] = useState<LearningImportPreview | null>(null);
+  const [learningMapping, setLearningMapping] = useState<Record<string, string>>({});
+  const [learningReview, setLearningReview] = useState<LearningImportReview | null>(null);
+  const [learningHistory, setLearningHistory] = useState<LearningImportBatch[]>([]);
+  const [learningImportBusy, setLearningImportBusy] = useState(false);
+  const [learningImportNotice, setLearningImportNotice] = useState("");
 
   useEffect(() => {
     Promise.all([
@@ -3279,9 +3327,87 @@ function HrAnalyticsView({ token }: { token: string }) {
     { label: "Развитие команды", value: summary ? `${summary.average_development_progress}%` : "—", note: "средний прогресс" },
   ];
 
+  function openLearningImport() {
+    setError("");
+    setLearningImport(null);
+    setLearningMapping({});
+    setLearningReview(null);
+    setLearningImportNotice("");
+    setShowLearningImport(true);
+    void apiRequest<LearningImportBatch[]>("/learning-imports/ispring/", token)
+      .then(setLearningHistory)
+      .catch(() => setLearningHistory([]));
+  }
+
+  async function uploadLearningReport(file: File) {
+    setLearningImportBusy(true);
+    setError("");
+    try {
+      const body = new FormData();
+      body.append("file", file);
+      const preview = await apiUpload<LearningImportPreview>("/learning-imports/ispring/", token, body);
+      setLearningImport(preview);
+      setLearningMapping(preview.mapping);
+      setLearningReview(preview.review);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось прочитать отчёт iSpring");
+    } finally {
+      setLearningImportBusy(false);
+    }
+  }
+
+  async function reviewLearningReport() {
+    if (!learningImport) return;
+    setLearningImportBusy(true);
+    setError("");
+    try {
+      const review = await apiRequest<LearningImportReview>("/learning-imports/ispring/", token, {
+        method: "POST",
+        body: JSON.stringify({
+          batch_id: learningImport.batch_id,
+          rows: learningImport.rows,
+          mapping: learningMapping,
+          commit: false,
+        }),
+      });
+      setLearningReview(review);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось проверить отчёт");
+    } finally {
+      setLearningImportBusy(false);
+    }
+  }
+
+  async function commitLearningReport() {
+    if (!learningImport || !learningReview || learningReview.error_count) return;
+    setLearningImportBusy(true);
+    setError("");
+    try {
+      const result = await apiRequest<{ total: number; created: number; updated: number }>("/learning-imports/ispring/", token, {
+        method: "POST",
+        body: JSON.stringify({
+          batch_id: learningImport.batch_id,
+          rows: learningImport.rows,
+          mapping: learningMapping,
+          commit: true,
+        }),
+      });
+      setLearningImportNotice(`Синхронизация завершена: добавлено ${result.created}, обновлено ${result.updated}`);
+      setLearningHistory(await apiRequest<LearningImportBatch[]>("/learning-imports/ispring/", token));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось импортировать результаты");
+    } finally {
+      setLearningImportBusy(false);
+    }
+  }
+
   return (
     <>
-      <PageHeader title="HR-дашборд" subtitle="Задачи и показатели, которые требуют внимания HR" />
+      <PageHeader
+        title="HR-дашборд"
+        subtitle="Задачи и показатели, которые требуют внимания HR"
+        action={<button className="secondary-button" type="button" onClick={openLearningImport}><RefreshCw />Синхронизация iSpring</button>}
+      />
       <section className="hr-dashboard-metrics">
         {dashboardMetrics.map((item) => (
           <article key={item.label} className={item.alert ? "hr-dashboard-metric hr-dashboard-metric--alert" : "hr-dashboard-metric"}>
@@ -3346,6 +3472,128 @@ function HrAnalyticsView({ token }: { token: string }) {
           <div className="hcm-ring" style={{ "--progress": `${summary?.average_development_progress ?? 0}%` } as React.CSSProperties}><strong>{summary?.average_development_progress ?? 0}%</strong><span>выполнено</span></div>
         </article>
       </section>
+      {showLearningImport && (
+        <div className="hcm-dialog-backdrop" onMouseDown={(event) => {
+          if (event.target === event.currentTarget && !learningImportBusy) setShowLearningImport(false);
+        }}>
+          <section className="hcm-dialog employee-import-dialog learning-import-dialog" role="dialog" aria-modal="true" aria-labelledby="learning-import-title">
+            <header>
+              <div>
+                <span className="eyebrow">Параллельная работа систем</span>
+                <h2 id="learning-import-title">Синхронизация результатов iSpring</h2>
+                <p>Сопоставляем сотрудника по корпоративной почте, а курс — по точному названию</p>
+              </div>
+              <button className="icon-button" type="button" disabled={learningImportBusy} onClick={() => setShowLearningImport(false)} aria-label="Закрыть"><X /></button>
+            </header>
+            {!learningImport ? (
+              <>
+                <div className="learning-import-note">
+                  <RefreshCw />
+                  <div><strong>Временный файловый мост</strong><p>Загрузите отчёт CSV/XLSX из iSpring. После получения доступа тот же процесс можно переключить на API без изменения карточек сотрудников.</p></div>
+                </div>
+                <label className={learningImportBusy ? "employee-import-upload employee-import-upload--busy" : "employee-import-upload"}>
+                  <Upload />
+                  <strong>{learningImportBusy ? "Читаем отчёт…" : "Выберите отчёт iSpring"}</strong>
+                  <span>Нужны колонки с корпоративной почтой и названием курса · до 1000 строк и 5 МБ</span>
+                  <input
+                    type="file"
+                    accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    disabled={learningImportBusy}
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (file) void uploadLearningReport(file);
+                      event.target.value = "";
+                    }}
+                  />
+                </label>
+                {!!learningHistory.length && (
+                  <section className="employee-import-history">
+                    <div className="section-heading"><div><h3>Последние синхронизации</h3><p>Повторная загрузка того же файла блокируется</p></div></div>
+                    <div>
+                      {learningHistory.slice(0, 5).map((batch) => (
+                        <article key={batch.id}>
+                          <span className="employee-import-history__source employee-import-history__source--one-c">iSpring</span>
+                          <div><strong>{batch.filename}</strong><small>{new Intl.DateTimeFormat("ru-RU").format(new Date(batch.completed_at))} · {batch.imported_by_name || "Администратор"}</small></div>
+                          <span>{batch.created_count} добавлено · {batch.updated_count} обновлено</span>
+                        </article>
+                      ))}
+                    </div>
+                  </section>
+                )}
+              </>
+            ) : learningImportNotice ? (
+              <div className="employee-import-complete">
+                <CheckCircle2 />
+                <h3>Данные iSpring обновлены</h3>
+                <p>{learningImportNotice}. Результаты уже доступны в разделе «Обучение» карточек сотрудников.</p>
+              </div>
+            ) : (
+              <>
+                <div className="employee-import-file">
+                  <FileText />
+                  <div><strong>{learningImport.filename}</strong><span>{learningImport.rows.length} строк из отчёта</span></div>
+                  <button className="secondary-button" type="button" disabled={learningImportBusy} onClick={() => {
+                    setLearningImport(null);
+                    setLearningReview(null);
+                  }}>Другой файл</button>
+                </div>
+                <section className="employee-import-mapping">
+                  <div className="section-heading"><div><h3>Сопоставление колонок</h3><p>Проверьте, откуда брать email, курс и показатели прохождения</p></div></div>
+                  <div>
+                    {learningImport.fields.map((field) => (
+                      <label key={field.key}>
+                        <span>{field.label}{field.required && <i>обязательно</i>}</span>
+                        <select value={learningMapping[field.key] || ""} onChange={(event) => setLearningMapping({ ...learningMapping, [field.key]: event.target.value })}>
+                          <option value="">Не импортировать</option>
+                          {learningImport.headers.map((header) => <option key={header} value={header}>{header}</option>)}
+                        </select>
+                      </label>
+                    ))}
+                  </div>
+                </section>
+                {learningReview && (
+                  <>
+                    <div className="employee-import-summary">
+                      <div><span>Всего строк</span><strong>{learningReview.total}</strong></div>
+                      <div><span>Новые результаты</span><strong>{learningReview.create_count}</strong></div>
+                      <div><span>Обновления</span><strong>{learningReview.update_count}</strong></div>
+                      <div className={learningReview.error_count ? "employee-import-summary__error" : ""}><span>С ошибками</span><strong>{learningReview.error_count}</strong></div>
+                    </div>
+                    <div className="employee-import-table">
+                      <table>
+                        <thead><tr><th>Строка</th><th>Сотрудник</th><th>Курс</th><th>Результат</th><th>Действие</th></tr></thead>
+                        <tbody>
+                          {learningReview.rows.map((row) => (
+                            <tr key={row.row_number}>
+                              <td>{row.row_number}</td>
+                              <td><strong>{row.preview.employee_name || "Не найден"}</strong><span>{row.preview.employee_email}</span></td>
+                              <td><strong>{row.preview.course_title || "Не указан"}</strong></td>
+                              <td><strong>{row.preview.progress}%</strong><span>{row.preview.score === null ? "Без оценки" : `${row.preview.score} баллов`}</span></td>
+                              <td>
+                                <span className={`employee-import-status employee-import-status--${row.action}`}>{row.action === "create" ? "Добавить" : row.action === "update" ? "Обновить" : "Ошибка"}</span>
+                                {!!Object.keys(row.errors).length && <small>{Object.values(row.errors).flat().join(" · ")}</small>}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                )}
+              </>
+            )}
+            <footer className="employee-import-dialog__footer">
+              <button className="secondary-button" type="button" disabled={learningImportBusy} onClick={() => setShowLearningImport(false)}>Закрыть</button>
+              {learningImport && !learningImportNotice && (
+                <>
+                  <button className="secondary-button" type="button" disabled={learningImportBusy} onClick={() => void reviewLearningReport()}>{learningImportBusy ? "Проверяем…" : "Проверить"}</button>
+                  <button className="primary-button" type="button" disabled={learningImportBusy || !learningReview || Boolean(learningReview.error_count)} onClick={() => void commitLearningReport()}><RefreshCw />Обновить результаты</button>
+                </>
+              )}
+            </footer>
+          </section>
+        </div>
+      )}
     </>
   );
 }

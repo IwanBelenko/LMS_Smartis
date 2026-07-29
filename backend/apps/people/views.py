@@ -32,6 +32,7 @@ from .models import (
     Interview,
     InterviewFeedback,
     HrImportBatch,
+    LearningImportBatch,
     Position,
     StaffPosition,
     Vacancy,
@@ -72,6 +73,7 @@ from .serializers import (
 )
 from .services import analyze_daily_transcript, analyze_product_update, assign_onboarding
 from .employee_import import commit_employee_import, parse_employee_import_file, preview_employee_import
+from .learning_import import commit_learning_import, parse_learning_import_file, preview_learning_import
 
 
 def is_product_update_admin(user):
@@ -872,6 +874,75 @@ class EmployeeImportView(APIView):
             batch.source if batch else HrImportBatch.Source.MANUAL,
             batch.effective_date if batch else None,
         )
+        if batch:
+            batch.mapping = mapping
+            batch.error_count = review["error_count"]
+            batch.save(update_fields=["mapping", "error_count"])
+        return Response({key: value for key, value in review.items() if not key.startswith("_")})
+
+
+class LearningImportView(APIView):
+    permission_classes = [IsHcmUser]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+    def get(self, request):
+        batches = LearningImportBatch.objects.filter(
+            status=LearningImportBatch.Status.COMPLETED,
+        ).select_related("imported_by")[:20]
+        return Response([
+            {
+                "id": batch.pk,
+                "source": batch.source,
+                "source_label": batch.get_source_display(),
+                "filename": batch.filename,
+                "total_rows": batch.total_rows,
+                "created_count": batch.created_count,
+                "updated_count": batch.updated_count,
+                "error_count": batch.error_count,
+                "imported_by_name": batch.imported_by.get_full_name() if batch.imported_by else "",
+                "completed_at": batch.completed_at,
+            }
+            for batch in batches
+        ])
+
+    def post(self, request):
+        if request.content_type and request.content_type.startswith("multipart/"):
+            parsed = parse_learning_import_file(request.FILES.get("file"))
+            if LearningImportBatch.objects.filter(
+                source=LearningImportBatch.Source.ISPRING_FILE,
+                status=LearningImportBatch.Status.COMPLETED,
+                file_sha256=parsed["file_sha256"],
+            ).exists():
+                raise ValidationError({"detail": "Этот отчёт iSpring уже был импортирован"})
+            review = preview_learning_import(parsed["rows"], parsed["mapping"])
+            batch = LearningImportBatch.objects.create(
+                source=LearningImportBatch.Source.ISPRING_FILE,
+                filename=parsed["filename"],
+                file_sha256=parsed["file_sha256"],
+                payload_sha256=parsed["payload_sha256"],
+                mapping=parsed["mapping"],
+                total_rows=review["total"],
+                error_count=review["error_count"],
+                imported_by=request.user,
+            )
+            parsed["batch_id"] = batch.pk
+            parsed.pop("file_sha256", None)
+            parsed.pop("payload_sha256", None)
+            parsed["review"] = {key: value for key, value in review.items() if not key.startswith("_")}
+            return Response(parsed)
+
+        rows = request.data.get("rows", [])
+        mapping = request.data.get("mapping", {})
+        batch_id = request.data.get("batch_id")
+        batch = get_object_or_404(LearningImportBatch, pk=batch_id) if batch_id else None
+        if request.data.get("commit"):
+            if not batch:
+                raise ValidationError({"batch_id": "Загрузите файл ещё раз"})
+            return Response(
+                commit_learning_import(rows, mapping, request, batch.pk),
+                status=status.HTTP_201_CREATED,
+            )
+        review = preview_learning_import(rows, mapping)
         if batch:
             batch.mapping = mapping
             batch.error_count = review["error_count"]
