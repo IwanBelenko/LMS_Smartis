@@ -519,8 +519,22 @@ type OnboardingTemplateConfig = {
 };
 type LearningPathOption = { id: number; title: string; status: string };
 type QuizOption = { text: string; correct: boolean };
-type QuizQuestion = { prompt: string; options: QuizOption[] };
+type QuizQuestionType = "single_choice" | "multiple_choice" | "true_false" | "matching" | "ordering" | "short_text" | "fill_blank";
+type QuizPair = { left: string; right: string };
+type QuizQuestion = {
+  type?: QuizQuestionType;
+  prompt: string;
+  image_url?: string;
+  learner_view?: boolean;
+  options: QuizOption[];
+  correct_boolean?: boolean;
+  pairs?: QuizPair[];
+  left_items?: string[];
+  right_items?: string[];
+  accepted_answers?: string[];
+};
 type QuizData = { passing_score: number; max_attempts: number; questions: QuizQuestion[] };
+type QuizAnswer = number | number[] | boolean | string | string[];
 type Lesson = {
   id?: number;
   client_key: string;
@@ -4159,14 +4173,41 @@ const lessonTypeLabels: Record<Lesson["lesson_type"], string> = {
   scorm: "SCORM 1.2",
 };
 
+const quizQuestionTypeLabels: Record<QuizQuestionType, string> = {
+  single_choice: "Один ответ",
+  multiple_choice: "Несколько ответов",
+  true_false: "Верно / неверно",
+  matching: "Сопоставление",
+  ordering: "Порядок",
+  short_text: "Короткий ответ",
+  fill_blank: "Пропуск в тексте",
+};
+
+function questionType(question: QuizQuestion): QuizQuestionType {
+  return question.type || "single_choice";
+}
+
+function createQuizQuestion(type: QuizQuestionType = "single_choice"): QuizQuestion {
+  const base: QuizQuestion = {
+    type,
+    prompt: type === "fill_blank" ? "Вставьте пропущенное слово: ___" : "",
+    image_url: "",
+    options: [],
+  };
+  if (type === "single_choice" || type === "multiple_choice") {
+    return { ...base, options: [{ text: "", correct: true }, { text: "", correct: false }] };
+  }
+  if (type === "true_false") return { ...base, correct_boolean: true };
+  if (type === "matching") return { ...base, pairs: [{ left: "", right: "" }, { left: "", right: "" }] };
+  if (type === "ordering") return { ...base, options: [{ text: "", correct: false }, { text: "", correct: false }] };
+  return { ...base, accepted_answers: [""] };
+}
+
 function emptyQuiz(): QuizData {
   return {
     passing_score: 80,
     max_attempts: 3,
-    questions: [{
-      prompt: "",
-      options: [{ text: "", correct: true }, { text: "", correct: false }],
-    }],
+    questions: [createQuizQuestion()],
   };
 }
 
@@ -4201,21 +4242,162 @@ function chapterCountLabel(count: number) {
   return `${count} ${word}`;
 }
 
+function normalizeQuizText(value: unknown) {
+  return String(value ?? "").trim().replace(/\s+/g, " ").toLocaleLowerCase("ru-RU");
+}
+
+function rotatedQuizItems<T>(items: T[]) {
+  return items.length < 2 ? items : [...items.slice(1), items[0]];
+}
+
+function displayedOrdering(question: QuizQuestion) {
+  const items = (question.options || []).map((option) => option.text);
+  return question.learner_view ? items : rotatedQuizItems(items);
+}
+
+function matchingSides(question: QuizQuestion) {
+  const left = question.left_items || (question.pairs || []).map((pair) => pair.left);
+  const storedRight = question.right_items || (question.pairs || []).map((pair) => pair.right);
+  return { left, right: question.learner_view ? storedRight : rotatedQuizItems(storedRight) };
+}
+
+function defaultQuizAnswer(question: QuizQuestion): QuizAnswer | undefined {
+  if (questionType(question) === "ordering") return displayedOrdering(question);
+  if (questionType(question) === "matching") return Array(matchingSides(question).left.length).fill("");
+  if (questionType(question) === "multiple_choice") return [];
+  return undefined;
+}
+
+function quizAnswerComplete(question: QuizQuestion, answer: QuizAnswer | undefined) {
+  const kind = questionType(question);
+  if (kind === "single_choice") return typeof answer === "number";
+  if (kind === "multiple_choice") return Array.isArray(answer) && answer.length > 0;
+  if (kind === "true_false") return typeof answer === "boolean";
+  if (kind === "matching") return Array.isArray(answer) && answer.length === matchingSides(question).left.length && answer.every(Boolean);
+  if (kind === "ordering") return Array.isArray(answer) && answer.length === question.options.length;
+  return typeof answer === "string" && Boolean(answer.trim());
+}
+
+function previewAnswerCorrect(question: QuizQuestion, answer: QuizAnswer | undefined) {
+  const kind = questionType(question);
+  if (kind === "single_choice") return typeof answer === "number" && Boolean(question.options[answer]?.correct);
+  if (kind === "multiple_choice" && Array.isArray(answer)) {
+    const expected = question.options.map((option, index) => option.correct ? index : -1).filter((index) => index >= 0);
+    return answer.length === expected.length && answer.every((index) => expected.includes(Number(index)));
+  }
+  if (kind === "true_false") return answer === question.correct_boolean;
+  if (kind === "matching" && Array.isArray(answer)) {
+    return answer.every((item, index) => normalizeQuizText(item) === normalizeQuizText(question.pairs?.[index]?.right));
+  }
+  if (kind === "ordering" && Array.isArray(answer)) {
+    return answer.every((item, index) => normalizeQuizText(item) === normalizeQuizText(question.options[index]?.text));
+  }
+  if ((kind === "short_text" || kind === "fill_blank") && typeof answer === "string") {
+    return (question.accepted_answers || []).some((item) => normalizeQuizText(item) === normalizeQuizText(answer));
+  }
+  return false;
+}
+
+function correctAnswerSummary(question: QuizQuestion) {
+  const kind = questionType(question);
+  if (kind === "single_choice" || kind === "multiple_choice") return question.options.filter((option) => option.correct).map((option) => option.text).join(", ");
+  if (kind === "true_false") return question.correct_boolean ? "Верно" : "Неверно";
+  if (kind === "matching") return (question.pairs || []).map((pair) => `${pair.left} — ${pair.right}`).join("; ");
+  if (kind === "ordering") return question.options.map((option) => option.text).join(" → ");
+  return (question.accepted_answers || []).join(", ");
+}
+
+function moveQuizItem<T>(items: T[], index: number, direction: -1 | 1) {
+  const target = index + direction;
+  if (target < 0 || target >= items.length) return items;
+  const next = [...items];
+  [next[index], next[target]] = [next[target], next[index]];
+  return next;
+}
+
+function QuizAnswerFields({
+  question,
+  answer,
+  onChange,
+  disabled = false,
+  reveal = false,
+}: {
+  question: QuizQuestion;
+  answer: QuizAnswer | undefined;
+  onChange: (answer: QuizAnswer) => void;
+  disabled?: boolean;
+  reveal?: boolean;
+}) {
+  const kind = questionType(question);
+  const choice = typeof answer === "number" ? answer : undefined;
+  const multiple = Array.isArray(answer) ? answer.map(Number) : [];
+  const matching = Array.isArray(answer) ? answer.map(String) : Array(matchingSides(question).left.length).fill("");
+  const ordering = Array.isArray(answer) && answer.length ? answer.map(String) : displayedOrdering(question);
+  const text = typeof answer === "string" ? answer : "";
+
+  return (
+    <>
+      {question.image_url && <img className="quiz-question__image" src={question.image_url} alt="" />}
+      {(kind === "single_choice" || kind === "multiple_choice") && (
+        <div className="quiz-options">
+          {question.options.map((option, optionIndex) => {
+            const chosen = kind === "single_choice" ? choice === optionIndex : multiple.includes(optionIndex);
+            const resultClass = reveal && option.correct ? " quiz-option--correct"
+              : reveal && chosen ? " quiz-option--incorrect" : "";
+            return (
+              <label className={`quiz-option${chosen ? " quiz-option--chosen" : ""}${resultClass}`} key={`${option.text}-${optionIndex}`}>
+                <input
+                  type={kind === "single_choice" ? "radio" : "checkbox"}
+                  name={kind === "single_choice" ? `quiz-choice-${question.prompt}` : undefined}
+                  checked={chosen}
+                  disabled={disabled}
+                  onChange={() => {
+                    if (kind === "single_choice") onChange(optionIndex);
+                    else onChange(chosen ? multiple.filter((item) => item !== optionIndex) : [...multiple, optionIndex]);
+                  }}
+                />
+                <span>{option.text}</span>
+              </label>
+            );
+          })}
+        </div>
+      )}
+      {kind === "true_false" && (
+        <div className="quiz-boolean" role="group" aria-label="Выберите верно или неверно">
+          {[true, false].map((value) => <button className={answer === value ? "quiz-boolean__button quiz-boolean__button--active" : "quiz-boolean__button"} type="button" disabled={disabled} onClick={() => onChange(value)} key={String(value)}>{value ? "Верно" : "Неверно"}</button>)}
+        </div>
+      )}
+      {kind === "matching" && (
+        <div className="quiz-matching">
+          {matchingSides(question).left.map((left, index) => (
+            <div key={`${left}-${index}`}><strong>{left}</strong><ChevronRight /><select aria-label={`Пара для ${left}`} value={matching[index] || ""} disabled={disabled} onChange={(event) => onChange(matching.map((item, itemIndex) => itemIndex === index ? event.target.value : item))}><option value="">Выберите пару</option>{matchingSides(question).right.map((right) => <option value={right} key={right}>{right}</option>)}</select></div>
+          ))}
+        </div>
+      )}
+      {kind === "ordering" && (
+        <div className="quiz-ordering">
+          {ordering.map((item, index) => (
+            <div key={`${item}-${index}`}><span>{index + 1}</span><strong>{item}</strong><button className="mini-button" type="button" disabled={disabled || index === 0} onClick={() => onChange(moveQuizItem(ordering, index, -1))} aria-label={`Поднять ${item}`}><ArrowUp /></button><button className="mini-button" type="button" disabled={disabled || index === ordering.length - 1} onClick={() => onChange(moveQuizItem(ordering, index, 1))} aria-label={`Опустить ${item}`}><ArrowDown /></button></div>
+          ))}
+        </div>
+      )}
+      {(kind === "short_text" || kind === "fill_blank") && <label className="quiz-text-answer">Ваш ответ<input value={text} disabled={disabled} onChange={(event) => onChange(event.target.value)} placeholder={kind === "fill_blank" ? "Слово или фраза для пропуска" : "Введите ответ"} /></label>}
+    </>
+  );
+}
+
 function QuizPreview({ lesson }: { lesson: Lesson }) {
   const questions = lesson.quiz_data?.questions || [];
   const passingScore = lesson.quiz_data?.passing_score ?? 80;
-  const [answers, setAnswers] = useState<Record<number, number>>({});
+  const [answers, setAnswers] = useState<Record<number, QuizAnswer>>({});
   const [currentQuestion, setCurrentQuestion] = useState(0);
   const [questionSubmitted, setQuestionSubmitted] = useState(false);
   const [finished, setFinished] = useState(false);
-  const correctCount = questions.reduce(
-    (total, question, index) => total + (question.options[answers[index]]?.correct ? 1 : 0),
-    0,
-  );
+  const correctCount = questions.reduce((total, question, index) => total + (previewAnswerCorrect(question, answers[index]) ? 1 : 0), 0);
   const score = questions.length ? Math.round((correctCount / questions.length) * 100) : 0;
   const question = questions[currentQuestion];
-  const chosenAnswer = answers[currentQuestion];
-  const chosenOption = question?.options[chosenAnswer];
+  const chosenAnswer = answers[currentQuestion] ?? (question ? defaultQuizAnswer(question) : undefined);
+  const isCorrect = question ? previewAnswerCorrect(question, chosenAnswer) : false;
 
   useEffect(() => {
     setAnswers({});
@@ -4240,9 +4422,7 @@ function QuizPreview({ lesson }: { lesson: Lesson }) {
     setQuestionSubmitted(false);
   }
 
-  if (!questions.length) {
-    return <div className="native-preview-placeholder"><CheckCircle2 /><p>Вопросы теста пока не добавлены.</p></div>;
-  }
+  if (!questions.length) return <div className="native-preview-placeholder"><CheckCircle2 /><p>Вопросы теста пока не добавлены.</p></div>;
 
   if (finished) {
     return (
@@ -4256,52 +4436,18 @@ function QuizPreview({ lesson }: { lesson: Lesson }) {
 
   return (
     <div className="quiz-preview">
-      <div className="quiz-preview__progress">
-        <div><span>Вопрос {currentQuestion + 1} из {questions.length}</span><strong>{Math.round(((currentQuestion + 1) / questions.length) * 100)}%</strong></div>
-        <span><i style={{ width: `${((currentQuestion + 1) / questions.length) * 100}%` }} /></span>
-      </div>
+      <div className="quiz-preview__progress"><div><span>Вопрос {currentQuestion + 1} из {questions.length}</span><strong>{quizQuestionTypeLabels[questionType(question)]}</strong></div><span><i style={{ width: `${((currentQuestion + 1) / questions.length) * 100}%` }} /></span></div>
       <p className="quiz-preview__intro">Отвечайте последовательно. Для прохождения нужно набрать не менее {passingScore}%.</p>
       <fieldset className="quiz-question" key={`${question.prompt}-${currentQuestion}`}>
         <legend>{currentQuestion + 1}. {question.prompt}</legend>
-        <div className="quiz-options">
-          {question.options.map((option, optionIndex) => {
-            const chosen = chosenAnswer === optionIndex;
-            const resultClass = questionSubmitted && option.correct ? " quiz-option--correct"
-              : questionSubmitted && chosen ? " quiz-option--incorrect" : "";
-            return (
-              <label className={`quiz-option${chosen ? " quiz-option--chosen" : ""}${resultClass}`} key={`${option.text}-${optionIndex}`}>
-                <input
-                  type="radio"
-                  name={`preview-question-${currentQuestion}`}
-                  checked={chosen}
-                  disabled={questionSubmitted}
-                  onChange={() => setAnswers((current) => ({ ...current, [currentQuestion]: optionIndex }))}
-                />
-                <span>{option.text}</span>
-              </label>
-            );
-          })}
-        </div>
+        <QuizAnswerFields question={question} answer={chosenAnswer} onChange={(answer) => setAnswers((current) => ({ ...current, [currentQuestion]: answer }))} disabled={questionSubmitted} reveal={questionSubmitted} />
       </fieldset>
       {!questionSubmitted ? (
-        <button
-          className="primary-button quiz-preview__submit"
-          type="button"
-          disabled={chosenAnswer === undefined}
-          onClick={() => setQuestionSubmitted(true)}
-        >
-          Ответить
-        </button>
+        <button className="primary-button quiz-preview__submit" type="button" disabled={!quizAnswerComplete(question, chosenAnswer)} onClick={() => { if (chosenAnswer !== undefined) setAnswers((current) => ({ ...current, [currentQuestion]: chosenAnswer })); setQuestionSubmitted(true); }}>Ответить</button>
       ) : (
-        <div className={chosenOption?.correct ? "quiz-feedback quiz-feedback--correct" : "quiz-feedback quiz-feedback--incorrect"} role="status">
-          <CheckCircle2 />
-          <div>
-            <strong>{chosenOption?.correct ? "Верно" : "Ответ неверный"}</strong>
-            <span>{chosenOption?.correct ? "Ответ принят — можно продолжать." : `Правильный ответ: ${question.options.find((option) => option.correct)?.text || "не указан"}`}</span>
-          </div>
-          <button className="primary-button" type="button" onClick={continueQuiz}>
-            {currentQuestion >= questions.length - 1 ? "Показать результат" : "Следующий вопрос"}<ChevronRight />
-          </button>
+        <div className={isCorrect ? "quiz-feedback quiz-feedback--correct" : "quiz-feedback quiz-feedback--incorrect"} role="status">
+          <CheckCircle2 /><div><strong>{isCorrect ? "Верно" : "Ответ неверный"}</strong><span>{isCorrect ? "Ответ принят — можно продолжать." : `Правильный ответ: ${correctAnswerSummary(question) || "не указан"}`}</span></div>
+          <button className="primary-button" type="button" onClick={continueQuiz}>{currentQuestion >= questions.length - 1 ? "Показать результат" : "Следующий вопрос"}<ChevronRight /></button>
         </div>
       )}
     </div>
@@ -4310,67 +4456,41 @@ function QuizPreview({ lesson }: { lesson: Lesson }) {
 
 function QuizEditor({ value, onChange }: { value: QuizData; onChange: (value: QuizData) => void }) {
   const quiz = value?.questions?.length ? value : emptyQuiz();
-  const updateQuestion = (questionIndex: number, update: Partial<QuizQuestion>) => {
-    onChange({
-      ...quiz,
-      questions: quiz.questions.map((question, index) => index === questionIndex ? { ...question, ...update } : question),
-    });
+  const updateQuestion = (questionIndex: number, update: Partial<QuizQuestion>) => onChange({ ...quiz, questions: quiz.questions.map((question, index) => index === questionIndex ? { ...question, ...update } : question) });
+  const replaceQuestionType = (questionIndex: number, type: QuizQuestionType) => {
+    const current = quiz.questions[questionIndex];
+    const replacement = createQuizQuestion(type);
+    onChange({ ...quiz, questions: quiz.questions.map((question, index) => index === questionIndex ? { ...replacement, prompt: type === "fill_blank" ? replacement.prompt : current.prompt, image_url: current.image_url || "" } : question) });
   };
 
   return (
     <div className="quiz-editor">
       <div className="quiz-editor__heading">
-        <div><h2>Вопросы теста</h2><p>Один вариант ответа на каждый вопрос</p></div>
+        <div><h2>Вопросы теста</h2><p>Семь форматов вопросов · сотрудник видит их по одному</p></div>
         <div className="quiz-editor__rules">
-          <label>Проходной балл
-            <span className="quiz-editor__score"><input type="number" min="0" max="100" value={quiz.passing_score} onChange={(event) => onChange({ ...quiz, passing_score: Number(event.target.value) })} /><b>%</b></span>
-          </label>
-          <label>Попыток
-            <span className="quiz-editor__score"><input type="number" min="1" max="20" value={quiz.max_attempts ?? 3} onChange={(event) => onChange({ ...quiz, max_attempts: Number(event.target.value) })} /></span>
-          </label>
+          <label>Проходной балл<span className="quiz-editor__score"><input type="number" min="0" max="100" value={quiz.passing_score} onChange={(event) => onChange({ ...quiz, passing_score: Number(event.target.value) })} /><b>%</b></span></label>
+          <label>Попыток<span className="quiz-editor__score"><input type="number" min="1" max="20" value={quiz.max_attempts ?? 3} onChange={(event) => onChange({ ...quiz, max_attempts: Number(event.target.value) })} /></span></label>
         </div>
       </div>
-      {quiz.questions.map((question, questionIndex) => (
-        <fieldset className="quiz-editor__question" key={questionIndex}>
-          <div className="quiz-editor__question-top">
-            <span>Вопрос {questionIndex + 1}</span>
-            {quiz.questions.length > 1 && (
-              <button className="mini-button mini-button--danger" type="button" onClick={() => onChange({ ...quiz, questions: quiz.questions.filter((_, index) => index !== questionIndex) })} aria-label={`Удалить вопрос ${questionIndex + 1}`}><Trash2 /></button>
-            )}
-          </div>
-          <input value={question.prompt} onChange={(event) => updateQuestion(questionIndex, { prompt: event.target.value })} placeholder="Введите вопрос" aria-label={`Текст вопроса ${questionIndex + 1}`} required />
-          <div className="quiz-editor__options">
-            {question.options.map((option, optionIndex) => (
-              <div className="quiz-editor__option" key={optionIndex}>
-                <input
-                  className="quiz-editor__correct"
-                  type="radio"
-                  name={`correct-${questionIndex}`}
-                  checked={option.correct}
-                  onChange={() => updateQuestion(questionIndex, {
-                    options: question.options.map((item, index) => ({ ...item, correct: index === optionIndex })),
-                  })}
-                  aria-label={`Правильный ответ ${optionIndex + 1}`}
-                />
-                <input
-                  value={option.text}
-                  onChange={(event) => updateQuestion(questionIndex, {
-                    options: question.options.map((item, index) => index === optionIndex ? { ...item, text: event.target.value } : item),
-                  })}
-                  placeholder={`Вариант ${optionIndex + 1}`}
-                  aria-label={`Вариант ответа ${optionIndex + 1}`}
-                  required
-                />
-                {question.options.length > 2 && (
-                  <button className="mini-button mini-button--danger" type="button" onClick={() => updateQuestion(questionIndex, { options: question.options.filter((_, index) => index !== optionIndex) })} aria-label={`Удалить вариант ${optionIndex + 1}`}><X /></button>
-                )}
-              </div>
-            ))}
-          </div>
-          <button className="secondary-button quiz-editor__add-option" type="button" onClick={() => updateQuestion(questionIndex, { options: [...question.options, { text: "", correct: false }] })}><Plus /> Добавить вариант</button>
-        </fieldset>
-      ))}
-      <button className="secondary-button quiz-editor__add-question" type="button" onClick={() => onChange({ ...quiz, questions: [...quiz.questions, emptyQuiz().questions[0]] })}><Plus /> Добавить вопрос</button>
+      {quiz.questions.map((question, questionIndex) => {
+        const kind = questionType(question);
+        return (
+          <fieldset className="quiz-editor__question" key={questionIndex}>
+            <div className="quiz-editor__question-top"><span>Вопрос {questionIndex + 1}</span><div><select aria-label={`Тип вопроса ${questionIndex + 1}`} value={kind} onChange={(event) => replaceQuestionType(questionIndex, event.target.value as QuizQuestionType)}>{Object.entries(quizQuestionTypeLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select>{quiz.questions.length > 1 && <button className="mini-button mini-button--danger" type="button" onClick={() => onChange({ ...quiz, questions: quiz.questions.filter((_, index) => index !== questionIndex) })} aria-label={`Удалить вопрос ${questionIndex + 1}`}><Trash2 /></button>}</div></div>
+            <input value={question.prompt} onChange={(event) => updateQuestion(questionIndex, { prompt: event.target.value })} placeholder={kind === "fill_blank" ? "Используйте ___ для обозначения пропуска" : "Введите вопрос"} aria-label={`Текст вопроса ${questionIndex + 1}`} required />
+            <label className="quiz-editor__image-url">Изображение к вопросу — необязательно<input value={question.image_url || ""} onChange={(event) => updateQuestion(questionIndex, { image_url: event.target.value })} placeholder="https://… или путь из медиатеки" /></label>
+            {(kind === "single_choice" || kind === "multiple_choice") && <>
+              <div className="quiz-editor__options">{question.options.map((option, optionIndex) => <div className="quiz-editor__option" key={optionIndex}><input className="quiz-editor__correct" type={kind === "single_choice" ? "radio" : "checkbox"} name={kind === "single_choice" ? `correct-${questionIndex}` : undefined} checked={option.correct} onChange={() => updateQuestion(questionIndex, { options: question.options.map((item, index) => ({ ...item, correct: kind === "single_choice" ? index === optionIndex : index === optionIndex ? !item.correct : item.correct })) })} aria-label={`Правильный ответ ${optionIndex + 1}`} /><input value={option.text} onChange={(event) => updateQuestion(questionIndex, { options: question.options.map((item, index) => index === optionIndex ? { ...item, text: event.target.value } : item) })} placeholder={`Вариант ${optionIndex + 1}`} required />{question.options.length > 2 && <button className="mini-button mini-button--danger" type="button" onClick={() => updateQuestion(questionIndex, { options: question.options.filter((_, index) => index !== optionIndex) })} aria-label={`Удалить вариант ${optionIndex + 1}`}><X /></button>}</div>)}</div>
+              <button className="secondary-button quiz-editor__add-option" type="button" onClick={() => updateQuestion(questionIndex, { options: [...question.options, { text: "", correct: false }] })}><Plus /> Добавить вариант</button>
+            </>}
+            {kind === "true_false" && <div className="quiz-editor__boolean"><span>Правильный ответ</span><label><input type="radio" name={`boolean-${questionIndex}`} checked={question.correct_boolean === true} onChange={() => updateQuestion(questionIndex, { correct_boolean: true })} />Верно</label><label><input type="radio" name={`boolean-${questionIndex}`} checked={question.correct_boolean === false} onChange={() => updateQuestion(questionIndex, { correct_boolean: false })} />Неверно</label></div>}
+            {kind === "matching" && <><div className="quiz-editor__pairs">{(question.pairs || []).map((pair, pairIndex) => <div key={pairIndex}><input value={pair.left} onChange={(event) => updateQuestion(questionIndex, { pairs: (question.pairs || []).map((item, index) => index === pairIndex ? { ...item, left: event.target.value } : item) })} placeholder="Понятие" required /><ChevronRight /><input value={pair.right} onChange={(event) => updateQuestion(questionIndex, { pairs: (question.pairs || []).map((item, index) => index === pairIndex ? { ...item, right: event.target.value } : item) })} placeholder="Соответствие" required />{(question.pairs || []).length > 2 && <button className="mini-button mini-button--danger" type="button" onClick={() => updateQuestion(questionIndex, { pairs: (question.pairs || []).filter((_, index) => index !== pairIndex) })}><X /></button>}</div>)}</div><button className="secondary-button quiz-editor__add-option" type="button" onClick={() => updateQuestion(questionIndex, { pairs: [...(question.pairs || []), { left: "", right: "" }] })}><Plus /> Добавить пару</button></>}
+            {kind === "ordering" && <><p className="quiz-editor__hint">Расположите элементы сразу в правильном порядке.</p><div className="quiz-editor__ordering">{question.options.map((option, optionIndex) => <div key={optionIndex}><span>{optionIndex + 1}</span><input value={option.text} onChange={(event) => updateQuestion(questionIndex, { options: question.options.map((item, index) => index === optionIndex ? { ...item, text: event.target.value } : item) })} placeholder={`Этап ${optionIndex + 1}`} required /><button className="mini-button" type="button" disabled={optionIndex === 0} onClick={() => updateQuestion(questionIndex, { options: moveQuizItem(question.options, optionIndex, -1) })}><ArrowUp /></button><button className="mini-button" type="button" disabled={optionIndex === question.options.length - 1} onClick={() => updateQuestion(questionIndex, { options: moveQuizItem(question.options, optionIndex, 1) })}><ArrowDown /></button>{question.options.length > 2 && <button className="mini-button mini-button--danger" type="button" onClick={() => updateQuestion(questionIndex, { options: question.options.filter((_, index) => index !== optionIndex) })}><X /></button>}</div>)}</div><button className="secondary-button quiz-editor__add-option" type="button" onClick={() => updateQuestion(questionIndex, { options: [...question.options, { text: "", correct: false }] })}><Plus /> Добавить этап</button></>}
+            {(kind === "short_text" || kind === "fill_blank") && <label>Принимаемые ответы<input value={(question.accepted_answers || []).join(", ")} onChange={(event) => updateQuestion(questionIndex, { accepted_answers: event.target.value.split(",").map((item) => item.trim()) })} placeholder="Smartis, Смартис" required /><small>Можно указать несколько вариантов через запятую. Регистр не учитывается.</small></label>}
+          </fieldset>
+        );
+      })}
+      <button className="secondary-button quiz-editor__add-question" type="button" onClick={() => onChange({ ...quiz, questions: [...quiz.questions, createQuizQuestion()] })}><Plus /> Добавить вопрос</button>
     </div>
   );
 }
@@ -4501,13 +4621,14 @@ function LearningCourseModal({
     return index < 0 ? Math.max(enrollment.lessons.length - 1, 0) : index;
   });
   const [questionIndex, setQuestionIndex] = useState(0);
-  const [answers, setAnswers] = useState<Record<number, number>>({});
+  const [answers, setAnswers] = useState<Record<number, QuizAnswer>>({});
   const [quizResult, setQuizResult] = useState<{ score: number; passed: boolean; attempts_left: number } | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const lesson = current.lessons[lessonIndex];
   const questions = lesson?.quiz_data?.questions || [];
-  const selectedAnswer = answers[questionIndex];
+  const activeQuestion = questions[questionIndex];
+  const selectedAnswer = answers[questionIndex] ?? (activeQuestion ? defaultQuizAnswer(activeQuestion) : undefined);
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
@@ -4552,7 +4673,7 @@ function LearningCourseModal({
   }
 
   async function submitQuiz() {
-    if (!lesson || Object.keys(answers).length !== questions.length) return;
+    if (!lesson || questions.some((question, index) => !quizAnswerComplete(question, answers[index] ?? defaultQuizAnswer(question)))) return;
     setSaving(true);
     setError("");
     try {
@@ -4563,7 +4684,7 @@ function LearningCourseModal({
         enrollment: CourseEnrollment;
       }>(`/my-learning/${current.id}/lessons/${lesson.id}/submit-quiz/`, token, {
         method: "POST",
-        body: JSON.stringify({ answers: questions.map((_, index) => answers[index]) }),
+        body: JSON.stringify({ answers: questions.map((question, index) => answers[index] ?? defaultQuizAnswer(question)) }),
       });
       setCurrent(result.enrollment);
       setQuizResult(result);
@@ -4631,12 +4752,12 @@ function LearningCourseModal({
                       <div className="quiz-preview__progress"><div><span>Вопрос {questionIndex + 1} из {questions.length}</span><strong>{lesson.attempts_count + 1} попытка</strong></div><span><i style={{ width: `${((questionIndex + 1) / Math.max(questions.length, 1)) * 100}%` }} /></span></div>
                       <p className="quiz-preview__intro">Проходной балл {lesson.quiz_data.passing_score}% · доступно попыток {lesson.quiz_data.max_attempts}</p>
                       <fieldset className="quiz-question">
-                        <legend>{questionIndex + 1}. {questions[questionIndex]?.prompt}</legend>
-                        <div className="quiz-options">{questions[questionIndex]?.options.map((option, index) => <label className={selectedAnswer === index ? "quiz-option quiz-option--chosen" : "quiz-option"} key={`${option.text}-${index}`}><input type="radio" name={`learning-question-${questionIndex}`} checked={selectedAnswer === index} onChange={() => setAnswers({ ...answers, [questionIndex]: index })} /><span>{option.text}</span></label>)}</div>
+                        <legend>{questionIndex + 1}. {activeQuestion?.prompt}</legend>
+                        {activeQuestion && <QuizAnswerFields question={activeQuestion} answer={selectedAnswer} onChange={(answer) => setAnswers({ ...answers, [questionIndex]: answer })} />}
                       </fieldset>
                       {questionIndex < questions.length - 1
-                        ? <button className="primary-button quiz-preview__submit" type="button" disabled={selectedAnswer === undefined} onClick={() => setQuestionIndex((value) => value + 1)}>Следующий вопрос <ChevronRight /></button>
-                        : <button className="primary-button quiz-preview__submit" type="button" disabled={selectedAnswer === undefined || saving} onClick={() => void submitQuiz()}>{saving ? "Проверяем…" : "Завершить тест"} <CheckCircle2 /></button>}
+                        ? <button className="primary-button quiz-preview__submit" type="button" disabled={!activeQuestion || !quizAnswerComplete(activeQuestion, selectedAnswer)} onClick={() => { if (activeQuestion && selectedAnswer !== undefined) setAnswers({ ...answers, [questionIndex]: selectedAnswer }); setQuestionIndex((value) => value + 1); }}>Следующий вопрос <ChevronRight /></button>
+                        : <button className="primary-button quiz-preview__submit" type="button" disabled={!activeQuestion || !quizAnswerComplete(activeQuestion, selectedAnswer) || saving} onClick={() => { if (activeQuestion && selectedAnswer !== undefined) setAnswers({ ...answers, [questionIndex]: selectedAnswer }); void submitQuiz(); }}>{saving ? "Проверяем…" : "Завершить тест"} <CheckCircle2 /></button>}
                     </div>
                   )
                 ) : lesson.lesson_type === "text" ? (

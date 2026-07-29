@@ -606,6 +606,127 @@ class CourseApiTests(TestCase):
             passed.data["enrollment"]["lessons"][0]["quiz_data"]["questions"][0]["options"][0],
         )
 
+    def test_advanced_quiz_types_are_scored_and_answers_are_hidden(self):
+        course = Course.objects.create(
+            title="Расширенный тест", author=self.admin, status=Course.Status.PUBLISHED
+        )
+        lesson = Lesson.objects.create(
+            course=course,
+            title="Семь типов вопросов",
+            lesson_type=Lesson.Type.QUIZ,
+            quiz_data={
+                "passing_score": 100,
+                "max_attempts": 2,
+                "questions": [
+                    {
+                        "type": "single_choice",
+                        "prompt": "Один ответ",
+                        "options": [
+                            {"text": "Нет", "correct": False},
+                            {"text": "Да", "correct": True},
+                        ],
+                    },
+                    {
+                        "type": "multiple_choice",
+                        "prompt": "Несколько ответов",
+                        "options": [
+                            {"text": "A", "correct": True},
+                            {"text": "B", "correct": False},
+                            {"text": "C", "correct": True},
+                        ],
+                    },
+                    {"type": "true_false", "prompt": "Smartis — LMS", "correct_boolean": True},
+                    {
+                        "type": "matching",
+                        "prompt": "Сопоставьте",
+                        "pairs": [
+                            {"left": "LMS", "right": "Обучение"},
+                            {"left": "HCM", "right": "Персонал"},
+                        ],
+                    },
+                    {
+                        "type": "ordering",
+                        "prompt": "Расставьте этапы",
+                        "options": [{"text": "Начало"}, {"text": "Середина"}, {"text": "Финиш"}],
+                    },
+                    {
+                        "type": "short_text",
+                        "prompt": "Введите бренд",
+                        "accepted_answers": ["Smartis", "Смартис"],
+                    },
+                    {
+                        "type": "fill_blank",
+                        "prompt": "HCM / LMS ___",
+                        "accepted_answers": ["Smartis"],
+                        "image_url": "https://example.test/question.png",
+                    },
+                ],
+            },
+        )
+        self.client.force_authenticate(self.admin)
+        assigned = self.client.post(
+            "/api/v1/my-learning/assign-course/",
+            {"user_id": self.employee.pk, "course_id": course.pk},
+            format="json",
+        )
+        enrollment_id = assigned.data["id"]
+
+        self.client.force_authenticate(self.employee)
+        enrollment = self.client.get("/api/v1/my-learning/").data["standalone"][0]
+        questions = enrollment["lessons"][0]["quiz_data"]["questions"]
+        self.assertEqual(questions[1]["type"], "multiple_choice")
+        self.assertNotIn("correct", questions[1]["options"][0])
+        self.assertNotIn("correct_boolean", questions[2])
+        self.assertEqual(questions[3]["left_items"], ["LMS", "HCM"])
+        self.assertNotIn("pairs", questions[3])
+        self.assertNotIn("accepted_answers", questions[5])
+        self.assertEqual(questions[6]["image_url"], "https://example.test/question.png")
+
+        response = self.client.post(
+            f"/api/v1/my-learning/{enrollment_id}/lessons/{lesson.pk}/submit-quiz/",
+            {
+                "answers": [
+                    1,
+                    [0, 2],
+                    True,
+                    ["Обучение", "Персонал"],
+                    ["Начало", "Середина", "Финиш"],
+                    " смартис ",
+                    "SMARTIS",
+                ],
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data["passed"])
+        self.assertEqual(response.data["score"], 100)
+
+        self.client.force_authenticate(self.admin)
+        exported = self.client.get(f"/api/v1/courses/{course.pk}/export-scorm/")
+        self.assertEqual(exported.status_code, 200)
+        with zipfile.ZipFile(io.BytesIO(b"".join(exported.streaming_content))) as archive:
+            player = archive.read("index.html").decode("utf-8")
+        self.assertIn('data-type="multiple_choice"', player)
+        self.assertIn('data-type="matching"', player)
+        self.assertIn('data-type="fill_blank"', player)
+
+    def test_advanced_quiz_validation_rejects_invalid_question(self):
+        self.client.force_authenticate(self.admin)
+        payload = self.course_payload("Некорректный тест")
+        payload["lessons"][0]["lesson_type"] = Lesson.Type.QUIZ
+        payload["lessons"][0]["quiz_data"] = {
+            "passing_score": 80,
+            "max_attempts": 3,
+            "questions": [{
+                "type": "fill_blank",
+                "prompt": "Здесь нет пропуска",
+                "accepted_answers": ["ответ"],
+            }],
+        }
+        response = self.client.post("/api/v1/courses/", payload, format="json")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("тремя подчёркиваниями", str(response.data))
+
     def test_employee_cannot_assign_learning(self):
         self.client.force_authenticate(self.employee)
         self.assertEqual(

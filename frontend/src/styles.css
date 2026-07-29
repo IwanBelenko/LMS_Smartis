@@ -890,6 +890,7 @@ td:first-child span { color: var(--muted); font-size: 0.8rem; }
 .quiz-preview__intro { padding: 12px 14px; border-left: 4px solid var(--brand); background: var(--surface-soft); color: var(--muted); }
 .quiz-question { margin: 0; padding: 18px; border: 1px solid var(--border); border-radius: 12px; }
 .quiz-question legend { padding: 0 7px; color: var(--foreground); font-size: 1rem; font-weight: 800; }
+.quiz-question__image { width: 100%; max-height: 360px; margin-bottom: 14px; border-radius: 9px; object-fit: contain; background: var(--surface-soft); }
 .quiz-options { display: grid; gap: 8px; }
 .quiz-option {
   min-height: 46px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px;
@@ -899,6 +900,24 @@ td:first-child span { color: var(--muted); font-size: 0.8rem; }
 .quiz-option input { width: 18px; min-height: 18px; padding: 0; accent-color: var(--brand); }
 .quiz-option--correct { border-color: var(--brand); background: color-mix(in srgb, var(--brand) 18%, var(--surface)); }
 .quiz-option--incorrect { border-color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, var(--surface)); }
+.quiz-boolean { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.quiz-boolean__button {
+  min-height: 48px; border: 1px solid var(--border); border-radius: 9px;
+  background: var(--surface); color: var(--foreground); font-weight: 700; cursor: pointer;
+}
+.quiz-boolean__button:hover, .quiz-boolean__button--active { border-color: var(--brand); background: color-mix(in srgb, var(--brand) 13%, var(--surface)); }
+.quiz-matching { display: grid; gap: 8px; }
+.quiz-matching > div { display: grid; grid-template-columns: minmax(120px, 1fr) 18px minmax(150px, 1fr); align-items: center; gap: 9px; }
+.quiz-matching > div > svg { width: 16px; color: var(--muted); }
+.quiz-matching select { min-width: 0; }
+.quiz-ordering { display: grid; gap: 7px; }
+.quiz-ordering > div {
+  min-height: 46px; padding: 7px 9px; border: 1px solid var(--border); border-radius: 8px;
+  display: grid; grid-template-columns: 24px minmax(0, 1fr) 30px 30px; align-items: center; gap: 7px; background: var(--surface);
+}
+.quiz-ordering > div > span { width: 24px; height: 24px; border-radius: 5px; display: grid; place-items: center; background: var(--surface-soft); color: var(--muted); font-size: .7rem; }
+.quiz-ordering .mini-button svg { width: 14px; }
+.quiz-text-answer { margin-top: 4px; }
 .quiz-preview__submit { justify-self: start; }
 .quiz-feedback {
   padding: 14px; border: 1px solid var(--border); border-radius: 12px;
@@ -923,10 +942,25 @@ td:first-child span { color: var(--muted); font-size: 0.8rem; }
 .quiz-editor__score input { padding-right: 28px; }
 .quiz-editor__score b { position: absolute; top: 11px; right: 12px; color: var(--muted); }
 .quiz-editor__question { margin: 0; padding: 16px; border: 1px solid var(--border); border-radius: 12px; display: grid; gap: 12px; }
-.quiz-editor__question-top { display: flex; align-items: center; justify-content: space-between; color: var(--brand); font-weight: 800; }
+.quiz-editor__question-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--brand); font-weight: 800; }
+.quiz-editor__question-top > div { display: flex; align-items: center; gap: 7px; }
+.quiz-editor__question-top select { min-height: 34px; padding: 5px 28px 5px 8px; font-size: .72rem; }
+.quiz-editor__image-url { padding: 10px 12px; border: 1px dashed var(--border); border-radius: 8px; background: var(--surface-soft); }
 .quiz-editor__options { display: grid; gap: 8px; }
 .quiz-editor__option { display: grid; grid-template-columns: 24px 1fr auto; align-items: center; gap: 8px; }
 .quiz-editor__correct { width: 18px; min-height: 18px; padding: 0; accent-color: var(--brand); }
+.quiz-editor__boolean { padding: 12px; border: 1px solid var(--border); border-radius: 8px; display: flex; align-items: center; gap: 18px; }
+.quiz-editor__boolean > span { margin-right: auto; color: var(--muted); font-size: .75rem; font-weight: 700; }
+.quiz-editor__boolean label { display: flex; grid-template-columns: none; align-items: center; gap: 7px; color: var(--foreground); }
+.quiz-editor__boolean input { width: 17px; min-height: 17px; padding: 0; accent-color: var(--brand); }
+.quiz-editor__pairs, .quiz-editor__ordering { display: grid; gap: 8px; }
+.quiz-editor__pairs > div { display: grid; grid-template-columns: minmax(0, 1fr) 18px minmax(0, 1fr) auto; align-items: center; gap: 8px; }
+.quiz-editor__pairs svg { width: 16px; color: var(--muted); }
+.quiz-editor__ordering > div { display: grid; grid-template-columns: 28px minmax(0, 1fr) repeat(3, auto); align-items: center; gap: 7px; }
+.quiz-editor__ordering > div > span { width: 26px; height: 26px; border-radius: 5px; display: grid; place-items: center; background: var(--surface-soft); color: var(--muted); font-size: .7rem; }
+.quiz-editor__ordering svg { width: 14px; }
+.quiz-editor__hint { color: var(--muted); font-size: .72rem; }
+.quiz-editor label small { color: var(--muted); font-size: .66rem; font-weight: 400; }
 .quiz-editor__add-option, .quiz-editor__add-question { justify-self: start; }
 .course-empty { grid-column: 1 / -1; }
 .empty {
@@ -2866,6 +2900,14 @@ button.vacancy-card { padding: 13px; display: grid; align-content: center; gap: 
 }
 
 @media (max-width: 620px) {
+  .quiz-matching > div, .quiz-editor__pairs > div { grid-template-columns: 1fr; }
+  .quiz-matching > div > svg, .quiz-editor__pairs svg { transform: rotate(90deg); justify-self: center; }
+  .quiz-editor__question-top { align-items: flex-start; flex-direction: column; }
+  .quiz-editor__question-top > div { width: 100%; }
+  .quiz-editor__question-top select { flex: 1; }
+  .quiz-editor__boolean { align-items: flex-start; flex-direction: column; gap: 9px; }
+  .quiz-editor__ordering > div { grid-template-columns: 28px minmax(0, 1fr) repeat(2, auto); }
+  .quiz-editor__ordering > div > .mini-button--danger { grid-column: 2 / -1; justify-self: end; }
   .employee-import-mode { grid-template-columns: 1fr; }
   .employee-import-effective-date { grid-template-columns: 1fr; }
   .employee-import-effective-date input { grid-column: 1; grid-row: auto; }

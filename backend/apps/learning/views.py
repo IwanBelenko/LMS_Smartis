@@ -31,6 +31,7 @@ from .models import (
     QuizAttempt,
 )
 from .permissions import IsCourseManagerOrReadOnly, IsLibraryManager
+from .quiz import answer_is_correct, answer_is_valid
 from .scorm import build_scorm_12_package, ensure_scorm_runtime_bridge, extract_scorm_package, inspect_scorm_package
 from .scorm_convert import convert_ispring_scorm_to_native, restore_ispring_images
 from .serializers import (
@@ -257,11 +258,10 @@ class MyLearningViewSet(viewsets.GenericViewSet):
             return Response({"detail": "Количество попыток исчерпано"}, status=400)
         correct = 0
         for question_index, question in enumerate(questions):
-            options = question.get("options", [])
             answer = answers[question_index]
-            if not isinstance(answer, int) or answer < 0 or answer >= len(options):
+            if not answer_is_valid(question, answer):
                 return Response({"detail": "Один из ответов некорректен"}, status=400)
-            correct += bool(options[answer].get("correct"))
+            correct += answer_is_correct(question, answer)
         score = round(correct / max(len(questions), 1) * 100)
         passing_score = quiz_data.get("passing_score", 80)
         passed = score >= passing_score

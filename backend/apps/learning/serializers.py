@@ -13,6 +13,7 @@ from .models import (
     LearningPathCourse,
     Lesson,
 )
+from .quiz import learner_question, validate_quiz_question
 
 
 def validate_library_placement(request, project, folder):
@@ -134,16 +135,7 @@ class LessonSerializer(serializers.ModelSerializer):
             quiz_data = data.get("quiz_data") or {}
             data["quiz_data"] = {
                 **quiz_data,
-                "questions": [
-                    {
-                        **question,
-                        "options": [
-                            {"text": option.get("text", "")}
-                            for option in question.get("options", [])
-                        ],
-                    }
-                    for question in quiz_data.get("questions", [])
-                ],
+                "questions": [learner_question(question) for question in quiz_data.get("questions", [])],
             }
         return data
 
@@ -190,13 +182,7 @@ class LessonSerializer(serializers.ModelSerializer):
             if not questions:
                 raise serializers.ValidationError({"quiz_data": "Добавьте хотя бы один вопрос"})
             for question in questions:
-                options = question.get("options", []) if isinstance(question, dict) else []
-                if not str(question.get("prompt", "")).strip() or len(options) < 2 or any(
-                    not str(option.get("text", "")).strip() for option in options if isinstance(option, dict)
-                ):
-                    raise serializers.ValidationError({"quiz_data": "У каждого вопроса должны быть текст и минимум два ответа"})
-                if sum(bool(option.get("correct")) for option in options if isinstance(option, dict)) != 1:
-                    raise serializers.ValidationError({"quiz_data": "Отметьте один правильный ответ для каждого вопроса"})
+                validate_quiz_question(question)
         return attrs
 
 
@@ -448,10 +434,7 @@ class CourseEnrollmentSerializer(serializers.ModelSerializer):
             progress = progress_by_lesson.get(lesson.pk)
             quiz_data = lesson.quiz_data if isinstance(lesson.quiz_data, dict) else {}
             safe_questions = [
-                {
-                    "prompt": question.get("prompt", ""),
-                    "options": [{"text": option.get("text", "")} for option in question.get("options", [])],
-                }
+                learner_question(question)
                 for question in quiz_data.get("questions", [])
                 if isinstance(question, dict)
             ]
