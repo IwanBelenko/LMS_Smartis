@@ -135,6 +135,34 @@ type EmployeeProfile = {
   monthly_bonus?: string | null;
   quarterly_bonus?: string | null;
 };
+type EmployeeImportField = { key: string; label: string; required: boolean };
+type EmployeeImportRow = {
+  row_number: number;
+  action: "create" | "update" | "error";
+  errors: Record<string, string[]>;
+  preview: {
+    full_name: string;
+    email: string;
+    employee_number: string;
+    department: string;
+    position: string;
+  };
+};
+type EmployeeImportReview = {
+  total: number;
+  create_count: number;
+  update_count: number;
+  error_count: number;
+  rows: EmployeeImportRow[];
+};
+type EmployeeImportPreview = {
+  filename: string;
+  headers: string[];
+  rows: Array<Record<string, string>>;
+  mapping: Record<string, string>;
+  fields: EmployeeImportField[];
+  review: EmployeeImportReview;
+};
 type CandidateStage = { id: number; name: string; position: number; is_terminal: boolean; candidates_count: number };
 type Candidate = {
   id: number;
@@ -2101,6 +2129,12 @@ function EmployeesView({ token, user }: { token: string; user: User }) {
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(emptyEmployeeForm);
+  const [showImport, setShowImport] = useState(false);
+  const [importData, setImportData] = useState<EmployeeImportPreview | null>(null);
+  const [importMapping, setImportMapping] = useState<Record<string, string>>({});
+  const [importReview, setImportReview] = useState<EmployeeImportReview | null>(null);
+  const [importBusy, setImportBusy] = useState(false);
+  const [importNotice, setImportNotice] = useState("");
 
   async function load() {
     try {
@@ -2178,6 +2212,68 @@ function EmployeesView({ token, user }: { token: string; user: User }) {
     }
   }
 
+  function openEmployeeImport() {
+    setError("");
+    setImportData(null);
+    setImportMapping({});
+    setImportReview(null);
+    setImportNotice("");
+    setShowImport(true);
+  }
+
+  async function uploadEmployeeImport(file: File) {
+    setImportBusy(true);
+    setError("");
+    setImportNotice("");
+    try {
+      const body = new FormData();
+      body.append("file", file);
+      const preview = await apiUpload<EmployeeImportPreview>("/employees/import/", token, body);
+      setImportData(preview);
+      setImportMapping(preview.mapping);
+      setImportReview(preview.review);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось прочитать файл");
+    } finally {
+      setImportBusy(false);
+    }
+  }
+
+  async function reviewEmployeeImport() {
+    if (!importData) return;
+    setImportBusy(true);
+    setError("");
+    try {
+      const review = await apiRequest<EmployeeImportReview>("/employees/import/", token, {
+        method: "POST",
+        body: JSON.stringify({ rows: importData.rows, mapping: importMapping, commit: false }),
+      });
+      setImportReview(review);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось проверить строки");
+    } finally {
+      setImportBusy(false);
+    }
+  }
+
+  async function commitEmployeeImport() {
+    if (!importData || !importReview || importReview.error_count) return;
+    setImportBusy(true);
+    setError("");
+    try {
+      const result = await apiRequest<{ total: number; created: number; updated: number }>("/employees/import/", token, {
+        method: "POST",
+        body: JSON.stringify({ rows: importData.rows, mapping: importMapping, commit: true }),
+      });
+      setImportNotice(`Импорт завершён: создано ${result.created}, обновлено ${result.updated}`);
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось импортировать сотрудников");
+    } finally {
+      setImportBusy(false);
+    }
+  }
+
   const visible = employees.filter((employee) =>
     `${employee.full_name} ${employee.email} ${employee.department_name || ""} ${employee.position_name || ""}`
       .toLowerCase()
@@ -2205,9 +2301,14 @@ function EmployeesView({ token, user }: { token: string; user: User }) {
         title="Сотрудники"
         subtitle="Единый реестр команды, должностей и развития"
         action={user.role !== "leader" ? (
-          <button className="primary-button" type="button" onClick={() => openEmployee()}>
-            <Plus /> Добавить сотрудника
-          </button>
+          <div className="page-actions">
+            <button className="secondary-button" type="button" onClick={openEmployeeImport}>
+              <Upload /> Импорт CSV/XLSX
+            </button>
+            <button className="primary-button" type="button" onClick={() => openEmployee()}>
+              <Plus /> Добавить сотрудника
+            </button>
+          </div>
         ) : undefined}
       />
       <HcmMetricCards summary={summary} />
@@ -2243,6 +2344,124 @@ function EmployeesView({ token, user }: { token: string; user: User }) {
         </div>
         {!visible.length && <div className="hcm-empty"><ContactRound /><p>Сотрудники не найдены</p></div>}
       </section>
+      {showImport && (
+        <div className="hcm-dialog-backdrop" onMouseDown={(event) => {
+          if (event.target === event.currentTarget && !importBusy) setShowImport(false);
+        }}>
+          <section className="hcm-dialog employee-import-dialog" role="dialog" aria-modal="true" aria-labelledby="employee-import-title">
+            <header>
+              <div>
+                <h2 id="employee-import-title">Импорт сотрудников</h2>
+                <p>Сначала проверим файл и сопоставление колонок — данные не изменятся без подтверждения</p>
+              </div>
+              <button className="icon-button" type="button" disabled={importBusy} onClick={() => setShowImport(false)} aria-label="Закрыть"><X /></button>
+            </header>
+            {!importData ? (
+              <label className={importBusy ? "employee-import-upload employee-import-upload--busy" : "employee-import-upload"}>
+                <Upload />
+                <strong>{importBusy ? "Читаем таблицу…" : "Выберите CSV или XLSX"}</strong>
+                <span>Первая строка должна содержать названия колонок · до 1000 сотрудников и 5 МБ</span>
+                <input
+                  type="file"
+                  accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                  disabled={importBusy}
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (file) void uploadEmployeeImport(file);
+                    event.target.value = "";
+                  }}
+                />
+              </label>
+            ) : importNotice ? (
+              <div className="employee-import-complete">
+                <CheckCircle2 />
+                <span className="eyebrow">Готово</span>
+                <h3>{importNotice}</h3>
+                <p>Реестр и кадровая история обновлены. Новым сотрудникам созданы учётные записи с приглашениями.</p>
+              </div>
+            ) : (
+              <>
+                <div className="employee-import-file">
+                  <FileText />
+                  <div><strong>{importData.filename}</strong><span>{importData.rows.length} строк · сопоставьте колонки перед импортом</span></div>
+                  <button className="text-button" type="button" onClick={() => {
+                    setImportData(null);
+                    setImportReview(null);
+                    setError("");
+                  }}>Заменить файл</button>
+                </div>
+                <section className="employee-import-mapping">
+                  <div className="section-heading"><div><h3>Сопоставление колонок</h3><p>ФИО можно передать одной колонкой либо отдельно именем и фамилией</p></div></div>
+                  <div>
+                    {importData.fields.map((field) => (
+                      <label key={field.key}>
+                        <span>{field.label}{field.required && <i>обязательно</i>}</span>
+                        <select
+                          value={importMapping[field.key] || ""}
+                          onChange={(event) => {
+                            setImportMapping({ ...importMapping, [field.key]: event.target.value });
+                            setImportReview(null);
+                          }}
+                        >
+                          <option value="">Не импортировать</option>
+                          {importData.headers.map((header) => <option key={header} value={header}>{header}</option>)}
+                        </select>
+                      </label>
+                    ))}
+                  </div>
+                </section>
+                {importReview && (
+                  <>
+                    <div className="employee-import-summary">
+                      <div><span>Всего строк</span><strong>{importReview.total}</strong></div>
+                      <div><span>Будет создано</span><strong>{importReview.create_count}</strong></div>
+                      <div><span>Будет обновлено</span><strong>{importReview.update_count}</strong></div>
+                      <div className={importReview.error_count ? "employee-import-summary__error" : ""}><span>С ошибками</span><strong>{importReview.error_count}</strong></div>
+                    </div>
+                    <div className="employee-import-table">
+                      <table>
+                        <thead><tr><th>Строка</th><th>Сотрудник</th><th>Отдел / должность</th><th>Результат</th></tr></thead>
+                        <tbody>
+                          {importReview.rows.map((row) => (
+                            <tr key={row.row_number}>
+                              <td>{row.row_number}</td>
+                              <td><strong>{row.preview.full_name || "Имя не определено"}</strong><span>{row.preview.employee_number || "Без номера"} · {row.preview.email || "Без email"}</span></td>
+                              <td><strong>{row.preview.department || "Без отдела"}</strong><span>{row.preview.position || "Должность не указана"}</span></td>
+                              <td>
+                                <span className={`employee-import-status employee-import-status--${row.action}`}>
+                                  {row.action === "create" ? "Создать" : row.action === "update" ? "Обновить" : "Ошибка"}
+                                </span>
+                                {row.action === "error" && <small>{Object.values(row.errors).flat().join(" · ")}</small>}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                )}
+              </>
+            )}
+            {error && <p className="form-error">{error}</p>}
+            <footer className="employee-import-dialog__footer">
+              {importNotice ? (
+                <button className="primary-button" type="button" onClick={() => setShowImport(false)}>Готово</button>
+              ) : importData ? (
+                <>
+                  <button className="secondary-button" type="button" disabled={importBusy} onClick={() => void reviewEmployeeImport()}>
+                    <RefreshCw /> {importReview ? "Проверить ещё раз" : "Проверить строки"}
+                  </button>
+                  <button className="primary-button" type="button" disabled={importBusy || !importReview || importReview.error_count > 0} onClick={() => void commitEmployeeImport()}>
+                    {importBusy ? "Импортируем…" : `Импортировать ${importReview?.total || 0}`}
+                  </button>
+                </>
+              ) : (
+                <button className="secondary-button" type="button" disabled={importBusy} onClick={() => setShowImport(false)}>Отмена</button>
+              )}
+            </footer>
+          </section>
+        </div>
+      )}
       {showForm && (
         <div className="hcm-dialog-backdrop" onMouseDown={(event) => {
           if (event.target === event.currentTarget) setShowForm(false);

@@ -70,6 +70,7 @@ from .serializers import (
     ProductUpdateSerializer,
 )
 from .services import analyze_daily_transcript, analyze_product_update, assign_onboarding
+from .employee_import import commit_employee_import, parse_employee_import_file, preview_employee_import
 
 
 def is_product_update_admin(user):
@@ -790,6 +791,24 @@ class EmployeeListCreateView(generics.ListCreateAPIView):
             EmployeeProfileSerializer(serializer.instance, context={"request": request}).data,
             status=201,
         )
+
+
+class EmployeeImportView(APIView):
+    permission_classes = [IsHcmUser]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+    def post(self, request):
+        if request.content_type and request.content_type.startswith("multipart/"):
+            parsed = parse_employee_import_file(request.FILES.get("file"))
+            review = preview_employee_import(parsed["rows"], parsed["mapping"], request)
+            parsed["review"] = {key: value for key, value in review.items() if not key.startswith("_")}
+            return Response(parsed)
+        rows = request.data.get("rows", [])
+        mapping = request.data.get("mapping", {})
+        if request.data.get("commit"):
+            return Response(commit_employee_import(rows, mapping, request), status=status.HTTP_201_CREATED)
+        review = preview_employee_import(rows, mapping, request)
+        return Response({key: value for key, value in review.items() if not key.startswith("_")})
 
 
 class EmployeeDetailView(generics.RetrieveUpdateAPIView):

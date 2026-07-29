@@ -1,5 +1,7 @@
 from datetime import date, timedelta
+from io import BytesIO
 import tempfile
+from zipfile import ZIP_DEFLATED, ZipFile
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
@@ -176,6 +178,117 @@ class PeopleApiTests(TestCase):
         self.assertEqual(updated.json()["grade"], "Middle")
         self.assertEqual(updated.json()["development_progress"], 55)
         self.assertFalse(User.objects.get(email="new.employee@test.local").has_usable_password())
+
+    def test_hr_previews_and_commits_csv_employee_import(self):
+        self.client.force_authenticate(self.hr)
+        content = (
+            "ФИО;Корпоративная почта;Табельный номер;Отдел;Должность;Грейд;Дата выхода;Статус\n"
+            "Иванова Анна;employee@test.local;SM-101;Аналитика;Аналитик;Middle;01.02.2024;Работает\n"
+            "Петров Иван;ivan.petrov@smartis.bi;SM-300;Продукт;Аналитик;Junior;15.07.2026;Испытательный срок\n"
+        )
+        preview = self.client.post(
+            "/api/v1/employees/import/",
+            {"file": SimpleUploadedFile("employees.csv", content.encode("utf-8"), content_type="text/csv")},
+            format="multipart",
+        )
+        self.assertEqual(preview.status_code, 200)
+        payload = preview.json()
+        self.assertEqual(payload["review"]["create_count"], 1)
+        self.assertEqual(payload["review"]["update_count"], 1)
+        self.assertEqual(payload["review"]["error_count"], 0)
+        committed = self.client.post(
+            "/api/v1/employees/import/",
+            {"rows": payload["rows"], "mapping": payload["mapping"], "commit": True},
+            format="json",
+        )
+        self.assertEqual(committed.status_code, 201)
+        self.assertEqual(committed.json()["created"], 1)
+        self.assertEqual(committed.json()["updated"], 1)
+        imported = EmployeeProfile.objects.get(employee_number="SM-300")
+        self.assertEqual(imported.user.last_name, "Петров")
+        self.assertEqual(imported.user.department, self.other_department)
+        self.assertEqual(imported.status, EmployeeProfile.Status.PROBATION)
+        self.assertFalse(imported.user.has_usable_password())
+        self.profile.refresh_from_db()
+        self.assertEqual(self.profile.grade, "Middle")
+        self.assertTrue(EmploymentEvent.objects.filter(employee=imported, event_type=EmploymentEvent.Type.HIRED).exists())
+
+    def test_employee_import_reports_unknown_directory_values_without_changes(self):
+        self.client.force_authenticate(self.hr)
+        content = (
+            "ФИО,Email,Табельный номер,Отдел,Должность\n"
+            "Тестов Тест,test.import@smartis.bi,SM-301,Неизвестный отдел,Неизвестная должность\n"
+        )
+        preview = self.client.post(
+            "/api/v1/employees/import/",
+            {"file": SimpleUploadedFile("employees.csv", content.encode("utf-8"), content_type="text/csv")},
+            format="multipart",
+        )
+        self.assertEqual(preview.status_code, 200)
+        self.assertEqual(preview.json()["review"]["error_count"], 1)
+        committed = self.client.post(
+            "/api/v1/employees/import/",
+            {
+                "rows": preview.json()["rows"],
+                "mapping": preview.json()["mapping"],
+                "commit": True,
+            },
+            format="json",
+        )
+        self.assertEqual(committed.status_code, 400)
+        self.assertFalse(EmployeeProfile.objects.filter(employee_number="SM-301").exists())
+
+    def test_hr_can_preview_xlsx_employee_import(self):
+        worksheet = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+          <sheetData>
+            <row r="1">
+              <c r="A1" t="inlineStr"><is><t>ФИО</t></is></c>
+              <c r="B1" t="inlineStr"><is><t>Email</t></is></c>
+              <c r="C1" t="inlineStr"><is><t>Табельный номер</t></is></c>
+            </row>
+            <row r="2">
+              <c r="A2" t="inlineStr"><is><t>Сидорова Елена</t></is></c>
+              <c r="B2" t="inlineStr"><is><t>elena.sidorova@smartis.bi</t></is></c>
+              <c r="C2" t="inlineStr"><is><t>SM-302</t></is></c>
+            </row>
+          </sheetData>
+        </worksheet>"""
+        output = BytesIO()
+        with ZipFile(output, "w", ZIP_DEFLATED) as archive:
+            archive.writestr("xl/worksheets/sheet1.xml", worksheet)
+        self.client.force_authenticate(self.hr)
+        response = self.client.post(
+            "/api/v1/employees/import/",
+            {
+                "file": SimpleUploadedFile(
+                    "employees.xlsx",
+                    output.getvalue(),
+                    content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                ),
+            },
+            format="multipart",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["review"]["create_count"], 1)
+        self.assertEqual(response.json()["review"]["error_count"], 0)
+
+    def test_employee_import_detects_duplicates_inside_file(self):
+        self.client.force_authenticate(self.hr)
+        content = (
+            "ФИО;Email;Табельный номер\n"
+            "Первая Запись;duplicate@smartis.bi;SM-400\n"
+            "Вторая Запись;duplicate@smartis.bi;SM-401\n"
+        )
+        response = self.client.post(
+            "/api/v1/employees/import/",
+            {"file": SimpleUploadedFile("duplicates.csv", content.encode("utf-8"), content_type="text/csv")},
+            format="multipart",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["review"]["create_count"], 1)
+        self.assertEqual(response.json()["review"]["error_count"], 1)
+        self.assertIn("Дубликат строки", response.json()["review"]["rows"][1]["errors"]["duplicate"][0])
 
     def test_admin_moves_candidate_to_another_stage(self):
         next_stage = CandidateStage.objects.create(name="Интервью", position=2)
