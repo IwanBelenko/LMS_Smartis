@@ -3,6 +3,7 @@ import { TextAlign } from "@tiptap/extension-text-align";
 import { TextStyleKit } from "@tiptap/extension-text-style";
 import Image from "@tiptap/extension-image";
 import DragHandle from "@tiptap/extension-drag-handle-react";
+import { Node as TiptapNode } from "@tiptap/core";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import {
@@ -12,11 +13,13 @@ import {
   Bold,
   Braces,
   Copy,
+  Columns2,
   Eraser,
   Heading1,
   Heading2,
   Heading3,
   Highlighter,
+  ImagePlus,
   Italic,
   Link2,
   List,
@@ -24,9 +27,11 @@ import {
   GripVertical,
   MoreHorizontal,
   Pilcrow,
+  Plus,
   Quote,
   Redo2,
   Strikethrough,
+  Table2,
   Trash2,
   Undo2,
 } from "lucide-react";
@@ -42,7 +47,49 @@ type RichTextEditorProps = {
   documentId?: string;
   showToolbar?: boolean;
   onFocus?: () => void;
+  onUploadImage?: (file: File) => Promise<string>;
 };
+
+const TableCell = TiptapNode.create({
+  name: "tableCell",
+  content: "block+",
+  isolating: true,
+  parseHTML: () => [{ tag: "td" }, { tag: "th" }],
+  renderHTML: () => ["td", 0],
+});
+
+const TableRow = TiptapNode.create({
+  name: "tableRow",
+  content: "tableCell+",
+  parseHTML: () => [{ tag: "tr" }],
+  renderHTML: () => ["tr", 0],
+});
+
+const EditableTable = TiptapNode.create({
+  name: "editableTable",
+  group: "block",
+  content: "tableRow+",
+  isolating: true,
+  parseHTML: () => [{ tag: "table[data-longread-table]" }],
+  renderHTML: () => ["table", { "data-longread-table": "true" }, ["tbody", 0]],
+});
+
+const Column = TiptapNode.create({
+  name: "column",
+  content: "block+",
+  isolating: true,
+  parseHTML: () => [{ tag: "div[data-longread-column]" }],
+  renderHTML: () => ["div", { "data-longread-column": "true" }, 0],
+});
+
+const Columns = TiptapNode.create({
+  name: "columns",
+  group: "block",
+  content: "column{2,3}",
+  isolating: true,
+  parseHTML: () => [{ tag: "div[data-longread-columns]" }],
+  renderHTML: () => ["div", { "data-longread-columns": "true" }, 0],
+});
 
 export default function RichTextEditor({
   value,
@@ -53,10 +100,14 @@ export default function RichTextEditor({
   documentId,
   showToolbar = true,
   onFocus,
+  onUploadImage,
 }: RichTextEditorProps) {
   const [highlightColor, setHighlightColor] = useState("#fff1a8");
   const [blockMenuOpen, setBlockMenuOpen] = useState(false);
   const [activeNodePos, setActiveNodePos] = useState<number | null>(null);
+  const [insertMenuOpen, setInsertMenuOpen] = useState(false);
+  const [imageUploading, setImageUploading] = useState(false);
+  const [insertError, setInsertError] = useState("");
   const blockMenuOpenRef = useRef(false);
   const [, refreshSelection] = useState(0);
   const editorRootRef = useRef<HTMLDivElement>(null);
@@ -70,6 +121,11 @@ export default function RichTextEditor({
     extensions: [
       StarterKit,
       Image.configure({ inline: false, allowBase64: false }),
+      TableCell,
+      TableRow,
+      EditableTable,
+      Column,
+      Columns,
       Highlight.configure({ multicolor: true }),
       TextStyleKit,
       TextAlign.configure({ types: ["heading", "paragraph"] }),
@@ -262,6 +318,79 @@ export default function RichTextEditor({
     const { from, node } = currentTopLevelBlock();
     currentEditor.chain().focus().deleteRange({ from, to: from + node.nodeSize }).run();
     setBlockMenuOpen(false);
+  }
+
+  function insertAfterCurrent(content: Parameters<typeof currentEditor.commands.insertContentAt>[1]) {
+    const { from, node } = currentTopLevelBlock();
+    const position = Math.min(from + node.nodeSize, currentEditor.state.doc.content.size);
+    currentEditor.chain().focus().insertContentAt(position, content).run();
+    setInsertMenuOpen(false);
+  }
+
+  function insertText(type: "paragraph" | "heading" | "bulletList" | "blockquote" | "codeBlock") {
+    if (type === "heading") {
+      insertAfterCurrent({ type: "heading", attrs: { level: 2 }, content: [{ type: "text", text: "Новый заголовок" }] });
+      return;
+    }
+    if (type === "bulletList") {
+      insertAfterCurrent({
+        type: "bulletList",
+        content: [{ type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "Новый пункт" }] }] }],
+      });
+      return;
+    }
+    if (type === "blockquote") {
+      insertAfterCurrent({
+        type: "blockquote",
+        content: [{ type: "paragraph", content: [{ type: "text", text: "Новая цитата" }] }],
+      });
+      return;
+    }
+    const text = type === "codeBlock" ? "// Фрагмент кода" : "";
+    insertAfterCurrent({
+      type,
+      content: [{ type: "text", text }].filter(() => Boolean(text)),
+    });
+  }
+
+  function insertColumns() {
+    insertAfterCurrent({
+      type: "columns",
+      content: [
+        { type: "column", content: [{ type: "paragraph", content: [{ type: "text", text: "Первая колонка" }] }] },
+        { type: "column", content: [{ type: "paragraph", content: [{ type: "text", text: "Вторая колонка" }] }] },
+      ],
+    });
+  }
+
+  function insertTable() {
+    insertAfterCurrent({
+      type: "editableTable",
+      content: Array.from({ length: 3 }, (_, row) => ({
+        type: "tableRow",
+        content: Array.from({ length: 3 }, (_, column) => ({
+          type: "tableCell",
+          content: [{
+            type: "paragraph",
+            content: row === 0 ? [{ type: "text", text: `Столбец ${column + 1}` }] : [],
+          }],
+        })),
+      })),
+    });
+  }
+
+  async function uploadAndInsertImage(file: File) {
+    if (!onUploadImage) return;
+    setInsertError("");
+    setImageUploading(true);
+    try {
+      const url = await onUploadImage(file);
+      insertAfterCurrent({ type: "image", attrs: { src: url, alt: file.name, title: file.name } });
+    } catch (reason) {
+      setInsertError(reason instanceof Error ? reason.message : "Не удалось загрузить изображение");
+    } finally {
+      setImageUploading(false);
+    }
   }
 
   async function copyBlockLink() {
@@ -482,6 +611,49 @@ export default function RichTextEditor({
         </DragHandle>
       )}
       <EditorContent editor={editor} />
+      {variant === "longread" && showToolbar && (
+        <div className="longread-insert-shell">
+          {insertMenuOpen && (
+            <div className="longread-insert-menu" role="menu">
+              <span>Добавить в лонгрид</span>
+              <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => insertText("heading")}><Heading2 /> Заголовок</button>
+              <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => insertText("bulletList")}><List /> Список</button>
+              <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => insertText("blockquote")}><Quote /> Цитата</button>
+              <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => insertText("codeBlock")}><Braces /> Код</button>
+            </div>
+          )}
+          <div className="longread-insert-bar" role="toolbar" aria-label="Добавить элемент">
+            <button
+              className={insertMenuOpen ? "longread-insert-plus longread-insert-plus--active" : "longread-insert-plus"}
+              type="button"
+              title="Все элементы"
+              aria-label="Все элементы"
+              aria-expanded={insertMenuOpen}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => setInsertMenuOpen((current) => !current)}
+            >
+              <Plus />
+            </button>
+            <button type="button" title="Добавить текст" aria-label="Добавить текст" onMouseDown={(event) => event.preventDefault()} onClick={() => insertText("paragraph")}><span>Aa</span></button>
+            <label className={imageUploading ? "longread-insert-file longread-insert-file--busy" : "longread-insert-file"} title="Добавить изображение">
+              <ImagePlus />
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+                disabled={imageUploading}
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) void uploadAndInsertImage(file);
+                  event.currentTarget.value = "";
+                }}
+              />
+            </label>
+            <button type="button" title="Добавить две колонки" aria-label="Добавить две колонки" onMouseDown={(event) => event.preventDefault()} onClick={insertColumns}><Columns2 /></button>
+            <button type="button" title="Добавить таблицу" aria-label="Добавить таблицу" onMouseDown={(event) => event.preventDefault()} onClick={insertTable}><Table2 /></button>
+          </div>
+          {insertError && <p className="longread-insert-error">{insertError}</p>}
+        </div>
+      )}
     </div>
   );
 }

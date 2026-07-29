@@ -3424,3 +3424,155 @@ button.vacancy-card { padding: 13px; display: grid; align-content: center; gap: 
   .course-grid--list .course-card__body { grid-template-columns: minmax(180px, 1fr) minmax(210px, 270px); }
   .course-grid--list .course-card__body .course-meta { display: none; }
 }
+
+/* iSpring-style longread inspector and insertion palette */
+@media (min-width: 1181px) {
+  .longread-workspace { grid-template-columns: 210px minmax(720px, 1fr) 278px; }
+  .longread-workspace--settings-closed { grid-template-columns: 210px minmax(720px, 1fr); }
+  .longread-canvas-wrap { padding: 18px 20px 26px; }
+  .longread-page { width: min(1080px, 100%); }
+  .longread-page--document { padding-right: clamp(42px, 4vw, 68px); padding-left: clamp(42px, 4vw, 68px); }
+}
+
+.longread-settings {
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.longread-settings-heading {
+  min-height: 72px; padding: 18px 20px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+}
+.longread-settings-heading h2 { margin: 0; font-size: 1.18rem; font-weight: 520; letter-spacing: -.015em; }
+.longread-settings-heading button {
+  width: 34px; height: 34px; padding: 0; border: 0; border-radius: 9px; display: grid; place-items: center;
+  background: transparent; color: var(--muted); cursor: pointer;
+}
+.longread-settings-heading button:hover { background: var(--surface-soft); color: var(--foreground); }
+.longread-settings-heading svg { width: 22px; height: 22px; }
+.longread-settings__body,
+.longread-settings--with-editor .longread-settings__body {
+  padding: 0; display: block;
+}
+.longread-inspector-title,
+.longread-inspector-section {
+  margin: 0; padding: 22px 20px; border-bottom: 1px solid var(--border);
+}
+.longread-inspector-title { font-size: .92rem; font-weight: 650; }
+.longread-inspector-section { display: grid; gap: 16px; }
+.longread-inspector-section h3 {
+  margin: 0 0 4px; color: var(--foreground); font-size: .94rem; font-weight: 650;
+}
+.longread-inspector-grid { display: grid; grid-template-columns: minmax(0, 1fr) 78px; gap: 10px; }
+.longread-inspector-grid label,
+.longread-inspector-section > label {
+  min-width: 0; gap: 7px; color: var(--muted); font-size: .72rem;
+}
+.longread-inspector-grid input,
+.longread-inspector-grid select {
+  min-height: 42px; padding: 8px 10px; border-radius: 10px; background: var(--surface);
+}
+.longread-inspector-section .check-field {
+  min-height: 38px; padding: 8px 0; color: var(--foreground); font-size: .76rem;
+}
+.longread-inspector-label { color: var(--muted); font-size: .74rem; }
+.longread-toolbar-dock { border: 0; background: transparent; }
+.longread-settings--with-editor .rich-editor__toolbar--longread {
+  padding: 0; border: 0; display: flex; flex-direction: row; flex-wrap: wrap; gap: 8px;
+  background: transparent;
+}
+.longread-settings--with-editor .rich-editor__toolbar--longread .editor-toolbar-title { display: none; }
+.longread-settings--with-editor .rich-editor__toolbar--longread .editor-select {
+  width: 100%; min-height: 42px; border-radius: 10px; background: var(--surface);
+}
+.longread-settings--with-editor .rich-editor__toolbar--longread .editor-tools-group {
+  width: 100%; min-height: 44px; padding: 4px; border: 1px solid var(--border); border-radius: 12px;
+  display: flex; justify-content: space-around; gap: 2px; background: var(--surface);
+}
+.longread-settings--with-editor .rich-editor__toolbar--longread .editor-tool {
+  flex: 1 1 34px; min-width: 34px; min-height: 34px; border-radius: 8px;
+}
+.longread-settings--with-editor .rich-editor__toolbar--longread .editor-tool--active {
+  background: var(--surface-soft); color: var(--foreground);
+}
+.longread-settings--with-editor .rich-editor__toolbar--longread .editor-color,
+.longread-settings--with-editor .rich-editor__toolbar--longread .editor-highlight-tools {
+  min-height: 42px; flex: 1 1 46%; border: 1px solid var(--border); border-radius: 10px;
+}
+.longread-settings-open {
+  min-height: 38px; padding: 8px 12px; position: sticky; top: 82px; z-index: 8; justify-self: end;
+  border: 1px solid var(--border); border-radius: 10px; display: inline-flex; align-items: center; gap: 7px;
+  background: color-mix(in srgb, var(--surface) 92%, transparent); color: var(--foreground); box-shadow: 0 8px 24px rgba(21, 28, 18, .1);
+  backdrop-filter: blur(14px); cursor: pointer;
+}
+.longread-settings-open svg { width: 17px; height: 17px; }
+
+.longread-insert-shell {
+  width: fit-content; margin: -78px auto 18px; position: sticky; bottom: 18px; z-index: 16;
+  display: grid; justify-items: center; gap: 8px; pointer-events: none;
+}
+.longread-insert-bar {
+  min-height: 58px; padding: 7px 11px; border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  border-radius: 999px; display: flex; align-items: center; gap: 5px;
+  background: color-mix(in srgb, var(--surface) 94%, transparent); box-shadow: 0 14px 40px rgba(25, 31, 22, .16);
+  backdrop-filter: blur(18px) saturate(135%); pointer-events: auto;
+}
+:root[data-theme="dark"] .longread-insert-bar { box-shadow: 0 16px 38px rgba(0, 0, 0, .32); }
+.longread-insert-bar > button,
+.longread-insert-file {
+  width: 44px; height: 44px; padding: 0; border: 0; border-radius: 50%; display: grid; place-items: center;
+  background: transparent; color: var(--foreground); cursor: pointer;
+}
+.longread-insert-bar > button:hover,
+.longread-insert-file:hover { background: var(--surface-soft); }
+.longread-insert-bar > button > span { font-size: 1.08rem; letter-spacing: -.06em; }
+.longread-insert-bar svg { width: 22px; height: 22px; }
+.longread-insert-plus {
+  background: color-mix(in srgb, var(--foreground) 92%, transparent) !important; color: var(--surface) !important;
+}
+.longread-insert-plus--active svg { transform: rotate(45deg); }
+.longread-insert-plus svg { transition: transform .16s ease; }
+.longread-insert-file input { display: none; }
+.longread-insert-file--busy { opacity: .5; cursor: wait; }
+.longread-insert-menu {
+  width: 222px; padding: 8px; border: 1px solid var(--border); border-radius: 14px; display: grid; gap: 3px;
+  background: color-mix(in srgb, var(--surface) 96%, transparent); box-shadow: 0 18px 48px rgba(25, 31, 22, .18);
+  backdrop-filter: blur(18px); pointer-events: auto;
+}
+.longread-insert-menu > span {
+  padding: 6px 8px; color: var(--muted); font-size: .65rem; font-weight: 750; letter-spacing: .06em; text-transform: uppercase;
+}
+.longread-insert-menu button {
+  min-height: 38px; padding: 7px 9px; border: 0; border-radius: 9px; display: flex; align-items: center; gap: 9px;
+  background: transparent; color: var(--foreground); font: inherit; font-size: .8rem; cursor: pointer;
+}
+.longread-insert-menu button:hover { background: var(--surface-soft); }
+.longread-insert-menu svg { width: 17px; height: 17px; color: var(--muted); }
+.longread-insert-error {
+  max-width: 280px; padding: 7px 10px; border-radius: 8px; background: color-mix(in srgb, var(--danger) 12%, var(--surface));
+  color: var(--danger); font-size: .72rem; pointer-events: auto;
+}
+
+.rich-editor__content [data-longread-columns] {
+  margin: 1.4em 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px;
+}
+.rich-editor__content [data-longread-column] {
+  min-width: 0; padding: 18px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-soft);
+}
+.rich-editor__content table[data-longread-table] {
+  width: 100%; margin: 1.4em 0; border-collapse: separate; border-spacing: 0; overflow: hidden;
+  border: 1px solid var(--border); border-radius: 10px;
+}
+.rich-editor__content table[data-longread-table] td {
+  min-width: 100px; padding: 10px 12px; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); vertical-align: top;
+}
+.rich-editor__content table[data-longread-table] tr:first-child td {
+  background: var(--surface-soft); font-weight: 650;
+}
+.rich-editor__content table[data-longread-table] td:last-child { border-right: 0; }
+.rich-editor__content table[data-longread-table] tr:last-child td { border-bottom: 0; }
+.rich-editor__content table[data-longread-table] p { margin: 0; }
+
+@media (max-width: 760px) {
+  .rich-editor__content [data-longread-columns] { grid-template-columns: 1fr; gap: 10px; }
+  .longread-insert-bar { transform: scale(.9); transform-origin: bottom center; }
+}

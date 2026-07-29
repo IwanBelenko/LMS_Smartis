@@ -5120,6 +5120,7 @@ function CoursesView({ token, user }: { token: string; user: User }) {
     () => (localStorage.getItem("smartis-course-view") as "cards" | "compact" | "list") || "cards",
   );
   const [longreadToolbarDock, setLongreadToolbarDock] = useState<HTMLDivElement | null>(null);
+  const [settingsVisible, setSettingsVisible] = useState(true);
   const [draggedLessonIndex, setDraggedLessonIndex] = useState<number | null>(null);
   const scormFrameRef = useRef<HTMLIFrameElement>(null);
 
@@ -5684,6 +5685,12 @@ function CoursesView({ token, user }: { token: string; user: User }) {
             showToolbar={activeSection === lesson.client_key}
             toolbarContainer={activeSection === lesson.client_key ? longreadToolbarDock : null}
             onFocus={() => setActiveSection(lesson.client_key)}
+            onUploadImage={async (file) => {
+              const body = new FormData();
+              body.append("image", file);
+              const uploaded = await apiUpload<{ url: string }>("/courses/question-image/", token, body);
+              return uploaded.url;
+            }}
           />
         </Suspense>
       );
@@ -5814,7 +5821,7 @@ function CoursesView({ token, user }: { token: string; user: User }) {
         {error && <p className="form-error longread-message">{error}</p>}
         {notice && <p className="form-notice longread-message"><CheckCircle2 />{notice}</p>}
 
-        <div className="longread-workspace">
+        <div className={settingsVisible ? "longread-workspace" : "longread-workspace longread-workspace--settings-closed"}>
           <aside className="longread-outline">
             <div className="longread-panel-heading">
               <div><span>Навигация</span><strong>Оглавление</strong></div>
@@ -5863,6 +5870,11 @@ function CoursesView({ token, user }: { token: string; user: User }) {
           </aside>
 
           <main className="longread-canvas-wrap">
+            {!settingsVisible && (
+              <button className="longread-settings-open" type="button" onClick={() => setSettingsVisible(true)}>
+                <Settings2 /> Настройки
+              </button>
+            )}
             {activeSection === "cover" ? (
               <article className={coverStyle === "custom" && coverPreview ? "longread-page longread-page--cover longread-page--custom-cover" : "longread-page longread-page--cover"}>
                 {coverStyle === "custom" && coverPreview && <img className="longread-cover-image" src={coverPreview} alt="" />}
@@ -5940,13 +5952,14 @@ function CoursesView({ token, user }: { token: string; user: User }) {
             )}
           </main>
 
-          <aside className={activeLesson?.lesson_type === "text" ? "longread-settings longread-settings--with-editor" : "longread-settings"}>
-            <div className="longread-panel-heading">
-              <div><span>Настройки</span><strong>{activeSection === "cover" ? "Курс" : "Элемент"}</strong></div>
-              <Settings2 />
+          {settingsVisible && <aside className={activeLesson?.lesson_type === "text" ? "longread-settings longread-settings--with-editor" : "longread-settings"}>
+            <div className="longread-settings-heading">
+              <h2>Настройки</h2>
+              <button type="button" aria-label="Закрыть настройки" title="Закрыть настройки" onClick={() => setSettingsVisible(false)}><X /></button>
             </div>
             {activeSection === "cover" ? (
               <div className="longread-settings__body">
+                <h3 className="longread-inspector-title">Обложка</h3>
                 <div className="longread-cover-setting">
                   <span className="field-label">Оформление</span>
                   <div className="longread-cover-toggle">
@@ -5988,18 +6001,29 @@ function CoursesView({ token, user }: { token: string; user: User }) {
               </div>
             ) : activeLesson ? (
               <div className="longread-settings__body">
-                <label>Тип элемента<select disabled={activeLesson.lesson_type === "scorm"} value={activeLesson.lesson_type} onChange={(event) => updateLesson(activeLessonIndex, { lesson_type: event.target.value as Lesson["lesson_type"] })}>
-                  {Object.entries(lessonTypeLabels).filter(([value]) => value !== "scorm" || activeLesson.lesson_type === "scorm").map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-                </select></label>
-                <label>Время, мин<input type="number" min="1" value={activeLesson.duration_minutes} onChange={(event) => updateLesson(activeLessonIndex, { duration_minutes: Number(event.target.value) })} required /></label>
-                <label className="check-field"><input type="checkbox" checked={activeLesson.is_required} onChange={(event) => updateLesson(activeLessonIndex, { is_required: event.target.checked })} /> Обязательный элемент</label>
-                {editingCourse?.source_format !== "scorm_12" && activeLesson.lesson_type !== "text" && (
-                  <button className="longread-delete" type="button" onClick={() => removeLesson(activeLessonIndex)}><Trash2 /> Удалить элемент</button>
+                <section className="longread-inspector-section">
+                  <h3>Блок</h3>
+                  <div className="longread-inspector-grid">
+                    <label>Тип элемента<select disabled={activeLesson.lesson_type === "scorm"} value={activeLesson.lesson_type} onChange={(event) => updateLesson(activeLessonIndex, { lesson_type: event.target.value as Lesson["lesson_type"] })}>
+                      {Object.entries(lessonTypeLabels).filter(([value]) => value !== "scorm" || activeLesson.lesson_type === "scorm").map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                    </select></label>
+                    <label>Время, мин<input type="number" min="1" value={activeLesson.duration_minutes} onChange={(event) => updateLesson(activeLessonIndex, { duration_minutes: Number(event.target.value) })} required /></label>
+                  </div>
+                  <label className="check-field"><input type="checkbox" checked={activeLesson.is_required} onChange={(event) => updateLesson(activeLessonIndex, { is_required: event.target.checked })} /> Обязательный элемент</label>
+                  {editingCourse?.source_format !== "scorm_12" && activeLesson.lesson_type !== "text" && (
+                    <button className="longread-delete" type="button" onClick={() => removeLesson(activeLessonIndex)}><Trash2 /> Удалить элемент</button>
+                  )}
+                </section>
+                {activeLesson.lesson_type === "text" && (
+                  <section className="longread-inspector-section longread-inspector-section--text">
+                    <h3>Текст</h3>
+                    <span className="longread-inspector-label">Стиль текста</span>
+                    <div className="longread-toolbar-dock" ref={setLongreadToolbarDock} />
+                  </section>
                 )}
               </div>
             ) : null}
-            {activeLesson?.lesson_type === "text" && <div className="longread-toolbar-dock" ref={setLongreadToolbarDock} />}
-          </aside>
+          </aside>}
         </div>
         {previewModal}
       </form>
