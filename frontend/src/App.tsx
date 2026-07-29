@@ -4250,6 +4250,23 @@ function chapterCountLabel(count: number) {
   return `${count} ${word}`;
 }
 
+type LongreadHeading = {
+  id: string;
+  level: 1 | 2 | 3;
+  text: string;
+};
+
+function extractLongreadHeadings(lesson: Lesson): LongreadHeading[] {
+  if (lesson.lesson_type !== "text" || !lesson.content || typeof DOMParser === "undefined") return [];
+  const document = new DOMParser().parseFromString(lesson.content, "text/html");
+  return Array.from(document.querySelectorAll("h1, h2, h3"))
+    .map((heading, index) => ({
+      id: `lesson-${lesson.client_key}-heading-${index}`,
+      level: Number(heading.tagName.slice(1)) as 1 | 2 | 3,
+      text: heading.textContent?.trim() || "Заголовок без названия",
+    }));
+}
+
 function normalizeQuizText(value: unknown) {
   return String(value ?? "").trim().replace(/\s+/g, " ").toLocaleLowerCase("ru-RU");
 }
@@ -5609,6 +5626,107 @@ function CoursesView({ token, user }: { token: string; user: User }) {
     return <Type />;
   }
 
+  function renderLongreadLessonBody(lesson: Lesson, index: number) {
+    if (lesson.lesson_type === "text") {
+      return (
+        <Suspense fallback={<div className="rich-editor rich-editor--loading">Загружаем редактор…</div>}>
+          <RichTextEditor
+            value={lesson.content}
+            onChange={(content) => updateLesson(index, { content })}
+            label={`Содержание главы ${index + 1}`}
+            variant="longread"
+            documentId={`lesson-${lesson.client_key}`}
+            showToolbar={activeSection === lesson.client_key}
+            toolbarContainer={activeSection === lesson.client_key ? longreadToolbarDock : null}
+            onFocus={() => setActiveSection(lesson.client_key)}
+          />
+        </Suspense>
+      );
+    }
+    if (lesson.lesson_type === "quiz") {
+      return <QuizEditor value={lesson.quiz_data} onChange={(quiz_data) => updateLesson(index, { quiz_data })} token={token} />;
+    }
+    if (lesson.lesson_type === "video") {
+      return (
+        <div className="longread-media-editor">
+          {lesson.video_url && !videoFiles[lesson.client_key] && (
+            <video className="video-preview" controls preload="metadata" src={lesson.video_url}>Ваш браузер не поддерживает просмотр видео.</video>
+          )}
+          <label className="longread-upload-zone">
+            <span className="longread-media-icon"><Upload /></span>
+            <strong>{lesson.video_url ? "Заменить видео" : "Загрузить видео"}</strong>
+            <span>MP4, WebM, MOV или M4V · до 500 МБ</span>
+            <input
+              type="file"
+              accept="video/mp4,video/webm,video/quicktime,video/x-m4v,.mp4,.webm,.mov,.m4v"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) setVideoFiles((current) => ({ ...current, [lesson.client_key]: file }));
+              }}
+            />
+          </label>
+          {(videoFiles[lesson.client_key] || lesson.video_original_name) && (
+            <div className="longread-file-chip">
+              <Video />
+              <span><strong>{videoFiles[lesson.client_key]?.name || lesson.video_original_name}</strong><small>{videoFiles[lesson.client_key] ? `${formatFileSize(videoFiles[lesson.client_key].size)} · загрузится при сохранении` : `${formatFileSize(lesson.video_size)} · хранится на платформе`}</small></span>
+            </div>
+          )}
+        </div>
+      );
+    }
+    if (lesson.lesson_type === "scorm") {
+      return (
+        <div className="longread-media-editor longread-scorm-editor">
+          <span className="longread-media-icon"><FileArchive /></span>
+          <h2>Курс SCORM 1.2</h2>
+          <p>Исходный пакет хранится целиком. Для изменения текста и структуры создайте редактируемую копию.</p>
+          <div className="longread-file-chip">
+            <FileArchive />
+            <span><strong>{editingCourse?.scorm_original_name || "SCORM-пакет"}</strong><small>{formatFileSize(editingCourse?.scorm_size || 0)} · хранится на платформе</small></span>
+          </div>
+          {editingCourse && (
+            <div className="scorm-edit-actions">
+              <button className="primary-button" type="button" disabled={convertingScormId === editingCourse.id} onClick={() => void convertScorm(editingCourse)}>
+                <Copy /> {convertingScormId === editingCourse.id ? "Преобразуем…" : "Создать редактируемую копию"}
+              </button>
+              <label className={replacingScormId === editingCourse.id ? "longread-upload-zone scorm-import--busy" : "longread-upload-zone"}>
+                <span className="longread-media-icon"><Upload /></span>
+                <strong>{replacingScormId === editingCourse.id ? "Заменяем пакет…" : "Загрузить новую версию ZIP"}</strong>
+                <span>Карточка курса и назначения сохранятся</span>
+                <input
+                  type="file"
+                  accept="application/zip,.zip"
+                  disabled={replacingScormId === editingCourse.id}
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (file) void replaceScorm(editingCourse, file);
+                    event.currentTarget.value = "";
+                  }}
+                />
+              </label>
+            </div>
+          )}
+        </div>
+      );
+    }
+    return (
+      <div className="longread-media-editor">
+        <span className="longread-media-icon">{lessonIcon(lesson.lesson_type)}</span>
+        <h2>{lesson.lesson_type === "link" ? "Добавьте ссылку" : "Добавьте материал"}</h2>
+        <p>Сотрудник откроет материал прямо из этой части курса.</p>
+        <input
+          type="url"
+          value={lesson.media_url}
+          onFocus={() => setActiveSection(lesson.client_key)}
+          onChange={(event) => updateLesson(index, { media_url: event.target.value })}
+          placeholder="https://…"
+          aria-label="Ссылка на материал"
+          required
+        />
+      </div>
+    );
+  }
+
   const previewModal = previewCourse ? (
     <CoursePreviewModal
       course={previewCourse}
@@ -5654,7 +5772,7 @@ function CoursesView({ token, user }: { token: string; user: User }) {
         <div className="longread-workspace">
           <aside className="longread-outline">
             <div className="longread-panel-heading">
-              <div><span>Содержание</span><strong>{chapterCountLabel(form.lessons.length)}</strong></div>
+              <div><span>Навигация</span><strong>Оглавление</strong></div>
               {editingCourse?.source_format !== "scorm_12" && (
                 <button className="mini-button" type="button" onClick={addLesson} aria-label="Добавить главу"><Plus /></button>
               )}
@@ -5669,16 +5787,33 @@ function CoursesView({ token, user }: { token: string; user: User }) {
                 <span><strong>Обложка</strong><small>Название и описание</small></span>
               </button>
               {form.lessons.map((lesson, index) => (
-                <button
-                  className={activeSection === lesson.client_key ? "longread-section longread-section--active" : "longread-section"}
-                  type="button"
-                  key={lesson.client_key}
-                  onClick={() => setActiveSection(lesson.client_key)}
-                >
-                  <GripVertical className="longread-section__grip" />
-                  <span className="longread-section__number">{index + 1}</span>
-                  <span><strong>{lesson.title || "Новая глава"}</strong><small>{lessonTypeLabels[lesson.lesson_type]} · {lesson.duration_minutes} мин</small></span>
-                </button>
+                <div className="longread-outline-group" key={lesson.client_key}>
+                  <button
+                    className={activeSection === lesson.client_key ? "longread-section longread-section--active" : "longread-section"}
+                    type="button"
+                    onClick={() => {
+                      setActiveSection(lesson.client_key);
+                      requestAnimationFrame(() => document.getElementById(`longread-lesson-${lesson.client_key}`)?.scrollIntoView({ behavior: "smooth", block: "start" }));
+                    }}
+                  >
+                    <span className="longread-section__number">{index + 1}</span>
+                    <span><strong>{lesson.title || "Новая глава"}</strong><small>{lessonTypeLabels[lesson.lesson_type]}</small></span>
+                  </button>
+                  {extractLongreadHeadings(lesson).map((heading) => (
+                    <button
+                      className={`longread-outline-heading longread-outline-heading--level-${heading.level}`}
+                      type="button"
+                      key={heading.id}
+                      title={heading.text}
+                      onClick={() => {
+                        setActiveSection(lesson.client_key);
+                        requestAnimationFrame(() => document.getElementById(heading.id)?.scrollIntoView({ behavior: "smooth", block: "center" }));
+                      }}
+                    >
+                      <span>{heading.text}</span>
+                    </button>
+                  ))}
+                </div>
               ))}
             </nav>
             {editingCourse?.source_format !== "scorm_12" && (
@@ -5715,124 +5850,39 @@ function CoursesView({ token, user }: { token: string; user: User }) {
                 </div>
                 <div className="longread-cover-decoration" aria-hidden="true"><span /><span /><span /></div>
               </article>
-            ) : activeLesson ? (
-              <article className="longread-page longread-page--chapter">
-                <div className="longread-chapter-kicker">
-                  <span>Глава {activeLessonIndex + 1}</span>
-                  <span>{lessonTypeLabels[activeLesson.lesson_type]}</span>
-                </div>
-                <textarea
-                  className="longread-title-input longread-title-input--chapter"
-                  rows={2}
-                  value={activeLesson.title}
-                  onChange={(event) => updateLesson(activeLessonIndex, { title: event.target.value })}
-                  placeholder="Название главы"
-                  aria-label="Название главы"
-                  required
-                />
-                {activeLesson.lesson_type === "text" ? (
-                  <Suspense fallback={<div className="rich-editor rich-editor--loading">Загружаем редактор…</div>}>
-                    <RichTextEditor
-                      value={activeLesson.content}
-                      onChange={(content) => updateLesson(activeLessonIndex, { content })}
-                      label={`Содержание главы ${activeLessonIndex + 1}`}
-                      variant="longread"
-                      toolbarContainer={longreadToolbarDock}
-                    />
-                  </Suspense>
-                ) : activeLesson.lesson_type === "quiz" ? (
-                  <QuizEditor value={activeLesson.quiz_data} onChange={(quiz_data) => updateLesson(activeLessonIndex, { quiz_data })} token={token} />
-                ) : activeLesson.lesson_type === "video" ? (
-                  <div className="longread-media-editor">
-                    {activeLesson.video_url && !videoFiles[activeLesson.client_key] && (
-                      <video className="video-preview" controls preload="metadata" src={activeLesson.video_url}>
-                        Ваш браузер не поддерживает просмотр видео.
-                      </video>
-                    )}
-                    <label className="longread-upload-zone">
-                      <span className="longread-media-icon"><Upload /></span>
-                      <strong>{activeLesson.video_url ? "Заменить видео" : "Загрузить видео"}</strong>
-                      <span>MP4, WebM, MOV или M4V · до 500 МБ</span>
-                      <input
-                        type="file"
-                        accept="video/mp4,video/webm,video/quicktime,video/x-m4v,.mp4,.webm,.mov,.m4v"
-                        onChange={(event) => {
-                          const file = event.target.files?.[0];
-                          if (file) setVideoFiles((current) => ({ ...current, [activeLesson.client_key]: file }));
-                        }}
-                      />
-                    </label>
-                    {(videoFiles[activeLesson.client_key] || activeLesson.video_original_name) && (
-                      <div className="longread-file-chip">
-                        <Video />
-                        <span><strong>{videoFiles[activeLesson.client_key]?.name || activeLesson.video_original_name}</strong><small>{videoFiles[activeLesson.client_key] ? `${formatFileSize(videoFiles[activeLesson.client_key].size)} · загрузится при сохранении` : `${formatFileSize(activeLesson.video_size)} · хранится на платформе`}</small></span>
-                      </div>
-                    )}
-                  </div>
-                ) : activeLesson.lesson_type === "scorm" ? (
-                  <div className="longread-media-editor longread-scorm-editor">
-                    <span className="longread-media-icon"><FileArchive /></span>
-                    <h2>Курс SCORM 1.2</h2>
-                    <p>Пакет импортирован целиком. Его внутреннее содержимое нельзя редактировать как обычный лонгрид, но название, обложку и параметры курса можно изменить.</p>
-                    <div className="longread-file-chip">
-                      <FileArchive />
-                      <span><strong>{editingCourse?.scorm_original_name || "SCORM-пакет"}</strong><small>{formatFileSize(editingCourse?.scorm_size || 0)} · хранится на платформе</small></span>
+            ) : (
+              <article className="longread-page longread-page--document">
+                {form.lessons.map((lesson, index) => (
+                  <section
+                    className={activeSection === lesson.client_key ? "longread-document-section longread-document-section--active" : "longread-document-section"}
+                    id={`longread-lesson-${lesson.client_key}`}
+                    key={lesson.client_key}
+                    onMouseDown={() => setActiveSection(lesson.client_key)}
+                  >
+                    <div className="longread-chapter-kicker">
+                      <span>Глава {index + 1}</span>
+                      <span>{lessonTypeLabels[lesson.lesson_type]} · {lesson.duration_minutes} мин</span>
                     </div>
-                    {editingCourse && (
-                      <div className="scorm-edit-actions">
-                        <button
-                          className="primary-button"
-                          type="button"
-                          disabled={convertingScormId === editingCourse.id}
-                          onClick={() => void convertScorm(editingCourse)}
-                        >
-                          <Copy /> {convertingScormId === editingCourse.id ? "Преобразуем…" : "Создать редактируемую копию"}
-                        </button>
-                        <p>Для лонгридов iSpring перенесём заголовки, текст, списки, вкладки и вопросы теста. Исходный SCORM останется без изменений.</p>
-                        <label className={replacingScormId === editingCourse.id ? "longread-upload-zone scorm-import--busy" : "longread-upload-zone"}>
-                          <span className="longread-media-icon"><Upload /></span>
-                          <strong>{replacingScormId === editingCourse.id ? "Заменяем пакет…" : "Загрузить новую версию ZIP"}</strong>
-                          <span>Курс, назначения и карточка сохранятся</span>
-                          <input
-                            type="file"
-                            accept="application/zip,.zip"
-                            disabled={replacingScormId === editingCourse.id}
-                            onChange={(event) => {
-                              const file = event.target.files?.[0];
-                              if (file) void replaceScorm(editingCourse, file);
-                              event.currentTarget.value = "";
-                            }}
-                          />
-                        </label>
-                      </div>
-                    )}
-                    <div className="longread-info-card scorm-edit-capabilities">
-                      <span>Можно изменить</span><strong>Название, описание, обложку, длительность</strong>
-                      <span>Содержимое</span><strong>Через редактируемую копию или замену ZIP</strong>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="longread-media-editor">
-                    <span className="longread-media-icon">{lessonIcon(activeLesson.lesson_type)}</span>
-                    <h2>{activeLesson.lesson_type === "link" ? "Добавьте ссылку" : "Добавьте материал"}</h2>
-                    <p>Сотрудник откроет материал прямо из этой главы курса.</p>
-                    <input
-                      type="url"
-                      value={activeLesson.media_url}
-                      onChange={(event) => updateLesson(activeLessonIndex, { media_url: event.target.value })}
-                      placeholder="https://…"
-                      aria-label="Ссылка на материал"
+                    <textarea
+                      className="longread-title-input longread-title-input--chapter"
+                      rows={2}
+                      value={lesson.title}
+                      onFocus={() => setActiveSection(lesson.client_key)}
+                      onChange={(event) => updateLesson(index, { title: event.target.value })}
+                      placeholder="Название главы"
+                      aria-label={`Название главы ${index + 1}`}
                       required
                     />
-                  </div>
-                )}
+                    {renderLongreadLessonBody(lesson, index)}
+                  </section>
+                ))}
                 {editingCourse?.source_format !== "scorm_12" && (
                   <button className="longread-add-divider" type="button" onClick={addLesson}>
                     <span><Plus /></span> Добавить следующую главу
                   </button>
                 )}
               </article>
-            ) : null}
+            )}
           </main>
 
           <aside className={activeLesson?.lesson_type === "text" ? "longread-settings longread-settings--with-editor" : "longread-settings"}>
