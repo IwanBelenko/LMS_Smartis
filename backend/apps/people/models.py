@@ -800,3 +800,22 @@ class AuditEvent(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+
+
+class InboxItemState(models.Model):
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="inbox_item_states",
+        on_delete=models.CASCADE,
+    )
+    item_id = models.CharField("Идентификатор уведомления", max_length=160)
+    read_at = models.DateTimeField("Прочитано", null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-updated_at"]
+        constraints = [
+            models.UniqueConstraint(fields=["user", "item_id"], name="unique_user_inbox_item_state"),
+        ]
+        verbose_name = "Состояние уведомления"
+        verbose_name_plural = "Состояния уведомлений"

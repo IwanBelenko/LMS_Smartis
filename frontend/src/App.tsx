@@ -438,7 +438,7 @@ type PerformanceReview = {
 };
 type InboxItem = {
   id: string;
-  category: "documents" | "performance" | "learning" | "onboarding" | "absences";
+  category: "documents" | "performance" | "learning" | "onboarding" | "absences" | "goals" | "employment" | "interviews" | "users";
   title: string;
   description: string;
   target_view: ViewId;
@@ -446,8 +446,10 @@ type InboxItem = {
   due_date: string | null;
   priority: "danger" | "warning" | "normal";
   action_label: string;
+  is_read: boolean;
+  read_at: string | null;
 };
-type Inbox = { total: number; urgent: number; items: InboxItem[] };
+type Inbox = { total: number; urgent: number; unread: number; items: InboxItem[] };
 type DailyTranscript = {
   id: number; title: string; meeting_date: string; department: number | null;
   department_name: string | null; source: "paste" | "file" | "api"; source_label: string;
@@ -968,23 +970,31 @@ function IconRail({
   active,
   user,
   open,
+  inbox,
   onNavigate,
   onOpen,
+  onReadInbox,
 }: {
   active: ViewId;
   user: User;
   open: boolean;
+  inbox: Inbox;
   onNavigate: (view: ViewId) => void;
   onOpen: () => void;
+  onReadInbox: (itemIds: string[]) => Promise<void>;
 }) {
   const [expanded, setExpanded] = useState<"learning" | "hr" | "admin" | null>(null);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
   const railRef = useRef<HTMLElement>(null);
   const availableHcmNav = visibleHcmNav(user);
   const availableAdminNav = visibleAdminNav(user);
   const learningNav = nav.filter((item) => item.id !== "home");
   useEffect(() => {
     function closeNestedMenu(event: MouseEvent) {
-      if (!railRef.current?.contains(event.target as Node)) setExpanded(null);
+      if (!railRef.current?.contains(event.target as Node)) {
+        setExpanded(null);
+        setNotificationsOpen(false);
+      }
     }
     document.addEventListener("mousedown", closeNestedMenu);
     return () => document.removeEventListener("mousedown", closeNestedMenu);
@@ -1039,10 +1049,55 @@ function IconRail({
         aria-label={open ? "Скрыть полное меню" : "Открыть полное меню"}
         aria-expanded={open}
         data-tooltip={open ? "Скрыть меню" : "Открыть меню"}
-        onClick={() => { setExpanded(null); onOpen(); }}
+        onClick={() => { setExpanded(null); setNotificationsOpen(false); onOpen(); }}
       >
         <CurtainToggleIcon open={open} />
       </button>
+      <div className="icon-rail__notifications">
+        <button
+          className={notificationsOpen ? "icon-rail__item icon-rail__item--active" : "icon-rail__item"}
+          type="button"
+          aria-label={`Уведомления${inbox.unread ? `, непрочитанных: ${inbox.unread}` : ""}`}
+          aria-expanded={notificationsOpen}
+          data-tooltip={notificationsOpen ? undefined : "Уведомления"}
+          onClick={() => { setExpanded(null); setNotificationsOpen((value) => !value); }}
+        >
+          <Bell aria-hidden="true" />
+          {inbox.unread > 0 && <span className="icon-rail__badge">{inbox.unread > 99 ? "99+" : inbox.unread}</span>}
+        </button>
+        {notificationsOpen && (
+          <section className="notification-popover" aria-label="Новые уведомления">
+            <header>
+              <div><strong>Уведомления</strong><span>{inbox.unread ? `${inbox.unread} новых` : "Новых нет"}</span></div>
+              {inbox.unread > 0 && (
+                <button type="button" onClick={() => void onReadInbox(inbox.items.map((item) => item.id))}>Прочитать все</button>
+              )}
+            </header>
+            <div className="notification-popover__list">
+              {inbox.items.slice(0, 6).map((item) => (
+                <button
+                  className={item.is_read ? "notification-popover__item" : "notification-popover__item notification-popover__item--unread"}
+                  type="button"
+                  key={item.id}
+                  onClick={() => {
+                    void onReadInbox([item.id]);
+                    onNavigate(item.target_view);
+                    setNotificationsOpen(false);
+                  }}
+                >
+                  <i aria-hidden="true" />
+                  <span><strong>{item.title}</strong><small>{item.description}</small></span>
+                  <ChevronRight aria-hidden="true" />
+                </button>
+              ))}
+              {!inbox.items.length && <div className="notification-popover__empty"><CheckCircle2 /><span>Новых задач нет</span></div>}
+            </div>
+            <button className="notification-popover__footer" type="button" onClick={() => { onNavigate("tasks"); setNotificationsOpen(false); }}>
+              Все задачи и уведомления<ChevronRight />
+            </button>
+          </section>
+        )}
+      </div>
       <nav className="icon-rail__group" aria-label="Основные разделы">
         <button
           className={active === "home" ? "icon-rail__item icon-rail__item--active" : "icon-rail__item"}
@@ -5975,35 +6030,44 @@ const inboxCategoryLabels: Record<InboxItem["category"], string> = {
   learning: "Обучение",
   onboarding: "Адаптация",
   absences: "Отсутствия",
+  goals: "Цели",
+  employment: "Кадровые события",
+  interviews: "Собеседования",
+  users: "Доступы",
 };
 
-function TaskCenterView({ token, onNavigate }: { token: string; onNavigate: (view: ViewId) => void }) {
-  const [inbox, setInbox] = useState<Inbox>({ total: 0, urgent: 0, items: [] });
-  const [filter, setFilter] = useState<"all" | "urgent" | InboxItem["category"]>("all");
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    apiRequest<Inbox>("/inbox/", token)
-      .then(setInbox)
-      .catch((reason) => setError(reason instanceof Error ? reason.message : "Не удалось загрузить задачи"));
-  }, [token]);
+function TaskCenterView({
+  inbox,
+  error,
+  onNavigate,
+  onReadInbox,
+}: {
+  inbox: Inbox;
+  error: string;
+  onNavigate: (view: ViewId) => void;
+  onReadInbox: (itemIds: string[]) => Promise<void>;
+}) {
+  const [filter, setFilter] = useState<"all" | "unread" | "urgent" | InboxItem["category"]>("all");
 
   const visible = inbox.items.filter((item) =>
-    filter === "all" ? true : filter === "urgent" ? item.priority === "danger" : item.category === filter
+    filter === "all" ? true : filter === "unread" ? !item.is_read : filter === "urgent" ? item.priority === "danger" : item.category === filter
   );
-  const categories = new Set(inbox.items.map((item) => item.category)).size;
   const today = localDateKey(new Date());
   const dueToday = inbox.items.filter((item) => item.due_date === today).length;
 
   return (
     <>
-      <PageHeader title="Задачи" subtitle="Единая очередь действий по обучению и работе с персоналом" />
+      <PageHeader
+        title="Задачи и уведомления"
+        subtitle="Единая очередь обучения, собеседований и работы с персоналом"
+        action={inbox.unread > 0 ? <button className="secondary-button" type="button" onClick={() => void onReadInbox(inbox.items.map((item) => item.id))}><CheckCircle2 />Прочитать все</button> : undefined}
+      />
       {error && <div className="form-error">{error}</div>}
       <section className="task-metrics">
         <article><span>Всего задач</span><strong>{inbox.total}</strong></article>
+        <article><span>Непрочитанные</span><strong>{inbox.unread}</strong></article>
         <article className={inbox.urgent ? "task-metric--danger" : ""}><span>Срочные</span><strong>{inbox.urgent}</strong></article>
         <article><span>На сегодня</span><strong>{dueToday}</strong></article>
-        <article><span>Направлений</span><strong>{categories}</strong></article>
       </section>
       <section className="panel task-center">
         <header>
@@ -6011,12 +6075,17 @@ function TaskCenterView({ token, onNavigate }: { token: string; onNavigate: (vie
           <div className="task-filters">
             {([
               ["all", "Все"],
+              ["unread", "Непрочитанные"],
               ["urgent", "Срочные"],
               ["documents", "Документы"],
               ["performance", "Оценка"],
               ["learning", "Обучение"],
               ["onboarding", "Адаптация"],
               ["absences", "Отсутствия"],
+              ["interviews", "Собеседования"],
+              ["goals", "Цели"],
+              ["employment", "Кадровые события"],
+              ["users", "Доступы"],
             ] as const).map(([value, label]) => (
               <button className={filter === value ? "task-filter task-filter--active" : "task-filter"} type="button" key={value} onClick={() => setFilter(value)}>{label}</button>
             ))}
@@ -6024,16 +6093,16 @@ function TaskCenterView({ token, onNavigate }: { token: string; onNavigate: (vie
         </header>
         <div className="task-list">
           {visible.map((item) => (
-            <article key={item.id}>
+            <article className={item.is_read ? "" : "task-list__item--unread"} key={item.id}>
               <div className={`task-list__icon task-list__icon--${item.category}`}><Bell /></div>
-              <div className="task-list__main"><strong>{item.title}</strong><span>{item.description}</span></div>
+              <div className="task-list__main"><strong>{!item.is_read && <i aria-label="Новое" />}{item.title}</strong><span>{item.description}</span></div>
               <span className="task-list__category">{inboxCategoryLabels[item.category]}</span>
               <div className="task-list__due">
                 <Clock3 />
                 <span>{item.due_date ? (item.due_date < today ? `Просрочено · ${displayDate(item.due_date)}` : `До ${displayDate(item.due_date)}`) : "Без срока"}</span>
               </div>
               <span className={`task-priority task-priority--${item.priority}`}>{item.priority === "danger" ? "Срочно" : item.priority === "warning" ? "Важно" : "Планово"}</span>
-              <button className={item.priority === "danger" ? "primary-button" : "secondary-button"} type="button" onClick={() => onNavigate(item.target_view)}>{item.action_label}<ChevronRight /></button>
+              <button className={item.priority === "danger" ? "primary-button" : "secondary-button"} type="button" onClick={() => { void onReadInbox([item.id]); onNavigate(item.target_view); }}>{item.action_label}<ChevronRight /></button>
             </article>
           ))}
           {!visible.length && <div className="task-empty"><CheckCircle2 /><strong>Всё выполнено</strong><span>В выбранной категории нет активных задач.</span></div>}
@@ -6706,6 +6775,8 @@ function Placeholder({ active }: { active: ViewId }) {
 function App() {
   const [token, setToken] = useState(() => localStorage.getItem("smartis-token"));
   const [user, setUser] = useState<User | null>(null);
+  const [inbox, setInbox] = useState<Inbox>({ total: 0, urgent: 0, unread: 0, items: [] });
+  const [inboxError, setInboxError] = useState("");
   const [active, setActive] = useState<ViewId>("home");
   const [dark, setDark] = useState(() => localStorage.getItem("smartis-theme") === "dark");
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -6725,6 +6796,32 @@ function App() {
       });
   }, [token]);
 
+  useEffect(() => {
+    if (!token || !user) return;
+    void loadInbox();
+    const timer = window.setInterval(() => void loadInbox(), 60000);
+    return () => window.clearInterval(timer);
+  }, [token, user?.id]);
+
+  async function loadInbox() {
+    if (!token) return;
+    try {
+      setInbox(await apiRequest<Inbox>("/inbox/", token));
+      setInboxError("");
+    } catch (reason) {
+      setInboxError(reason instanceof Error ? reason.message : "Не удалось загрузить уведомления");
+    }
+  }
+
+  async function readInbox(itemIds: string[]) {
+    if (!token || !itemIds.length) return;
+    await apiRequest("/inbox/", token, {
+      method: "POST",
+      body: JSON.stringify({ item_ids: itemIds, read: true }),
+    });
+    await loadInbox();
+  }
+
   function login(nextToken: string, nextUser: User) {
     localStorage.setItem("smartis-token", nextToken);
     setToken(nextToken);
@@ -6736,6 +6833,7 @@ function App() {
     localStorage.removeItem("smartis-token");
     setToken(null);
     setUser(null);
+    setInbox({ total: 0, urgent: 0, unread: 0, items: [] });
   }
 
   function navigate(view: ViewId) {
@@ -6754,8 +6852,10 @@ function App() {
         active={active}
         user={user}
         open={sidebarOpen}
+        inbox={inbox}
         onNavigate={navigate}
         onOpen={() => setSidebarOpen((value) => !value)}
+        onReadInbox={readInbox}
       />
       <Sidebar
         active={active}
@@ -6781,7 +6881,7 @@ function App() {
         ) : active === "ranking" ? (
           <DevelopmentNetworkView token={token} onNavigate={navigate} />
         ) : active === "tasks" ? (
-          <TaskCenterView token={token} onNavigate={navigate} />
+          <TaskCenterView inbox={inbox} error={inboxError} onNavigate={navigate} onReadInbox={readInbox} />
         ) : active === "analytics" ? (
           <DailyAnalyticsView token={token} user={user} />
         ) : active === "performance" ? (

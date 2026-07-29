@@ -34,6 +34,7 @@ from .models import (
     Interview,
     InterviewFeedback,
     HrImportBatch,
+    InboxItemState,
     LearningImportBatch,
     Position,
     StaffPosition,
@@ -577,6 +578,25 @@ class InboxView(APIView):
                     assignment.course.title, "trajectory", assignment.course_id,
                     priority="normal", action_label="К курсу",
                 )
+            for goal in EmployeeGoal.objects.filter(employee=profile).exclude(
+                status=EmployeeGoal.Status.COMPLETED
+            )[:8]:
+                add(
+                    f"goal-{goal.pk}", "goals", "Цель требует внимания",
+                    goal.title, "tasks", goal.pk, goal.due_date,
+                    "danger" if goal.due_date and goal.due_date < today else "warning"
+                    if goal.due_date and goal.due_date <= week_end else "normal",
+                    "Посмотреть",
+                )
+            for event in EmploymentEvent.objects.filter(
+                employee=profile,
+                effective_date__gte=today - timedelta(days=30),
+            )[:6]:
+                add(
+                    f"employment-{event.pk}", "employment", "Кадровое событие",
+                    f"{event.get_event_type_display()} · {event.title}", "tasks", event.pk,
+                    event.effective_date, "normal", "Подробнее",
+                )
             for plan in OnboardingPlan.objects.filter(
                 employee=profile, status=OnboardingPlan.Status.ACTIVE
             ):
@@ -654,17 +674,62 @@ class InboxView(APIView):
                     "Открыть",
                 )
 
+        for interview in Interview.objects.filter(
+            Q(participants=user) | Q(created_by=user),
+            status__in=[Interview.Status.SCHEDULED, Interview.Status.IN_PROGRESS],
+            scheduled_at__gte=timezone.now() - timedelta(hours=2),
+        ).select_related("candidate").distinct()[:8]:
+            interview_target = "recruitment" if user.is_superuser or user.role in {User.Role.ADMIN, User.Role.HR} else "tasks"
+            add(
+                f"interview-{interview.pk}", "interviews", "Предстоящее собеседование",
+                f"{interview.candidate.full_name} · {interview.title}", interview_target, interview.pk,
+                interview.scheduled_at.date(),
+                "danger" if interview.scheduled_at <= timezone.now() + timedelta(hours=2) else "warning",
+                "К собеседованию",
+            )
+
+        if user.is_superuser or user.role == User.Role.ADMIN:
+            for invited_user in User.objects.filter(status=User.Status.INVITED).order_by("date_joined")[:8]:
+                add(
+                    f"invitation-{invited_user.pk}", "users", "Ожидается активация доступа",
+                    invited_user.get_full_name() or invited_user.email, "users", invited_user.pk,
+                    priority="normal", action_label="К пользователям",
+                )
+
         priority_order = {"danger": 0, "warning": 1, "normal": 2}
         unique = {item["id"]: item for item in items}
         result = sorted(
             unique.values(),
             key=lambda item: (priority_order[item["priority"]], item["due_date"] or date.max),
         )
+        states = {
+            state.item_id: state
+            for state in InboxItemState.objects.filter(user=user, item_id__in=unique)
+        }
+        for item in result:
+            state = states.get(item["id"])
+            item["is_read"] = bool(state and state.read_at)
+            item["read_at"] = state.read_at if state else None
         return Response({
             "total": len(result),
             "urgent": sum(item["priority"] == "danger" for item in result),
+            "unread": sum(not item["is_read"] for item in result),
             "items": result,
         })
+
+    def post(self, request):
+        item_ids = request.data.get("item_ids", [])
+        if not isinstance(item_ids, list) or not item_ids:
+            raise ValidationError({"item_ids": "Передайте список уведомлений"})
+        item_ids = list(dict.fromkeys(str(item_id)[:160] for item_id in item_ids[:200]))
+        read_at = timezone.now() if request.data.get("read", True) else None
+        for item_id in item_ids:
+            InboxItemState.objects.update_or_create(
+                user=request.user,
+                item_id=item_id,
+                defaults={"read_at": read_at},
+            )
+        return Response({"updated": len(item_ids), "read": read_at is not None})
 
 
 def can_manage_documents(user):

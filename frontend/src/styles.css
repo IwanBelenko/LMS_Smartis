@@ -1302,6 +1302,54 @@ th { font-size: 0.72rem; text-transform: none; letter-spacing: 0.02em; }
 }
 .icon-rail__toggle { margin-bottom: 4px; color: var(--muted); }
 .icon-rail__toggle[aria-expanded="true"] { background: color-mix(in srgb, var(--brand) 11%, var(--surface)); color: var(--brand-hover); }
+.icon-rail__notifications { position: relative; }
+.icon-rail__badge {
+  min-width: 17px; height: 17px; padding: 0 4px; position: absolute; top: 2px; right: 1px;
+  border: 2px solid var(--surface); border-radius: 999px; display: grid; place-items: center;
+  background: var(--brand); color: #132006; font-size: .55rem; font-weight: 800; line-height: 1;
+}
+.notification-popover {
+  width: min(360px, calc(100vw - 82px)); position: absolute; top: -2px; left: calc(100% + 12px); z-index: 95;
+  border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
+  background: color-mix(in srgb, var(--surface) 96%, transparent);
+  box-shadow: 0 18px 48px rgba(15, 15, 15, .2);
+  backdrop-filter: blur(18px) saturate(120%); -webkit-backdrop-filter: blur(18px) saturate(120%);
+}
+:root[data-theme="dark"] .notification-popover { box-shadow: 0 20px 52px rgba(0, 0, 0, .48); }
+.notification-popover > header {
+  min-height: 58px; padding: 11px 13px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+}
+.notification-popover > header div { display: grid; gap: 2px; }
+.notification-popover > header strong { font-size: .8rem; }
+.notification-popover > header span { color: var(--muted); font-size: .65rem; }
+.notification-popover > header button, .notification-popover__footer {
+  border: 0; background: transparent; color: var(--brand-hover); font-size: .66rem; font-weight: 700; cursor: pointer;
+}
+.notification-popover__list { max-height: min(410px, calc(100vh - 160px)); overflow-y: auto; }
+.notification-popover__item {
+  width: 100%; min-height: 62px; padding: 10px 12px; border: 0; border-bottom: 1px solid var(--border);
+  display: grid; grid-template-columns: 7px minmax(0, 1fr) 16px; align-items: center; gap: 9px;
+  background: transparent; color: var(--foreground); text-align: left; cursor: pointer;
+}
+.notification-popover__item:hover { background: var(--surface-soft); }
+.notification-popover__item > i { width: 6px; height: 6px; border-radius: 50%; background: transparent; }
+.notification-popover__item--unread { background: color-mix(in srgb, var(--brand) 7%, var(--surface)); }
+.notification-popover__item--unread > i { background: var(--brand); box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 14%, transparent); }
+.notification-popover__item > span { min-width: 0; display: grid; gap: 3px; }
+.notification-popover__item strong, .notification-popover__item small {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.notification-popover__item strong { font-size: .72rem; }
+.notification-popover__item small { color: var(--muted); font-size: .64rem; }
+.notification-popover__item svg { width: 14px; height: 14px; color: var(--muted); }
+.notification-popover__empty { min-height: 150px; display: grid; place-content: center; justify-items: center; gap: 7px; color: var(--muted); font-size: .7rem; }
+.notification-popover__empty svg { width: 28px; height: 28px; color: var(--brand); }
+.notification-popover__footer {
+  width: 100%; min-height: 42px; padding: 9px 13px; display: flex; align-items: center; justify-content: center; gap: 5px;
+}
+.notification-popover__footer:hover { background: var(--surface-soft); }
+.notification-popover__footer svg { width: 14px; height: 14px; }
 .curtain-toggle-icon { width: 26px; height: 26px; overflow: visible; stroke: currentColor; stroke-width: 1.65; stroke-linecap: round; stroke-linejoin: round; }
 .curtain-toggle-icon circle { fill: currentColor; stroke: none; }
 .curtain-toggle-icon__arrow { stroke-width: 1.9; }
@@ -2449,8 +2497,14 @@ button.vacancy-card { padding: 13px; display: grid; align-content: center; gap: 
 .task-list__icon--learning { color: #8b67a8; background: color-mix(in srgb, #8b67a8 13%, var(--surface)); }
 .task-list__icon--onboarding { color: var(--warning); background: color-mix(in srgb, var(--warning) 12%, var(--surface)); }
 .task-list__icon--absences { color: #4b8b85; background: color-mix(in srgb, #4b8b85 13%, var(--surface)); }
+.task-list__icon--goals { color: #a56e33; background: color-mix(in srgb, #a56e33 13%, var(--surface)); }
+.task-list__icon--employment { color: #5572a4; background: color-mix(in srgb, #5572a4 13%, var(--surface)); }
+.task-list__icon--interviews { color: #8b67a8; background: color-mix(in srgb, #8b67a8 13%, var(--surface)); }
+.task-list__icon--users { color: var(--brand-hover); background: color-mix(in srgb, var(--brand) 13%, var(--surface)); }
+.task-list__item--unread { background: color-mix(in srgb, var(--brand) 5%, var(--surface)); }
 .task-list__main { min-width: 0; display: grid; gap: 4px; }
 .task-list__main strong { overflow: hidden; font-size: .77rem; text-overflow: ellipsis; white-space: nowrap; }
+.task-list__main strong i { width: 6px; height: 6px; margin-right: 7px; border-radius: 50%; display: inline-block; background: var(--brand); vertical-align: 1px; }
 .task-list__main span { overflow: hidden; color: var(--muted); font-size: .68rem; text-overflow: ellipsis; white-space: nowrap; }
 .task-list__category { padding: 4px 7px; border-radius: 4px; background: var(--surface-soft); color: var(--muted); font-size: .63rem; font-weight: 650; white-space: nowrap; }
 .task-list__due { display: flex; align-items: center; gap: 5px; color: var(--muted); }

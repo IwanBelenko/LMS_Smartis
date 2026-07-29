@@ -25,6 +25,7 @@ from .models import (
     EmploymentEvent,
     Interview,
     HrImportBatch,
+    InboxItemState,
     LearningImportBatch,
     Position,
     StaffPosition,
@@ -1013,6 +1014,14 @@ class PeopleApiTests(TestCase):
         identifiers = [item["id"] for item in response.json()["items"]]
         self.assertIn(f"document-{own.pk}", identifiers)
         self.assertEqual(len([item for item in identifiers if item.startswith("document-")]), 1)
+        self.assertGreater(response.json()["unread"], 0)
+
+        item_id = f"document-{own.pk}"
+        marked = self.client.post("/api/v1/inbox/", {"item_ids": [item_id]}, format="json")
+        self.assertEqual(marked.status_code, 200)
+        self.assertTrue(InboxItemState.objects.get(user=self.employee, item_id=item_id).read_at)
+        refreshed = self.client.get("/api/v1/inbox/").json()
+        self.assertTrue(next(item for item in refreshed["items"] if item["id"] == item_id)["is_read"])
 
     def test_leader_inbox_contains_department_approvals(self):
         absence = AbsenceRequest.objects.create(
