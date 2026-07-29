@@ -49,14 +49,33 @@ docker compose up --build
 - email: admin@smartis.local
 - пароль: SmartisDemo123!
 
-Перед публикацией на сервере обязательно замените пароль и секреты в .env. Для
-SCORM-плеера укажите отдельный поддомен в `SCORM_HOST` и полный адрес этого
-поддомена в `SCORM_CONTENT_ORIGIN`: это изолирует импортированные курсы от
-авторизации и интерфейса LMS.
+Локальный шаблон включает `BOOTSTRAP_DEMO=true`. Он создаёт тестовых сотрудников
+и материалы. В production этот режим необходимо выключить.
+
+## Развёртывание на сервере
+
+Подробная инструкция: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+
+Короткий сценарий:
+
+~~~bash
+cp .env.production.example .env
+# Заполните домены, секреты и временный пароль первого администратора
+docker compose config
+docker compose up -d --build
+docker compose ps
+~~~
+
+Caddy автоматически получает HTTPS-сертификаты, если оба домена направлены на
+сервер и порты 80/443 открыты. SCORM размещается на отдельном поддомене — это
+изолирует импортированный контент от интерфейса и авторизации системы.
+
+После первого успешного входа очистите `INITIAL_ADMIN_EMAIL` и
+`INITIAL_ADMIN_PASSWORD` в `.env`, затем выполните `docker compose up -d`.
 
 ## Состав проекта
 
 - frontend — React + TypeScript;
 - backend — Django REST API;
 - infra — Caddy;
-- compose.yaml — PostgreSQL, Redis, MinIO, API и веб-интерфейс.
+- compose.yaml — PostgreSQL, API, веб-интерфейс, Caddy и сервисы резервного копирования.

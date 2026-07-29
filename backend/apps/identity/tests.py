@@ -1,3 +1,6 @@
+from unittest.mock import patch
+
+from django.core.management import call_command
 from django.test import TestCase
 from rest_framework.test import APIClient
 
@@ -78,3 +81,18 @@ class IdentityApiTests(TestCase):
         )
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.json()["role"], User.Role.HR)
+
+    def test_ensure_admin_creates_only_initial_administrator(self):
+        with patch.dict(
+            "os.environ",
+            {
+                "INITIAL_ADMIN_EMAIL": "first.admin@smartis.local",
+                "INITIAL_ADMIN_PASSWORD": "TemporaryStrong123!",
+            },
+        ):
+            call_command("ensure_admin")
+        admin = User.objects.get(email="first.admin@smartis.local")
+        self.assertTrue(admin.is_superuser)
+        self.assertTrue(admin.is_staff)
+        self.assertEqual(admin.role, User.Role.ADMIN)
+        self.assertTrue(admin.check_password("TemporaryStrong123!"))

@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+!.env.production.example
 node_modules/
 dist/
 __pycache__/
@@ -12,3 +13,4 @@ staticfiles/
 media/
 *.sqlite3
 *.log
+backups/

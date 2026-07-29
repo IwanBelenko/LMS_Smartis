@@ -1,10 +1,10 @@
-http://{$SCORM_HOST:scorm.localhost} {
+{$SCORM_SITE_ADDRESS:http://scorm.localhost} {
 	encode zstd gzip
 	handle /scorm-content/* { reverse_proxy api:8000 }
 	handle { respond 404 }
 }
 
-:80 {
+{$APP_SITE_ADDRESS:http://localhost} {
 	encode zstd gzip
 	handle /api/* { reverse_proxy api:8000 }
 	handle /admin/* { reverse_proxy api:8000 }

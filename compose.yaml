@@ -3,9 +3,13 @@ services:
   proxy:
     image: caddy:2.10-alpine
     restart: unless-stopped
-    ports: ["${HTTP_PORT:-80}:80"]
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+      - "${HTTPS_PORT:-443}:443/udp"
     environment:
-      SCORM_HOST: "${SCORM_HOST:-scorm.localhost}"
+      APP_SITE_ADDRESS: "${APP_SITE_ADDRESS:-http://localhost}"
+      SCORM_SITE_ADDRESS: "${SCORM_SITE_ADDRESS:-http://scorm.localhost}"
     volumes:
       - ./infra/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
@@ -27,19 +31,33 @@ services:
     environment:
       DJANGO_SECRET_KEY: "${DJANGO_SECRET_KEY:-unsafe-development-key}"
       DJANGO_DEBUG: "${DJANGO_DEBUG:-true}"
-      DJANGO_ALLOWED_HOSTS: "${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1,api}"
+      DJANGO_ALLOWED_HOSTS: "${DJANGO_ALLOWED_HOSTS:-localhost,scorm.localhost,127.0.0.1,api}"
+      DJANGO_CSRF_TRUSTED_ORIGINS: "${DJANGO_CSRF_TRUSTED_ORIGINS:-http://localhost,http://127.0.0.1}"
+      DJANGO_SECURE_COOKIES: "${DJANGO_SECURE_COOKIES:-false}"
+      DJANGO_SECURE_SSL_REDIRECT: "${DJANGO_SECURE_SSL_REDIRECT:-false}"
+      DJANGO_SECURE_HSTS_SECONDS: "${DJANGO_SECURE_HSTS_SECONDS:-0}"
+      DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS: "${DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS:-false}"
+      DJANGO_SECURE_HSTS_PRELOAD: "${DJANGO_SECURE_HSTS_PRELOAD:-false}"
       SCORM_CONTENT_ORIGIN: "${SCORM_CONTENT_ORIGIN:-http://scorm.localhost}"
       POSTGRES_DB: "${POSTGRES_DB:-smartis_lms}"
       POSTGRES_USER: "${POSTGRES_USER:-smartis}"
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-smartis_local_password}"
       POSTGRES_HOST: db
-      REDIS_URL: redis://redis:6379/0
+      BOOTSTRAP_DEMO: "${BOOTSTRAP_DEMO:-false}"
       DEMO_ADMIN_EMAIL: "${DEMO_ADMIN_EMAIL:-admin@smartis.local}"
       DEMO_ADMIN_PASSWORD: "${DEMO_ADMIN_PASSWORD:-SmartisDemo123!}"
+      INITIAL_ADMIN_EMAIL: "${INITIAL_ADMIN_EMAIL:-}"
+      INITIAL_ADMIN_PASSWORD: "${INITIAL_ADMIN_PASSWORD:-}"
+      GUNICORN_WORKERS: "${GUNICORN_WORKERS:-3}"
+      GUNICORN_TIMEOUT: "${GUNICORN_TIMEOUT:-120}"
+      MAX_VIDEO_UPLOAD_SIZE: "${MAX_VIDEO_UPLOAD_SIZE:-524288000}"
+      MAX_COVER_UPLOAD_SIZE: "${MAX_COVER_UPLOAD_SIZE:-10485760}"
+      MAX_HR_DOCUMENT_UPLOAD_SIZE: "${MAX_HR_DOCUMENT_UPLOAD_SIZE:-20971520}"
+      MAX_SCORM_UPLOAD_SIZE: "${MAX_SCORM_UPLOAD_SIZE:-1073741824}"
+      MAX_SCORM_UNPACKED_SIZE: "${MAX_SCORM_UNPACKED_SIZE:-2147483648}"
+      MAX_SCORM_FILES: "${MAX_SCORM_FILES:-10000}"
     depends_on:
       db: { condition: service_healthy }
-      redis: { condition: service_healthy }
-      minio: { condition: service_healthy }
     volumes: ["media_data:/app/media"]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health/')"]
@@ -59,33 +77,38 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
-  redis:
-    image: redis:7.4-alpine
-    restart: unless-stopped
-    command: redis-server --appendonly yes
-    volumes: ["redis_data:/data"]
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-  minio:
-    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
-    restart: unless-stopped
-    command: server /data --console-address ":9001"
+  backup:
+    image: postgres:17-alpine
+    profiles: ["maintenance"]
     environment:
-      MINIO_ROOT_USER: "${MINIO_ROOT_USER:-smartis}"
-      MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:-smartis_local_storage}"
-    ports: ["${MINIO_CONSOLE_PORT:-9001}:9001"]
-    volumes: ["minio_data:/data"]
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://127.0.0.1:9000/minio/health/live"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
+      POSTGRES_DB: "${POSTGRES_DB:-smartis_lms}"
+      POSTGRES_USER: "${POSTGRES_USER:-smartis}"
+      PGPASSWORD: "${POSTGRES_PASSWORD:-smartis_local_password}"
+      POSTGRES_HOST: db
+      BACKUP_RETENTION_DAYS: "${BACKUP_RETENTION_DAYS:-14}"
+    volumes:
+      - "${BACKUP_DIR:-./backups}:/backups"
+      - media_data:/source/media:ro
+      - ./infra/backup:/scripts:ro
+    entrypoint: ["/bin/sh", "/scripts/backup.sh"]
+    depends_on:
+      db: { condition: service_healthy }
+  restore:
+    image: postgres:17-alpine
+    profiles: ["maintenance"]
+    environment:
+      POSTGRES_DB: "${POSTGRES_DB:-smartis_lms}"
+      POSTGRES_USER: "${POSTGRES_USER:-smartis}"
+      PGPASSWORD: "${POSTGRES_PASSWORD:-smartis_local_password}"
+      POSTGRES_HOST: db
+    volumes:
+      - "${BACKUP_DIR:-./backups}:/backups:ro"
+      - media_data:/restore/media
+      - ./infra/backup:/scripts:ro
+    entrypoint: ["/bin/sh", "/scripts/restore.sh"]
+    depends_on:
+      db: { condition: service_healthy }
 volumes:
   postgres_data:
-  redis_data:
-  minio_data:
   caddy_data:
   media_data:

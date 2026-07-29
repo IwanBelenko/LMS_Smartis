@@ -1,0 +1,113 @@
+# Развёртывание HCM / LMS Smartis
+
+## Что потребуется
+
+- Linux-сервер с Docker Engine и Docker Compose;
+- два домена, направленных на сервер:
+  - `lms.company.ru` — интерфейс и API;
+  - `scorm.company.ru` — изолированный SCORM-контент;
+- открытые TCP-порты 80 и 443;
+- каталог вне репозитория для резервных копий.
+
+## Первый запуск
+
+1. Скопируйте проект на сервер.
+2. Создайте production-конфигурацию:
+
+   ~~~bash
+   cp .env.production.example .env
+   ~~~
+
+3. В `.env` обязательно замените:
+
+   - `APP_SITE_ADDRESS` и `SCORM_SITE_ADDRESS`;
+   - `DJANGO_ALLOWED_HOSTS` и `DJANGO_CSRF_TRUSTED_ORIGINS`;
+   - `SCORM_CONTENT_ORIGIN`;
+   - `DJANGO_SECRET_KEY`;
+   - `POSTGRES_PASSWORD`;
+   - `INITIAL_ADMIN_EMAIL` и `INITIAL_ADMIN_PASSWORD`;
+   - `BACKUP_DIR` на каталог, который копируется на отдельный диск или хранилище.
+
+4. Проверьте итоговую конфигурацию и запустите систему:
+
+   ~~~bash
+   docker compose config
+   docker compose up -d --build
+   docker compose ps
+   ~~~
+
+5. Проверьте состояние API:
+
+   ~~~bash
+   curl https://lms.company.ru/api/v1/health/
+   ~~~
+
+   Корректный ответ содержит `status: ok` и `database: ok`.
+
+6. Войдите под первым администратором, смените временный пароль, очистите
+   `INITIAL_ADMIN_EMAIL` и `INITIAL_ADMIN_PASSWORD` в `.env`, затем примените
+   конфигурацию командой `docker compose up -d`.
+
+`BOOTSTRAP_DEMO` в production должен оставаться `false`: демонстрационные
+сотрудники, курсы и тестовый пароль на сервере не создаются.
+
+## Обновление
+
+Перед обновлением создайте резервную копию, затем:
+
+~~~bash
+docker compose --profile maintenance run --rm backup
+docker compose up -d --build
+docker compose ps
+~~~
+
+Миграции базы выполняются автоматически при запуске API. Контейнер API считается
+готовым только после успешного ответа healthcheck, включая соединение с PostgreSQL.
+
+## Резервное копирование
+
+Ручной запуск:
+
+~~~bash
+docker compose --profile maintenance run --rm backup
+~~~
+
+В `BACKUP_DIR` создаётся папка с UTC-датой, содержащая:
+
+- `database.dump` — база PostgreSQL;
+- `media.tar.gz` — видео, документы, обложки и SCORM-файлы;
+- `backup-id.txt` — идентификатор копии.
+
+Копии старше `BACKUP_RETENTION_DAYS` удаляются автоматически. Сам каталог
+`BACKUP_DIR` необходимо дополнительно синхронизировать на другой сервер или в
+объектное хранилище.
+
+Для ежедневного запуска можно добавить в cron:
+
+~~~cron
+15 2 * * * cd /opt/smartis && docker compose --profile maintenance run --rm backup
+~~~
+
+## Восстановление
+
+Остановите API и веб-интерфейс, оставив PostgreSQL запущенным:
+
+~~~bash
+docker compose stop api web proxy
+docker compose --profile maintenance run --rm restore 20260729T120000Z
+docker compose up -d
+~~~
+
+Замените идентификатор на название нужной папки в `BACKUP_DIR`. Восстановление
+заменяет данные PostgreSQL и содержимое тома загруженных файлов, поэтому сначала
+сохраните текущее состояние отдельной копией.
+
+## Проверка после запуска
+
+- открывается основной домен;
+- `/api/v1/health/` возвращает HTTP 200;
+- вход первого администратора работает;
+- загружаются обложка, видео и документ;
+- открывается SCORM на отдельном поддомене;
+- создаётся и читается резервная копия;
+- в `.env` нет демонстрационного пароля и `BOOTSTRAP_DEMO=false`.
