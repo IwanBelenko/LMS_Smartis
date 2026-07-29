@@ -8,7 +8,10 @@ from .views import (
     MeView,
     PasswordResetConfirmView,
     PasswordResetRequestView,
+    UserBlockView,
+    UserDetailView,
     UserListCreateView,
+    UserRestoreView,
 )
 
 urlpatterns = [
@@ -20,5 +23,8 @@ urlpatterns = [
     path("auth/password-reset/<str:uid>/<str:token>/", PasswordResetConfirmView.as_view(), name="password-reset-confirm"),
     path("departments/", DepartmentListCreateView.as_view(), name="departments"),
     path("users/", UserListCreateView.as_view(), name="users"),
+    path("users/<int:pk>/", UserDetailView.as_view(), name="user-detail"),
+    path("users/<int:pk>/block/", UserBlockView.as_view(), name="user-block"),
+    path("users/<int:pk>/restore/", UserRestoreView.as_view(), name="user-restore"),
     path("users/<int:pk>/resend-invitation/", InvitationResendView.as_view(), name="invitation-resend"),
 ]

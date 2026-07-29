@@ -151,3 +151,7 @@ EMAIL_USE_SSL = env_bool("EMAIL_USE_SSL", True)
 EMAIL_USE_TLS = env_bool("EMAIL_USE_TLS", False)
 EMAIL_TIMEOUT = int(os.getenv("EMAIL_TIMEOUT", "15"))
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", EMAIL_HOST_USER or "HCM / LMS Smartis <noreply@localhost>")
+CORPORATE_EMAIL_DOMAINS = [
+    domain.lower().lstrip("@")
+    for domain in env_list("CORPORATE_EMAIL_DOMAINS")
+]

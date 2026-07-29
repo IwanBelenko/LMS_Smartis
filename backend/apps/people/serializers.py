@@ -7,8 +7,10 @@ from django.db import transaction
 from django.utils import timezone
 from django.utils.text import slugify
 from rest_framework import serializers
+from rest_framework.authtoken.models import Token
 
 from apps.identity.models import Department, Invitation, User
+from apps.identity.validators import validate_corporate_email
 from .models import (
     AbsenceRequest,
     Candidate,
@@ -163,7 +165,7 @@ class EmployeeProfileSerializer(serializers.ModelSerializer):
         fields = [
             "id", "user", "full_name", "first_name", "last_name", "email", "employee_number", "department", "department_name",
             "position", "position_name", "grade", "birth_date", "age", "hire_date", "tenure_years",
-            "education", "competencies", "status", "status_label", "checklist_score",
+            "dismissal_date", "education", "competencies", "status", "status_label", "checklist_score",
             "development_progress", "salary_base", "monthly_bonus", "quarterly_bonus", "updated_at",
         ]
         read_only_fields = ["id", "updated_at"]
@@ -202,11 +204,12 @@ class EmployeeProfileWriteSerializer(serializers.ModelSerializer):
         model = EmployeeProfile
         fields = [
             "email", "first_name", "last_name", "employee_number", "department", "position",
-            "grade", "birth_date", "hire_date", "education", "competencies", "status",
+            "grade", "birth_date", "hire_date", "dismissal_date", "education", "competencies", "status",
             "checklist_score", "development_progress", "salary_base", "monthly_bonus", "quarterly_bonus",
         ]
 
     def validate_email(self, value):
+        value = validate_corporate_email(value)
         queryset = User.objects.filter(email__iexact=value)
         if self.instance:
             queryset = queryset.exclude(pk=self.instance.user_id)
@@ -232,6 +235,7 @@ class EmployeeProfileWriteSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         old_department = instance.user.department
         old_position = instance.position
+        old_status = instance.status
         user_data = validated_data.pop("user", {})
         for field, value in user_data.items():
             setattr(instance.user, field, value)
@@ -260,6 +264,24 @@ class EmployeeProfileWriteSerializer(serializers.ModelSerializer):
                 effective_date=today,
                 created_by=actor,
             )
+        if old_status != instance.status and instance.status == EmployeeProfile.Status.DISMISSED:
+            if not instance.dismissal_date:
+                instance.dismissal_date = today
+                instance.save(update_fields=["dismissal_date", "updated_at"])
+            instance.user.status = User.Status.BLOCKED
+            instance.user.save(update_fields=["status"])
+            Token.objects.filter(user=instance.user).delete()
+            EmploymentEvent.objects.create(
+                employee=instance,
+                event_type=EmploymentEvent.Type.DISMISSED,
+                title="Увольнение сотрудника",
+                note=change_source,
+                effective_date=instance.dismissal_date,
+                created_by=actor,
+            )
+        elif old_status == EmployeeProfile.Status.DISMISSED and instance.status != old_status:
+            instance.dismissal_date = None
+            instance.save(update_fields=["dismissal_date", "updated_at"])
         return instance
 
 

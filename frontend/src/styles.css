@@ -963,6 +963,20 @@ td:first-child span { color: var(--muted); font-size: 0.8rem; }
 .users-notice { margin-bottom: 0; }
 .user-invite-button { min-height: 31px; padding: 5px 8px; border-radius: 6px; font-size: .65rem; white-space: nowrap; }
 .user-invite-button svg { width: 14px; height: 14px; }
+.user-access-dialog { width: min(660px, 100%); }
+.user-access-state {
+  padding: 11px 12px; border: 1px solid var(--border); border-radius: 7px;
+  display: flex; align-items: center; gap: 10px; background: var(--surface-soft);
+}
+.user-access-state p { color: var(--muted); font-size: .7rem; }
+.hcm-form > footer.user-access-actions { justify-content: space-between; }
+.user-access-actions > div { display: flex; align-items: center; gap: 8px; }
+.employee-dismissal-warning {
+  padding: 9px 11px; border: 1px solid color-mix(in srgb, var(--danger) 40%, var(--border)); border-radius: 7px;
+  display: grid; align-content: center; gap: 2px; background: color-mix(in srgb, var(--danger) 7%, var(--surface));
+}
+.employee-dismissal-warning span { color: var(--danger); font-size: .7rem; font-weight: 700; }
+.employee-dismissal-warning small { color: var(--muted); font-size: .62rem; }
 
 @media (max-width: 1180px) {
   .longread-workspace { grid-template-columns: 190px minmax(400px, 1fr); }

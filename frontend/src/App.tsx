@@ -124,6 +124,7 @@ type EmployeeProfile = {
   birth_date: string | null;
   age: number | null;
   hire_date: string | null;
+  dismissal_date: string | null;
   tenure_years: number | null;
   education: string;
   competencies: string;
@@ -1545,10 +1546,15 @@ function UsersView({ token }: { token: string }) {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [resendingUser, setResendingUser] = useState<number | null>(null);
+  const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [userBusy, setUserBusy] = useState(false);
   const [form, setForm] = useState({
     email: "", first_name: "", last_name: "", role: "employee", department: "",
   });
   const [departmentName, setDepartmentName] = useState("");
+  const [userForm, setUserForm] = useState({
+    email: "", first_name: "", last_name: "", role: "employee", department: "",
+  });
 
   async function load() {
     try {
@@ -1597,6 +1603,58 @@ function UsersView({ token }: { token: string }) {
       setError(reason instanceof Error ? reason.message : "Не удалось отправить приглашение");
     } finally {
       setResendingUser(null);
+    }
+  }
+
+  function openUser(user: User) {
+    setError("");
+    setNotice("");
+    setEditingUser(user);
+    setUserForm({
+      email: user.email,
+      first_name: user.first_name,
+      last_name: user.last_name,
+      role: user.role,
+      department: user.department ? String(user.department) : "",
+    });
+  }
+
+  async function saveUser(event: FormEvent) {
+    event.preventDefault();
+    if (!editingUser) return;
+    setUserBusy(true);
+    setError("");
+    try {
+      await apiRequest<User>(`/users/${editingUser.id}/`, token, {
+        method: "PATCH",
+        body: JSON.stringify({
+          ...userForm,
+          department: userForm.department ? Number(userForm.department) : null,
+        }),
+      });
+      setEditingUser(null);
+      setNotice("Данные пользователя и права доступа обновлены");
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось обновить пользователя");
+    } finally {
+      setUserBusy(false);
+    }
+  }
+
+  async function changeUserAccess(action: "block" | "restore") {
+    if (!editingUser) return;
+    setUserBusy(true);
+    setError("");
+    try {
+      const updated = await apiRequest<User>(`/users/${editingUser.id}/${action}/`, token, { method: "POST" });
+      setEditingUser(updated);
+      setNotice(action === "block" ? "Доступ пользователя заблокирован" : updated.status === "invited" ? "Доступ возвращён в статус приглашения" : "Доступ пользователя восстановлен");
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось изменить доступ");
+    } finally {
+      setUserBusy(false);
     }
   }
 
@@ -1678,17 +1736,48 @@ function UsersView({ token }: { token: string }) {
                   <td><strong>{item.first_name} {item.last_name}</strong><span>{item.email}</span></td>
                   <td>{item.department_name || "—"}</td><td>{item.role_label}</td>
                   <td><span className={"status status--" + item.status}>{item.status_label}</span></td>
-                  <td>{item.status === "invited" && (
-                    <button className="secondary-button user-invite-button" type="button" disabled={resendingUser === item.id} onClick={() => void resendInvitation(item)}>
-                      <RefreshCw />{resendingUser === item.id ? "Отправляем…" : "Отправить снова"}
-                    </button>
-                  )}</td>
+                  <td><button className="secondary-button user-invite-button" type="button" onClick={() => openUser(item)}><Settings2 />Управлять</button></td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       </section>
+      {editingUser && (
+        <div className="hcm-dialog-backdrop" onMouseDown={(event) => {
+          if (event.target === event.currentTarget && !userBusy) setEditingUser(null);
+        }}>
+          <section className="hcm-dialog user-access-dialog" role="dialog" aria-modal="true" aria-labelledby="user-access-title">
+            <header>
+              <div><span className="eyebrow">Учётная запись</span><h2 id="user-access-title">Пользователь и права</h2><p>Изменения роли применяются сразу после сохранения</p></div>
+              <button className="icon-button" type="button" disabled={userBusy} onClick={() => setEditingUser(null)} aria-label="Закрыть"><X /></button>
+            </header>
+            <form className="hcm-form" onSubmit={saveUser}>
+              <div className="hcm-form__grid">
+                <label>Имя<input value={userForm.first_name} onChange={(event) => setUserForm({ ...userForm, first_name: event.target.value })} required /></label>
+                <label>Фамилия<input value={userForm.last_name} onChange={(event) => setUserForm({ ...userForm, last_name: event.target.value })} required /></label>
+                <label className="hcm-form__wide">Корпоративная почта<input type="email" value={userForm.email} onChange={(event) => setUserForm({ ...userForm, email: event.target.value })} required /></label>
+                <label>Роль<select value={userForm.role} onChange={(event) => setUserForm({ ...userForm, role: event.target.value })}><option value="employee">Сотрудник</option><option value="hr">HR-менеджер</option><option value="admin">Администратор</option><option value="author">Автор курсов</option><option value="leader">Руководитель</option></select></label>
+                <label>Отдел<select value={userForm.department} onChange={(event) => setUserForm({ ...userForm, department: event.target.value })}><option value="">Без отдела</option>{departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+              </div>
+              <div className="user-access-state">
+                <span className={"status status--" + editingUser.status}>{editingUser.status_label}</span>
+                <p>{editingUser.status === "blocked" ? "Вход и действующие сессии отключены." : editingUser.status === "invited" ? "Пользователь ещё не активировал доступ." : "Пользователь может входить в систему."}</p>
+              </div>
+              {error && <p className="form-error">{error}</p>}
+              <footer className="user-access-actions">
+                <div>
+                  {editingUser.status === "invited" && <button className="secondary-button" type="button" disabled={userBusy || resendingUser === editingUser.id} onClick={() => void resendInvitation(editingUser)}><RefreshCw />Отправить приглашение снова</button>}
+                  {editingUser.status === "blocked"
+                    ? <button className="secondary-button" type="button" disabled={userBusy} onClick={() => void changeUserAccess("restore")}>Восстановить доступ</button>
+                    : <button className="danger-button" type="button" disabled={userBusy} onClick={() => void changeUserAccess("block")}>Заблокировать</button>}
+                </div>
+                <div><button className="secondary-button" type="button" onClick={() => setEditingUser(null)}>Отмена</button><button className="primary-button" type="submit" disabled={userBusy}>{userBusy ? "Сохраняем…" : "Сохранить"}</button></div>
+              </footer>
+            </form>
+          </section>
+        </div>
+      )}
     </>
   );
 }
@@ -2290,7 +2379,7 @@ function OrganizationView({ token }: { token: string }) {
 
 const emptyEmployeeForm = {
   first_name: "", last_name: "", email: "", employee_number: "", department: "", position: "",
-  grade: "", birth_date: "", hire_date: "", education: "", competencies: "", status: "employed",
+  grade: "", birth_date: "", hire_date: "", dismissal_date: "", education: "", competencies: "", status: "employed",
   checklist_score: "0", development_progress: "0", salary_base: "", monthly_bonus: "", quarterly_bonus: "",
 };
 
@@ -2348,6 +2437,7 @@ function EmployeesView({ token, user }: { token: string; user: User }) {
       grade: employee.grade || "",
       birth_date: employee.birth_date || "",
       hire_date: employee.hire_date || "",
+      dismissal_date: employee.dismissal_date || "",
       education: employee.education || "",
       competencies: employee.competencies || "",
       status: employee.status,
@@ -2371,6 +2461,7 @@ function EmployeesView({ token, user }: { token: string; user: User }) {
         position: form.position ? Number(form.position) : null,
         birth_date: form.birth_date || null,
         hire_date: form.hire_date || null,
+        dismissal_date: form.dismissal_date || null,
         checklist_score: Number(form.checklist_score),
         development_progress: Number(form.development_progress),
         salary_base: form.salary_base || null,
@@ -2699,7 +2790,9 @@ function EmployeesView({ token, user }: { token: string; user: User }) {
                 <label>Отдел<select value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })}><option value="">Без отдела</option>{departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
                 <label>Должность<select value={form.position} onChange={(e) => setForm({ ...form, position: e.target.value })}><option value="">Не указана</option>{positions.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
                 <label>Грейд<input value={form.grade} onChange={(e) => setForm({ ...form, grade: e.target.value })} placeholder="Junior, Middle, Senior" /></label>
-                <label>Статус<select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}><option value="employed">Работает</option><option value="probation">Испытательный срок</option><option value="dismissed">Уволен</option></select></label>
+                <label>Статус<select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value, dismissal_date: e.target.value === "dismissed" ? (form.dismissal_date || new Date().toISOString().slice(0, 10)) : "" })}><option value="employed">Работает</option><option value="probation">Испытательный срок</option><option value="dismissed" disabled={!editing}>Уволен</option></select></label>
+                {form.status === "dismissed" && <label>Дата увольнения<input type="date" value={form.dismissal_date} onChange={(e) => setForm({ ...form, dismissal_date: e.target.value })} required /></label>}
+                {form.status === "dismissed" && <div className="employee-dismissal-warning"><span>Доступ будет заблокирован</span><small>История, документы и результаты обучения сохранятся.</small></div>}
                 <label>План развития, %<input type="number" min="0" max="100" value={form.development_progress} onChange={(e) => setForm({ ...form, development_progress: e.target.value })} /></label>
                 <label>Чек-лист, %<input type="number" min="0" max="100" value={form.checklist_score} onChange={(e) => setForm({ ...form, checklist_score: e.target.value })} /></label>
                 <label className="hcm-form__wide">Компетенции<textarea value={form.competencies} onChange={(e) => setForm({ ...form, competencies: e.target.value })} placeholder="Ключевые навыки сотрудника" /></label>

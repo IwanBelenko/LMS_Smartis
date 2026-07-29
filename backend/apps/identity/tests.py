@@ -5,6 +5,7 @@ import re
 from django.core.management import call_command
 from django.core import mail
 from django.test import TestCase, override_settings
+from rest_framework.authtoken.models import Token
 from rest_framework.test import APIClient
 
 from .models import Department, Invitation, User
@@ -189,3 +190,67 @@ class IdentityApiTests(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(mail.outbox), 0)
+
+    def test_administrator_updates_role_and_department(self):
+        employee = User.objects.create_user(
+            email="managed@test.local",
+            password="StrongPassword123!",
+            role=User.Role.EMPLOYEE,
+            status=User.Status.ACTIVE,
+        )
+        self.client.force_authenticate(self.admin)
+        response = self.client.patch(
+            f"/api/v1/users/{employee.pk}/",
+            {"role": User.Role.AUTHOR, "department": self.department.pk},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        employee.refresh_from_db()
+        self.assertEqual(employee.role, User.Role.AUTHOR)
+        self.assertEqual(employee.department, self.department)
+
+    def test_blocking_user_revokes_existing_token_and_restore_activates(self):
+        employee = User.objects.create_user(
+            email="blocked@test.local",
+            password="StrongPassword123!",
+            status=User.Status.ACTIVE,
+        )
+        token = Token.objects.create(user=employee)
+        self.client.force_authenticate(self.admin)
+        blocked = self.client.post(f"/api/v1/users/{employee.pk}/block/")
+        self.assertEqual(blocked.status_code, 200)
+        employee.refresh_from_db()
+        self.assertEqual(employee.status, User.Status.BLOCKED)
+        self.assertFalse(Token.objects.filter(pk=token.pk).exists())
+
+        restored = self.client.post(f"/api/v1/users/{employee.pk}/restore/")
+        self.assertEqual(restored.status_code, 200)
+        employee.refresh_from_db()
+        self.assertEqual(employee.status, User.Status.ACTIVE)
+
+    def test_administrator_cannot_block_self_or_remove_last_admin_role(self):
+        self.client.force_authenticate(self.admin)
+        blocked = self.client.post(f"/api/v1/users/{self.admin.pk}/block/")
+        self.assertEqual(blocked.status_code, 400)
+        demoted = self.client.patch(
+            f"/api/v1/users/{self.admin.pk}/",
+            {"role": User.Role.EMPLOYEE},
+            format="json",
+        )
+        self.assertEqual(demoted.status_code, 400)
+
+    @override_settings(CORPORATE_EMAIL_DOMAINS=["smartis.bi"])
+    def test_user_creation_rejects_non_corporate_email_when_domain_is_configured(self):
+        self.client.force_authenticate(self.admin)
+        response = self.client.post(
+            "/api/v1/users/",
+            {
+                "email": "person@gmail.com",
+                "first_name": "Иван",
+                "last_name": "Петров",
+                "role": User.Role.EMPLOYEE,
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("@smartis.bi", response.json()["email"][0])

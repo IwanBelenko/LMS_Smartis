@@ -95,6 +95,7 @@ class EmployeeGoal(models.Model):
 class EmploymentEvent(models.Model):
     class Type(models.TextChoices):
         HIRED = "hired", "Приём"
+        DISMISSED = "dismissed", "Увольнение"
         TRANSFER = "transfer", "Перевод"
         PROMOTION = "promotion", "Повышение"
         REVIEW = "review", "Оценка"

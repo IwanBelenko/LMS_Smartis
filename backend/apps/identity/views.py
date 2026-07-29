@@ -23,6 +23,7 @@ from .serializers import (
     PasswordPairSerializer,
     PasswordResetRequestSerializer,
     UserCreateSerializer,
+    UserUpdateSerializer,
     UserSerializer,
 )
 
@@ -74,6 +75,66 @@ class UserListCreateView(generics.ListCreateAPIView):
             user = serializer.save()
             send_invitation_email(user.invitation)
         return Response(UserSerializer(user).data, status=status.HTTP_201_CREATED)
+
+
+class UserDetailView(generics.RetrieveUpdateAPIView):
+    queryset = User.objects.select_related("department")
+    permission_classes = [IsAdministrator]
+
+    def get_serializer_class(self):
+        return UserSerializer if self.request.method == "GET" else UserUpdateSerializer
+
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop("partial", False)
+        user = self.get_object()
+        serializer = self.get_serializer(user, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(UserSerializer(user).data)
+
+
+class UserBlockView(APIView):
+    permission_classes = [IsAdministrator]
+
+    def post(self, request, pk):
+        user = get_object_or_404(User, pk=pk)
+        if user.pk == request.user.pk:
+            return Response(
+                {"detail": "Нельзя заблокировать собственную учётную запись"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if (
+            user.role == User.Role.ADMIN
+            and user.status == User.Status.ACTIVE
+            and not User.objects.filter(
+                role=User.Role.ADMIN,
+                status=User.Status.ACTIVE,
+            ).exclude(pk=user.pk).exists()
+        ):
+            return Response(
+                {"detail": "В системе должен остаться хотя бы один активный администратор"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        user.status = User.Status.BLOCKED
+        user.save(update_fields=["status"])
+        Token.objects.filter(user=user).delete()
+        return Response(UserSerializer(user).data)
+
+
+class UserRestoreView(APIView):
+    permission_classes = [IsAdministrator]
+
+    def post(self, request, pk):
+        user = get_object_or_404(User, pk=pk)
+        profile = getattr(user, "employee_profile", None)
+        if profile and profile.status == profile.Status.DISMISSED:
+            return Response(
+                {"detail": "Сначала измените кадровый статус уволенного сотрудника"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        user.status = User.Status.ACTIVE if user.has_usable_password() else User.Status.INVITED
+        user.save(update_fields=["status"])
+        return Response(UserSerializer(user).data)
 
 
 def _active_invitation(token):

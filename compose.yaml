@@ -68,6 +68,7 @@ services:
       LOGIN_THROTTLE_RATE: "${LOGIN_THROTTLE_RATE:-10/minute}"
       PASSWORD_RESET_THROTTLE_RATE: "${PASSWORD_RESET_THROTTLE_RATE:-5/hour}"
       INVITATION_THROTTLE_RATE: "${INVITATION_THROTTLE_RATE:-30/hour}"
+      CORPORATE_EMAIL_DOMAINS: "${CORPORATE_EMAIL_DOMAINS:-}"
     depends_on:
       db: { condition: service_healthy }
     volumes: ["media_data:/app/media"]

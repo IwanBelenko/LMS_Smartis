@@ -27,6 +27,7 @@
    - `POSTGRES_PASSWORD`;
    - `INITIAL_ADMIN_EMAIL` и `INITIAL_ADMIN_PASSWORD`;
    - `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD` и `DEFAULT_FROM_EMAIL`;
+   - `CORPORATE_EMAIL_DOMAINS` — разрешённые домены через запятую;
    - `BACKUP_DIR` на каталог, который копируется на отдельный диск или хранилище.
 
 4. Проверьте итоговую конфигурацию и запустите систему:

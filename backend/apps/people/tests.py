@@ -6,6 +6,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from rest_framework.test import APIClient
+from rest_framework.authtoken.models import Token
 
 from apps.identity.models import Department, User
 from apps.learning.models import Course, LearningPath, LearningPathCourse, Lesson
@@ -180,6 +181,30 @@ class PeopleApiTests(TestCase):
         self.assertEqual(updated.json()["grade"], "Middle")
         self.assertEqual(updated.json()["development_progress"], 55)
         self.assertFalse(User.objects.get(email="new.employee@test.local").has_usable_password())
+
+    def test_dismissal_blocks_access_and_preserves_employee_history(self):
+        token = Token.objects.create(user=self.employee)
+        self.client.force_authenticate(self.admin)
+        response = self.client.patch(
+            f"/api/v1/employees/{self.profile.pk}/",
+            {"status": EmployeeProfile.Status.DISMISSED, "dismissal_date": "2026-07-29"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.profile.refresh_from_db()
+        self.employee.refresh_from_db()
+        self.assertEqual(self.profile.dismissal_date.isoformat(), "2026-07-29")
+        self.assertEqual(self.employee.status, User.Status.BLOCKED)
+        self.assertFalse(Token.objects.filter(pk=token.pk).exists())
+        event = EmploymentEvent.objects.get(
+            employee=self.profile,
+            event_type=EmploymentEvent.Type.DISMISSED,
+        )
+        self.assertEqual(event.effective_date.isoformat(), "2026-07-29")
+
+        restore = self.client.post(f"/api/v1/users/{self.employee.pk}/restore/")
+        self.assertEqual(restore.status_code, 400)
+        self.assertTrue(EmployeeProfile.objects.filter(pk=self.profile.pk).exists())
 
     def test_hr_previews_and_commits_csv_employee_import(self):
         self.client.force_authenticate(self.hr)
