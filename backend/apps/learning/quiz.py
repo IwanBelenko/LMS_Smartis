@@ -54,6 +54,11 @@ def validate_quiz_question(question):
     image_url = question.get("image_url", "")
     if image_url is not None and not isinstance(image_url, str):
         raise serializers.ValidationError({"quiz_data": "Ссылка на изображение должна быть строкой"})
+    if any(
+        question.get(field) is not None and not isinstance(question.get(field), str)
+        for field in ("feedback_correct", "feedback_incorrect")
+    ):
+        raise serializers.ValidationError({"quiz_data": "Пояснение к ответу должно быть текстом"})
 
     if kind in {SINGLE_CHOICE, MULTIPLE_CHOICE}:
         options = question.get("options", [])

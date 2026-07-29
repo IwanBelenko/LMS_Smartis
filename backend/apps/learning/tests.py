@@ -606,6 +606,8 @@ class CourseApiTests(TestCase):
                 "max_attempts": 2,
                 "questions": [{
                     "prompt": "Выберите верный ответ",
+                    "feedback_correct": "Именно так.",
+                    "feedback_incorrect": "Повторите материал урока.",
                     "options": [
                         {"text": "Неверно", "correct": False},
                         {"text": "Верно", "correct": True},
@@ -635,6 +637,8 @@ class CourseApiTests(TestCase):
         self.assertEqual(failed.status_code, 200)
         self.assertFalse(failed.data["passed"])
         self.assertEqual(failed.data["attempts_left"], 1)
+        self.assertFalse(failed.data["question_results"][0]["correct"])
+        self.assertEqual(failed.data["question_results"][0]["feedback"], "Повторите материал урока.")
         passed = self.client.post(
             f"/api/v1/my-learning/{enrollment_id}/lessons/{lesson.pk}/submit-quiz/",
             {"answers": [1]},
@@ -642,6 +646,8 @@ class CourseApiTests(TestCase):
         )
         self.assertTrue(passed.data["passed"])
         self.assertEqual(passed.data["score"], 100)
+        self.assertTrue(passed.data["question_results"][0]["correct"])
+        self.assertEqual(passed.data["question_results"][0]["feedback"], "Именно так.")
         self.assertEqual(passed.data["enrollment"]["status"], CourseEnrollment.Status.COMPLETED)
         self.assertEqual(passed.data["enrollment"]["lessons"][0]["attempts_count"], 2)
         self.assertNotIn(
@@ -664,6 +670,8 @@ class CourseApiTests(TestCase):
                     {
                         "type": "single_choice",
                         "prompt": "Один ответ",
+                        "feedback_correct": "Да, это верный вариант.",
+                        "feedback_incorrect": "Посмотрите вводную главу.",
                         "options": [
                             {"text": "Нет", "correct": False},
                             {"text": "Да", "correct": True},
@@ -752,6 +760,8 @@ class CourseApiTests(TestCase):
         self.assertIn('data-type="multiple_choice"', player)
         self.assertIn('data-type="matching"', player)
         self.assertIn('data-type="fill_blank"', player)
+        self.assertIn("Да, это верный вариант.", player)
+        self.assertIn("quiz-question-feedback", player)
 
     def test_advanced_quiz_validation_rejects_invalid_question(self):
         self.client.force_authenticate(self.admin)

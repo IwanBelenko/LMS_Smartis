@@ -527,6 +527,8 @@ type QuizQuestion = {
   image_url?: string;
   image_asset_id?: number | null;
   image_original_name?: string;
+  feedback_correct?: string;
+  feedback_incorrect?: string;
   learner_view?: boolean;
   options: QuizOption[];
   correct_boolean?: boolean;
@@ -4196,6 +4198,8 @@ function createQuizQuestion(type: QuizQuestionType = "single_choice"): QuizQuest
     image_url: "",
     image_asset_id: null,
     image_original_name: "",
+    feedback_correct: "",
+    feedback_incorrect: "",
     options: [],
   };
   if (type === "single_choice" || type === "multiple_choice") {
@@ -4450,7 +4454,7 @@ function QuizPreview({ lesson }: { lesson: Lesson }) {
         <button className="primary-button quiz-preview__submit" type="button" disabled={!quizAnswerComplete(question, chosenAnswer)} onClick={() => { if (chosenAnswer !== undefined) setAnswers((current) => ({ ...current, [currentQuestion]: chosenAnswer })); setQuestionSubmitted(true); }}>Ответить</button>
       ) : (
         <div className={isCorrect ? "quiz-feedback quiz-feedback--correct" : "quiz-feedback quiz-feedback--incorrect"} role="status">
-          <CheckCircle2 /><div><strong>{isCorrect ? "Верно" : "Ответ неверный"}</strong><span>{isCorrect ? "Ответ принят — можно продолжать." : `Правильный ответ: ${correctAnswerSummary(question) || "не указан"}`}</span></div>
+          <CheckCircle2 /><div><strong>{isCorrect ? "Верно" : "Ответ неверный"}</strong><span>{isCorrect ? (question.feedback_correct || "Ответ принят — можно продолжать.") : (question.feedback_incorrect || `Правильный ответ: ${correctAnswerSummary(question) || "не указан"}`)}</span></div>
           <button className="primary-button" type="button" onClick={continueQuiz}>{currentQuestion >= questions.length - 1 ? "Показать результат" : "Следующий вопрос"}<ChevronRight /></button>
         </div>
       )}
@@ -4472,6 +4476,8 @@ function QuizEditor({ value, onChange, token }: { value: QuizData; onChange: (va
       image_url: current.image_url || "",
       image_asset_id: current.image_asset_id || null,
       image_original_name: current.image_original_name || "",
+      feedback_correct: current.feedback_correct || "",
+      feedback_incorrect: current.feedback_incorrect || "",
     } : question) });
   };
 
@@ -4597,6 +4603,13 @@ function QuizEditor({ value, onChange, token }: { value: QuizData; onChange: (va
             {kind === "matching" && <><div className="quiz-editor__pairs">{(question.pairs || []).map((pair, pairIndex) => <div key={pairIndex}><input value={pair.left} onChange={(event) => updateQuestion(questionIndex, { pairs: (question.pairs || []).map((item, index) => index === pairIndex ? { ...item, left: event.target.value } : item) })} placeholder="Понятие" required /><ChevronRight /><input value={pair.right} onChange={(event) => updateQuestion(questionIndex, { pairs: (question.pairs || []).map((item, index) => index === pairIndex ? { ...item, right: event.target.value } : item) })} placeholder="Соответствие" required />{(question.pairs || []).length > 2 && <button className="mini-button mini-button--danger" type="button" onClick={() => updateQuestion(questionIndex, { pairs: (question.pairs || []).filter((_, index) => index !== pairIndex) })}><X /></button>}</div>)}</div><button className="secondary-button quiz-editor__add-option" type="button" onClick={() => updateQuestion(questionIndex, { pairs: [...(question.pairs || []), { left: "", right: "" }] })}><Plus /> Добавить пару</button></>}
             {kind === "ordering" && <><p className="quiz-editor__hint">Расположите элементы сразу в правильном порядке.</p><div className="quiz-editor__ordering">{question.options.map((option, optionIndex) => <div key={optionIndex}><span>{optionIndex + 1}</span><input value={option.text} onChange={(event) => updateQuestion(questionIndex, { options: question.options.map((item, index) => index === optionIndex ? { ...item, text: event.target.value } : item) })} placeholder={`Этап ${optionIndex + 1}`} required /><button className="mini-button" type="button" disabled={optionIndex === 0} onClick={() => updateQuestion(questionIndex, { options: moveQuizItem(question.options, optionIndex, -1) })}><ArrowUp /></button><button className="mini-button" type="button" disabled={optionIndex === question.options.length - 1} onClick={() => updateQuestion(questionIndex, { options: moveQuizItem(question.options, optionIndex, 1) })}><ArrowDown /></button>{question.options.length > 2 && <button className="mini-button mini-button--danger" type="button" onClick={() => updateQuestion(questionIndex, { options: question.options.filter((_, index) => index !== optionIndex) })}><X /></button>}</div>)}</div><button className="secondary-button quiz-editor__add-option" type="button" onClick={() => updateQuestion(questionIndex, { options: [...question.options, { text: "", correct: false }] })}><Plus /> Добавить этап</button></>}
             {(kind === "short_text" || kind === "fill_blank") && <label>Принимаемые ответы<input value={(question.accepted_answers || []).join(", ")} onChange={(event) => updateQuestion(questionIndex, { accepted_answers: event.target.value.split(",").map((item) => item.trim()) })} placeholder="Smartis, Смартис" required /><small>Можно указать несколько вариантов через запятую. Регистр не учитывается.</small></label>}
+            <details className="quiz-editor__feedback">
+              <summary>Обратная связь после ответа</summary>
+              <div>
+                <label>Если ответ верный<textarea value={question.feedback_correct || ""} onChange={(event) => updateQuestion(questionIndex, { feedback_correct: event.target.value })} placeholder="Например: Верно — этот этап запускает процесс." /></label>
+                <label>Если ответ неверный<textarea value={question.feedback_incorrect || ""} onChange={(event) => updateQuestion(questionIndex, { feedback_incorrect: event.target.value })} placeholder="Дайте подсказку, не раскрывая весь материал." /></label>
+              </div>
+            </details>
           </fieldset>
         );
       })}
@@ -4733,7 +4746,12 @@ function LearningCourseModal({
   });
   const [questionIndex, setQuestionIndex] = useState(0);
   const [answers, setAnswers] = useState<Record<number, QuizAnswer>>({});
-  const [quizResult, setQuizResult] = useState<{ score: number; passed: boolean; attempts_left: number } | null>(null);
+  const [quizResult, setQuizResult] = useState<{
+    score: number;
+    passed: boolean;
+    attempts_left: number;
+    question_results: Array<{ question_index: number; correct: boolean; feedback: string }>;
+  } | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const lesson = current.lessons[lessonIndex];
@@ -4792,6 +4810,7 @@ function LearningCourseModal({
         score: number;
         passed: boolean;
         attempts_left: number;
+        question_results: Array<{ question_index: number; correct: boolean; feedback: string }>;
         enrollment: CourseEnrollment;
       }>(`/my-learning/${current.id}/lessons/${lesson.id}/submit-quiz/`, token, {
         method: "POST",
@@ -4851,12 +4870,23 @@ function LearningCourseModal({
                 {error && <div className="form-error">{error}</div>}
                 {lesson.lesson_type === "quiz" ? (
                   quizResult ? (
-                    <div className={quizResult.passed ? "quiz-result quiz-result--passed" : "quiz-result quiz-result--failed"}>
-                      <CheckCircle2 />
-                      <div><strong>{quizResult.passed ? "Тест пройден" : "Проходной балл не набран"}</strong><span>Результат: {quizResult.score}% · осталось попыток: {quizResult.attempts_left}</span></div>
-                      {quizResult.passed
-                        ? <button className="primary-button" type="button" onClick={() => moveForward(current)}>Продолжить <ChevronRight /></button>
-                        : quizResult.attempts_left > 0 && <button className="secondary-button" type="button" onClick={restartQuiz}>Повторить тест</button>}
+                    <div className="learning-quiz-result">
+                      <div className={quizResult.passed ? "quiz-result quiz-result--passed" : "quiz-result quiz-result--failed"}>
+                        <CheckCircle2 />
+                        <div><strong>{quizResult.passed ? "Тест пройден" : "Проходной балл не набран"}</strong><span>Результат: {quizResult.score}% · осталось попыток: {quizResult.attempts_left}</span></div>
+                        {quizResult.passed
+                          ? <button className="primary-button" type="button" onClick={() => moveForward(current)}>Продолжить <ChevronRight /></button>
+                          : quizResult.attempts_left > 0 && <button className="secondary-button" type="button" onClick={restartQuiz}>Повторить тест</button>}
+                      </div>
+                      <div className="quiz-result-review">
+                        <div><span className="eyebrow">Разбор ответов</span><strong>{quizResult.question_results.filter((item) => item.correct).length} из {questions.length} верно</strong></div>
+                        {quizResult.question_results.map((item) => (
+                          <article className={item.correct ? "quiz-result-review__item quiz-result-review__item--correct" : "quiz-result-review__item quiz-result-review__item--incorrect"} key={item.question_index}>
+                            <span>{item.correct ? <CheckCircle2 /> : <X />}</span>
+                            <div><strong>{item.question_index + 1}. {questions[item.question_index]?.prompt}</strong><p>{item.feedback || (item.correct ? "Ответ верный." : "Вернитесь к материалу урока и попробуйте ещё раз.")}</p></div>
+                          </article>
+                        ))}
+                      </div>
                     </div>
                   ) : (
                     <div className="quiz-preview learning-quiz">
@@ -5597,8 +5627,11 @@ function CoursesView({ token, user }: { token: string; user: User }) {
             <ChevronLeft /> К курсам
           </button>
           <div className="longread-editor__identity">
-            <span>{editingCourse?.source_format === "scorm_12" ? "Редактор SCORM 1.2" : "Редактор лонгрида"}</span>
-            <strong>{form.title || "Курс без названия"}</strong>
+            <span className="longread-editor__crumb"><BookOpen /> Учебный материал / {editingCourse?.source_format === "scorm_12" ? "SCORM 1.2" : "Лонгрид"}</span>
+            <div className="longread-editor__title-row">
+              <strong>{form.title || "Курс без названия"}</strong>
+              <span className={`status status--${editingCourse?.status || "draft"}`}>{editingCourse?.status_label || "Черновик"}</span>
+            </div>
           </div>
           <div className="longread-editor__actions">
             <button className="secondary-button" type="button" onClick={previewCurrentCourse}>
@@ -5621,7 +5654,7 @@ function CoursesView({ token, user }: { token: string; user: User }) {
         <div className="longread-workspace">
           <aside className="longread-outline">
             <div className="longread-panel-heading">
-              <div><span>Структура</span><strong>{chapterCountLabel(form.lessons.length)}</strong></div>
+              <div><span>Содержание</span><strong>{chapterCountLabel(form.lessons.length)}</strong></div>
               {editingCourse?.source_format !== "scorm_12" && (
                 <button className="mini-button" type="button" onClick={addLesson} aria-label="Добавить главу"><Plus /></button>
               )}
@@ -6080,35 +6113,40 @@ function CoursesView({ token, user }: { token: string; user: User }) {
           <section className={`course-grid course-grid--${courseView}`} aria-busy={loading}>
         {visibleCourses.map((course) => (
           <article className="panel course-card" key={course.id}>
-            <div className="course-card__top">
-              <div className="course-card__badges">
-                <span className={`status status--${course.status}`}>{course.status_label}</span>
-                {course.source_format === "scorm_12" && <span className="status status--scorm">SCORM 1.2</span>}
-              </div>
-              <button className="icon-button" type="button" onClick={() => editCourse(course)} aria-label={`Редактировать ${course.title}`}><Pencil /></button>
-            </div>
-            <div className="course-card__title"><h2>{course.title}</h2></div>
-            <div className="course-meta"><span><FileText />{chapterCountLabel(course.lessons_count)}</span><span><Clock3 />{course.estimated_minutes} мин</span></div>
-            <div className="course-card__actions">
-              <button className="primary-button course-card__open-scorm" type="button" onClick={() => void openCoursePreview(course)}>
-                <Eye /> Предпросмотр
-              </button>
-              <details className="course-card__more">
-                <summary className="secondary-button"><MoreHorizontal /> Ещё</summary>
-                <div className="course-card__menu">
-                  <label className="content-placement">Переместить<select aria-label={`Расположение курса ${course.title}`} value={placementValue(course.project, course.folder)} onChange={(event) => void moveCourse(course, event.target.value)}>
-                    <option value="unassigned">Без проекта</option>
-                    {projects.map((project) => <option key={`course-project-${project.id}`} value={`p:${project.id}`}>{project.name} · корень</option>)}
-                    {folders.map((folder) => <option key={`course-folder-${folder.id}`} value={`f:${folder.id}`}>{folder.project_name} / {folder.name}</option>)}
-                  </select></label>
-                  <button type="button" disabled={exportingScormId === course.id} onClick={() => void exportScorm(course)}>
-                    <Download /> {exportingScormId === course.id ? "Экспортируем…" : "Экспорт SCORM 1.2"}
-                  </button>
-                  <button type="button" onClick={() => void changePublication(course)}>
-                    {course.status === "published" ? <><CheckCircle2 /> Снять с публикации</> : <><PlayCircle /> Опубликовать</>}
-                  </button>
+            <div className={course.cover_url ? "course-card__visual course-card__visual--image" : "course-card__visual"}>
+              {course.cover_url ? <img src={course.cover_url} alt="" /> : <div className="course-card__visual-placeholder"><BookOpen /><span>SMARTIS COURSE</span></div>}
+              <div className="course-card__top">
+                <div className="course-card__badges">
+                  <span className={`status status--${course.status}`}>{course.status_label}</span>
+                  {course.source_format === "scorm_12" && <span className="status status--scorm">SCORM 1.2</span>}
                 </div>
-              </details>
+                <button className="icon-button" type="button" onClick={() => editCourse(course)} aria-label={`Редактировать ${course.title}`}><Pencil /></button>
+              </div>
+            </div>
+            <div className="course-card__body">
+              <div className="course-card__title"><h2>{course.title}</h2></div>
+              <div className="course-meta"><span><FileText />{chapterCountLabel(course.lessons_count)}</span><span><Clock3 />{course.estimated_minutes} мин</span></div>
+              <div className="course-card__actions">
+                <button className="primary-button course-card__open-scorm" type="button" onClick={() => void openCoursePreview(course)}>
+                  <Eye /> Предпросмотр
+                </button>
+                <details className="course-card__more">
+                  <summary className="secondary-button"><MoreHorizontal /> Ещё</summary>
+                  <div className="course-card__menu">
+                    <label className="content-placement">Переместить<select aria-label={`Расположение курса ${course.title}`} value={placementValue(course.project, course.folder)} onChange={(event) => void moveCourse(course, event.target.value)}>
+                      <option value="unassigned">Без проекта</option>
+                      {projects.map((project) => <option key={`course-project-${project.id}`} value={`p:${project.id}`}>{project.name} · корень</option>)}
+                      {folders.map((folder) => <option key={`course-folder-${folder.id}`} value={`f:${folder.id}`}>{folder.project_name} / {folder.name}</option>)}
+                    </select></label>
+                    <button type="button" disabled={exportingScormId === course.id} onClick={() => void exportScorm(course)}>
+                      <Download /> {exportingScormId === course.id ? "Экспортируем…" : "Экспорт SCORM 1.2"}
+                    </button>
+                    <button type="button" onClick={() => void changePublication(course)}>
+                      {course.status === "published" ? <><CheckCircle2 /> Снять с публикации</> : <><PlayCircle /> Опубликовать</>}
+                    </button>
+                  </div>
+                </details>
+              </div>
             </div>
           </article>
         ))}

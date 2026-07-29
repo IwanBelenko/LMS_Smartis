@@ -258,11 +258,18 @@ class MyLearningViewSet(viewsets.GenericViewSet):
         if progress.attempts_count >= max_attempts and not progress.completed:
             return Response({"detail": "Количество попыток исчерпано"}, status=400)
         correct = 0
+        question_results = []
         for question_index, question in enumerate(questions):
             answer = answers[question_index]
             if not answer_is_valid(question, answer):
                 return Response({"detail": "Один из ответов некорректен"}, status=400)
-            correct += answer_is_correct(question, answer)
+            is_correct = answer_is_correct(question, answer)
+            correct += is_correct
+            question_results.append({
+                "question_index": question_index,
+                "correct": is_correct,
+                "feedback": question.get("feedback_correct" if is_correct else "feedback_incorrect", ""),
+            })
         score = round(correct / max(len(questions), 1) * 100)
         passing_score = quiz_data.get("passing_score", 80)
         passed = score >= passing_score
@@ -288,6 +295,7 @@ class MyLearningViewSet(viewsets.GenericViewSet):
             "passed": passed,
             "attempts_used": attempt_number,
             "attempts_left": max(max_attempts - attempt_number, 0),
+            "question_results": question_results,
             "enrollment": self.get_serializer(refreshed).data,
         })
 
