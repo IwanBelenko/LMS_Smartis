@@ -2521,6 +2521,71 @@ button.vacancy-card { padding: 13px; display: grid; align-content: center; gap: 
 .task-empty strong { color: var(--foreground); font-size: .86rem; }
 .task-empty span { font-size: .72rem; }
 
+.settings-loading { min-height: 260px; display: grid; place-content: center; justify-items: center; gap: 9px; color: var(--muted); }
+.settings-loading svg { color: var(--brand); animation: spin 1s linear infinite; }
+.settings-notice { margin: -8px 0 0; }
+.settings-layout { display: grid; grid-template-columns: minmax(0, 1fr) 260px; align-items: start; gap: 16px; }
+.settings-main, .settings-aside { display: grid; gap: 16px; }
+.settings-aside { position: sticky; top: 18px; }
+.settings-section { padding: 0; overflow: hidden; }
+.settings-section > header {
+  min-height: 72px; padding: 15px 18px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 12px;
+}
+.settings-section > header > svg {
+  width: 30px; height: 30px; padding: 6px; border-radius: 7px;
+  background: color-mix(in srgb, var(--brand) 13%, var(--surface)); color: var(--brand-hover);
+}
+.settings-section > header div { display: grid; gap: 3px; }
+.settings-section > header h2 { font-size: .9rem; }
+.settings-section > header p { margin: 0; font-size: .7rem; }
+.settings-fields { padding: 17px 18px 19px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.settings-fields label { display: grid; gap: 6px; color: var(--muted); font-size: .68rem; font-weight: 650; }
+.settings-fields label:first-child { grid-column: 1 / -1; }
+.settings-fields input, .settings-fields textarea {
+  width: 100%; min-height: 40px; padding: 9px 11px; border: 1px solid var(--border); border-radius: 7px;
+  background: var(--surface); color: var(--foreground);
+}
+.settings-fields textarea { min-height: 108px; resize: vertical; line-height: 1.55; }
+.settings-fields label > span { font-size: .61rem; font-weight: 500; }
+.settings-fields--access { grid-template-columns: minmax(0, 1.4fr) minmax(160px, .6fr); align-items: start; }
+.settings-domains { grid-column: auto !important; }
+.settings-notification-grid { padding: 16px 18px 19px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+.settings-toggle-card {
+  min-height: 72px; padding: 12px; border: 1px solid var(--border); border-radius: 8px;
+  display: grid; grid-template-columns: minmax(0, 1fr) 34px; align-items: center; gap: 12px;
+  position: relative; background: var(--surface); cursor: pointer;
+}
+.settings-toggle-card:hover { background: var(--surface-soft); }
+.settings-toggle-card--active { border-color: color-mix(in srgb, var(--brand) 55%, var(--border)); background: color-mix(in srgb, var(--brand) 7%, var(--surface)); }
+.settings-toggle-card > span { display: grid; gap: 4px; }
+.settings-toggle-card strong { font-size: .75rem; }
+.settings-toggle-card small { color: var(--muted); font-size: .64rem; line-height: 1.35; }
+.settings-toggle-card input { width: 1px; height: 1px; position: absolute; opacity: 0; }
+.settings-toggle-card > i {
+  width: 34px; height: 20px; padding: 2px; border: 1px solid var(--border); border-radius: 999px;
+  display: block; position: relative; background: var(--surface-soft); transition: background 150ms ease;
+}
+.settings-toggle-card > i::after {
+  content: ""; width: 14px; height: 14px; position: absolute; top: 2px; left: 2px; border-radius: 50%;
+  background: var(--muted); transition: transform 150ms ease, background 150ms ease;
+}
+.settings-toggle-card input:checked + i { background: var(--brand); border-color: var(--brand); }
+.settings-toggle-card input:checked + i::after { background: var(--brand-foreground); transform: translateX(14px); }
+.settings-toggle-card:has(input:focus-visible) { outline: 3px solid var(--brand); outline-offset: 2px; }
+.settings-summary, .settings-security { padding: 17px; }
+.settings-summary { display: grid; gap: 14px; }
+.settings-summary dl { margin: 0; display: grid; }
+.settings-summary dl div { min-height: 43px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.settings-summary dt { color: var(--muted); font-size: .67rem; }
+.settings-summary dd { margin: 0; font-size: .75rem; font-weight: 750; }
+.settings-summary p { margin: 0; font-size: .64rem; line-height: 1.45; }
+.settings-security { display: flex; align-items: flex-start; gap: 10px; }
+.settings-security > svg { width: 20px; height: 20px; color: var(--brand-hover); }
+.settings-security div { display: grid; gap: 5px; }
+.settings-security strong { font-size: .72rem; }
+.settings-security p { margin: 0; font-size: .64rem; line-height: 1.45; }
+
 .performance-metrics {
   border: 1px solid var(--border); border-radius: 8px; display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr)); overflow: hidden; background: var(--surface);
@@ -2757,6 +2822,8 @@ button.vacancy-card { padding: 13px; display: grid; align-content: center; gap: 
   .task-list article { grid-template-columns: 36px minmax(180px, 1fr) auto auto; }
   .task-list__due { grid-column: 2 / 3; }
   .task-list__category { display: none; }
+  .settings-layout { grid-template-columns: 1fr; }
+  .settings-aside { position: static; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .performance-reviews article { grid-template-columns: 34px minmax(150px, 1fr) minmax(140px, .8fr) auto; }
   .performance-review__score { display: none !important; }
   .performance-reviews article > button { grid-column: 2 / -1; justify-self: start; }
@@ -2854,6 +2921,8 @@ button.vacancy-card { padding: 13px; display: grid; align-content: center; gap: 
   .task-list article { grid-template-columns: 36px minmax(0, 1fr) auto; }
   .task-list__due { grid-column: 2 / -1; }
   .task-list article > button { grid-column: 2 / -1; justify-self: start; }
+  .settings-fields, .settings-fields--access, .settings-notification-grid, .settings-aside { grid-template-columns: 1fr; }
+  .settings-fields label:first-child, .settings-domains { grid-column: 1 !important; }
   .performance-metrics { grid-template-columns: 1fr; }
   .performance-metrics article + article { border-top: 1px solid var(--border); border-left: 0; }
   .performance-cycles article { grid-template-columns: 1fr auto; }

@@ -5,6 +5,12 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.views import APIView
 
+from apps.identity.permissions import IsAdministrator
+
+from .audit import record_audit
+from .models import get_system_settings
+from .serializers import SystemSettingsSerializer
+
 
 class HealthView(APIView):
     permission_classes = [AllowAny]
@@ -40,3 +46,25 @@ class DashboardView(APIView):
                 ],
             }
         )
+
+
+class SystemSettingsView(APIView):
+    permission_classes = [IsAdministrator]
+
+    def get(self, request):
+        return Response(SystemSettingsSerializer(get_system_settings()).data)
+
+    def put(self, request):
+        configuration = get_system_settings()
+        serializer = SystemSettingsSerializer(configuration, data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save(updated_by=request.user)
+        record_audit(
+            actor=request.user,
+            entity_type="system_settings",
+            entity_id=configuration.pk,
+            action="updated",
+            changes={"fields": sorted(serializer.validated_data.keys())},
+            request=request,
+        )
+        return Response(SystemSettingsSerializer(configuration).data)

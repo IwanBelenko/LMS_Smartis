@@ -241,6 +241,8 @@ class InvitationResendView(APIView):
     permission_classes = [IsAdministrator]
 
     def post(self, request, pk):
+        from apps.core.models import get_system_settings
+
         user = get_object_or_404(User, pk=pk)
         if user.status != User.Status.INVITED:
             return Response(
@@ -254,7 +256,7 @@ class InvitationResendView(APIView):
         invitation.token = uuid.uuid4()
         invitation.created_by = request.user
         invitation.created_at = timezone.now()
-        invitation.expires_at = timezone.now() + timedelta(days=7)
+        invitation.expires_at = timezone.now() + timedelta(days=get_system_settings().invitation_expiry_days)
         invitation.accepted_at = None
         invitation.save()
         send_invitation_email(invitation)

@@ -87,6 +87,7 @@ AUDIT_ENTITY_LABELS = {
     "user": "Пользователи",
     "employee": "Сотрудники",
     "course": "Курсы",
+    "system_settings": "Настройки системы",
     "employee_import": "Импорт сотрудников",
     "learning_import": "Импорт обучения",
     "employee_goal": "Цели",
@@ -532,7 +533,10 @@ class InboxView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        from apps.core.models import get_system_settings
+
         user = request.user
+        configuration = get_system_settings()
         today = date.today()
         week_end = today + timedelta(days=7)
         items = []
@@ -569,34 +573,36 @@ class InboxView(APIView):
                     "danger" if review.cycle.end_date < today else "warning",
                     "Начать",
                 )
-            for assignment in EmployeeLearning.objects.filter(
-                employee=profile,
-                status__in=[EmployeeLearning.Status.ASSIGNED, EmployeeLearning.Status.IN_PROGRESS],
-            ).select_related("course")[:8]:
-                add(
-                    f"learning-{assignment.pk}", "learning", "Продолжить обучение",
-                    assignment.course.title, "trajectory", assignment.course_id,
-                    priority="normal", action_label="К курсу",
-                )
-            for goal in EmployeeGoal.objects.filter(employee=profile).exclude(
-                status=EmployeeGoal.Status.COMPLETED
-            )[:8]:
-                add(
-                    f"goal-{goal.pk}", "goals", "Цель требует внимания",
-                    goal.title, "tasks", goal.pk, goal.due_date,
-                    "danger" if goal.due_date and goal.due_date < today else "warning"
-                    if goal.due_date and goal.due_date <= week_end else "normal",
-                    "Посмотреть",
-                )
-            for event in EmploymentEvent.objects.filter(
-                employee=profile,
-                effective_date__gte=today - timedelta(days=30),
-            )[:6]:
-                add(
-                    f"employment-{event.pk}", "employment", "Кадровое событие",
-                    f"{event.get_event_type_display()} · {event.title}", "tasks", event.pk,
-                    event.effective_date, "normal", "Подробнее",
-                )
+            if configuration.notify_learning:
+                for assignment in EmployeeLearning.objects.filter(
+                    employee=profile,
+                    status__in=[EmployeeLearning.Status.ASSIGNED, EmployeeLearning.Status.IN_PROGRESS],
+                ).select_related("course")[:8]:
+                    add(
+                        f"learning-{assignment.pk}", "learning", "Продолжить обучение",
+                        assignment.course.title, "trajectory", assignment.course_id,
+                        priority="normal", action_label="К курсу",
+                    )
+            if configuration.notify_hr_events:
+                for goal in EmployeeGoal.objects.filter(employee=profile).exclude(
+                    status=EmployeeGoal.Status.COMPLETED
+                )[:8]:
+                    add(
+                        f"goal-{goal.pk}", "goals", "Цель требует внимания",
+                        goal.title, "tasks", goal.pk, goal.due_date,
+                        "danger" if goal.due_date and goal.due_date < today else "warning"
+                        if goal.due_date and goal.due_date <= week_end else "normal",
+                        "Посмотреть",
+                    )
+                for event in EmploymentEvent.objects.filter(
+                    employee=profile,
+                    effective_date__gte=today - timedelta(days=30),
+                )[:6]:
+                    add(
+                        f"employment-{event.pk}", "employment", "Кадровое событие",
+                        f"{event.get_event_type_display()} · {event.title}", "tasks", event.pk,
+                        event.effective_date, "normal", "Подробнее",
+                    )
             for plan in OnboardingPlan.objects.filter(
                 employee=profile, status=OnboardingPlan.Status.ACTIVE
             ):
@@ -674,21 +680,22 @@ class InboxView(APIView):
                     "Открыть",
                 )
 
-        for interview in Interview.objects.filter(
-            Q(participants=user) | Q(created_by=user),
-            status__in=[Interview.Status.SCHEDULED, Interview.Status.IN_PROGRESS],
-            scheduled_at__gte=timezone.now() - timedelta(hours=2),
-        ).select_related("candidate").distinct()[:8]:
-            interview_target = "recruitment" if user.is_superuser or user.role in {User.Role.ADMIN, User.Role.HR} else "tasks"
-            add(
-                f"interview-{interview.pk}", "interviews", "Предстоящее собеседование",
-                f"{interview.candidate.full_name} · {interview.title}", interview_target, interview.pk,
-                interview.scheduled_at.date(),
-                "danger" if interview.scheduled_at <= timezone.now() + timedelta(hours=2) else "warning",
-                "К собеседованию",
-            )
+        if configuration.notify_interviews:
+            for interview in Interview.objects.filter(
+                Q(participants=user) | Q(created_by=user),
+                status__in=[Interview.Status.SCHEDULED, Interview.Status.IN_PROGRESS],
+                scheduled_at__gte=timezone.now() - timedelta(hours=2),
+            ).select_related("candidate").distinct()[:8]:
+                interview_target = "recruitment" if user.is_superuser or user.role in {User.Role.ADMIN, User.Role.HR} else "tasks"
+                add(
+                    f"interview-{interview.pk}", "interviews", "Предстоящее собеседование",
+                    f"{interview.candidate.full_name} · {interview.title}", interview_target, interview.pk,
+                    interview.scheduled_at.date(),
+                    "danger" if interview.scheduled_at <= timezone.now() + timedelta(hours=2) else "warning",
+                    "К собеседованию",
+                )
 
-        if user.is_superuser or user.role == User.Role.ADMIN:
+        if configuration.notify_invitations and (user.is_superuser or user.role == User.Role.ADMIN):
             for invited_user in User.objects.filter(status=User.Status.INVITED).order_by("date_joined")[:8]:
                 add(
                     f"invitation-{invited_user.pk}", "users", "Ожидается активация доступа",

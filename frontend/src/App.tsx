@@ -246,6 +246,19 @@ type AuditResponse = {
     actors: Array<{ id: number; name: string }>;
   };
 };
+type SystemSettingsConfig = {
+  company_name: string;
+  legal_name: string;
+  support_email: string;
+  corporate_email_domains: string[];
+  invitation_expiry_days: number;
+  notify_learning: boolean;
+  notify_interviews: boolean;
+  notify_hr_events: boolean;
+  notify_invitations: boolean;
+  updated_by: number | null;
+  updated_at: string;
+};
 type CandidateStage = { id: number; name: string; position: number; is_terminal: boolean; candidates_count: number };
 type Candidate = {
   id: number;
@@ -1977,6 +1990,112 @@ function AuditLogView({ token }: { token: string }) {
           </section>
         </div>
       )}
+    </>
+  );
+}
+
+function SettingsView({ token }: { token: string }) {
+  const [form, setForm] = useState<SystemSettingsConfig | null>(null);
+  const [domains, setDomains] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+
+  useEffect(() => {
+    apiRequest<SystemSettingsConfig>("/system-settings/", token)
+      .then((configuration) => {
+        setForm(configuration);
+        setDomains(configuration.corporate_email_domains.join("\n"));
+      })
+      .catch((reason) => setError(reason instanceof Error ? reason.message : "Не удалось загрузить настройки"))
+      .finally(() => setLoading(false));
+  }, [token]);
+
+  async function saveSettings(event: FormEvent) {
+    event.preventDefault();
+    if (!form) return;
+    setSaving(true);
+    setError("");
+    setNotice("");
+    try {
+      const updated = await apiRequest<SystemSettingsConfig>("/system-settings/", token, {
+        method: "PUT",
+        body: JSON.stringify({
+          ...form,
+          corporate_email_domains: domains.split(/[\s,;]+/).map((domain) => domain.trim()).filter(Boolean),
+        }),
+      });
+      setForm(updated);
+      setDomains(updated.corporate_email_domains.join("\n"));
+      setNotice("Настройки сохранены и уже применяются");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось сохранить настройки");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (loading) return <section className="panel settings-loading"><RefreshCw /><strong>Загружаем настройки…</strong></section>;
+  if (!form) return <><PageHeader title="Настройки" subtitle="Параметры платформы" />{error && <p className="form-error">{error}</p>}</>;
+
+  const notificationOptions: Array<{ key: "notify_learning" | "notify_interviews" | "notify_hr_events" | "notify_invitations"; title: string; text: string }> = [
+    { key: "notify_learning", title: "Обучение", text: "Назначенные и незавершённые курсы" },
+    { key: "notify_interviews", title: "Собеседования", text: "Предстоящие встречи и участие в интервью" },
+    { key: "notify_hr_events", title: "Кадровые события", text: "Цели, изменения и сроки сотрудника" },
+    { key: "notify_invitations", title: "Приглашения", text: "Ожидающие активации учётные записи" },
+  ];
+
+  return (
+    <>
+      <PageHeader
+        title="Настройки"
+        subtitle="Профиль компании, доступы и правила системных уведомлений"
+        action={<button className="primary-button" type="submit" form="system-settings-form" disabled={saving}><Save />{saving ? "Сохраняем…" : "Сохранить"}</button>}
+      />
+      {error && <p className="form-error">{error}</p>}
+      {notice && <p className="form-notice settings-notice"><CheckCircle2 />{notice}</p>}
+      <form className="settings-layout" id="system-settings-form" onSubmit={saveSettings}>
+        <div className="settings-main">
+          <section className="panel settings-section">
+            <header><Building2 /><div><h2>Профиль компании</h2><p>Название платформы и контакт для сотрудников</p></div></header>
+            <div className="settings-fields">
+              <label>Название платформы<input value={form.company_name} onChange={(event) => setForm({ ...form, company_name: event.target.value })} required /></label>
+              <label>Юридическое название<input value={form.legal_name} onChange={(event) => setForm({ ...form, legal_name: event.target.value })} placeholder="Например, ООО «Смартис»" /></label>
+              <label>Почта поддержки<input type="email" value={form.support_email} onChange={(event) => setForm({ ...form, support_email: event.target.value })} placeholder="support@smartis.bi" /></label>
+            </div>
+          </section>
+          <section className="panel settings-section">
+            <header><Users /><div><h2>Корпоративный доступ</h2><p>По одному домену в строке, без символа @</p></div></header>
+            <div className="settings-fields settings-fields--access">
+              <label className="settings-domains">Разрешённые домены<textarea value={domains} onChange={(event) => setDomains(event.target.value)} placeholder={"smartis.bi\nsmartis.team"} /></label>
+              <label>Срок приглашения<input type="number" min="1" max="30" value={form.invitation_expiry_days} onChange={(event) => setForm({ ...form, invitation_expiry_days: Number(event.target.value) })} /><span>от 1 до 30 дней</span></label>
+            </div>
+          </section>
+          <section className="panel settings-section">
+            <header><Bell /><div><h2>Системные уведомления</h2><p>Какие события попадут в центр задач пользователей</p></div></header>
+            <div className="settings-notification-grid">
+              {notificationOptions.map((option) => (
+                <label className={form[option.key] ? "settings-toggle-card settings-toggle-card--active" : "settings-toggle-card"} key={option.key}>
+                  <span><strong>{option.title}</strong><small>{option.text}</small></span>
+                  <input type="checkbox" checked={form[option.key]} onChange={(event) => setForm({ ...form, [option.key]: event.target.checked })} />
+                  <i aria-hidden="true" />
+                </label>
+              ))}
+            </div>
+          </section>
+        </div>
+        <aside className="settings-aside">
+          <section className="panel settings-summary">
+            <span className="eyebrow">Текущая политика</span>
+            <dl><div><dt>Доменов</dt><dd>{domains.split(/[\s,;]+/).filter(Boolean).length}</dd></div><div><dt>Приглашение</dt><dd>{form.invitation_expiry_days} дн.</dd></div><div><dt>Каналов</dt><dd>{notificationOptions.filter((option) => form[option.key]).length} из 4</dd></div></dl>
+            <p>{form.updated_at ? `Последнее сохранение: ${new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" }).format(new Date(form.updated_at))}` : "Настройки ещё не изменялись"}</p>
+          </section>
+          <section className="panel settings-security">
+            <Settings2 /><div><strong>Секреты остаются на сервере</strong><p>SMTP-пароль, ключ Django и параметры базы не выводятся в интерфейс и задаются при развёртывании.</p></div>
+          </section>
+        </aside>
+      </form>
     </>
   );
 }
@@ -6906,6 +7025,8 @@ function App() {
           <ProductUpdatesView token={token} />
         ) : active === "audit" ? (
           <AuditLogView token={token} />
+        ) : active === "settings" ? (
+          <SettingsView token={token} />
         ) : (
           <Placeholder active={active} />
         )}

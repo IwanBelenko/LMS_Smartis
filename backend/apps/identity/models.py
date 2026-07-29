@@ -105,5 +105,7 @@ class Invitation(models.Model):
 
     def save(self, *args, **kwargs):
         if not self.expires_at:
-            self.expires_at = timezone.now() + timedelta(days=7)
+            from apps.core.models import get_system_settings
+
+            self.expires_at = timezone.now() + timedelta(days=get_system_settings().invitation_expiry_days)
         super().save(*args, **kwargs)
