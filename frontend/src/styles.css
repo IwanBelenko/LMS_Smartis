@@ -422,6 +422,14 @@ svg { width: 20px; height: 20px; flex: 0 0 auto; }
 }
 .form-panel { display: grid; gap: 18px; }
 .user-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.user-compensation-access {
+  min-height: 58px; padding: 11px 12px; border: 1px solid var(--border); border-radius: 9px;
+  grid-column: 1 / -1; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 10px;
+  background: color-mix(in srgb, var(--brand) 6%, var(--surface)); cursor: pointer;
+}
+.user-compensation-access input { width: 17px; min-height: 17px; accent-color: var(--brand); }
+.user-compensation-access span { display: grid; gap: 2px; color: var(--foreground); }
+.user-compensation-access small { color: var(--muted); font-size: .68rem; font-weight: 400; line-height: 1.35; }
 label { display: grid; gap: 6px; color: var(--muted); font-size: 0.85rem; font-weight: 650; }
 input, select, textarea {
   width: 100%; min-height: 42px; padding: 9px 11px; border: 1px solid var(--border);
@@ -2144,6 +2152,12 @@ button.vacancy-card { padding: 13px; display: grid; align-content: center; gap: 
 .employee-competencies { grid-column: 1 / -1; }
 .employee-competencies > div:last-child { padding-top: 14px; display: flex; flex-wrap: wrap; gap: 7px; }
 .employee-competencies > div:last-child > span { padding: 5px 9px; border-radius: 5px; background: color-mix(in srgb, var(--brand) 14%, var(--surface)); font-size: 0.78rem; }
+.employee-compensation { grid-column: 1 / -1; }
+.employee-compensation dl { padding-top: 12px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.employee-compensation dl > div { padding: 10px 12px; border-left: 1px solid var(--border); display: grid; gap: 4px; }
+.employee-compensation dl > div:first-child { border-left: 0; }
+.employee-compensation dt { color: var(--muted); font-size: .7rem; }
+.employee-compensation dd { margin: 0; font-size: .92rem; font-weight: 700; }
 .employee-profile-section { display: grid; gap: 14px; }
 .employee-profile-section > header { min-height: 48px; display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; }
 .employee-profile-section > header p { margin-top: 4px; color: var(--muted); font-size: 0.8rem; }
@@ -2841,7 +2855,10 @@ button.vacancy-card { padding: 13px; display: grid; align-content: center; gap: 
   .hr-dashboard-metric:nth-child(4) { border-top: 1px solid var(--border); }
   .hr-dashboard-grid, .hr-dashboard-grid--lower { grid-template-columns: 1fr; }
   .employee-overview { grid-template-columns: 1fr; }
-  .employee-competencies { grid-column: 1; }
+  .employee-competencies, .employee-compensation { grid-column: 1; }
+  .employee-compensation dl { grid-template-columns: 1fr; }
+  .employee-compensation dl > div { border-left: 0; border-bottom: 1px solid var(--border); }
+  .employee-compensation dl > div:last-child { border-bottom: 0; }
   .onboarding-layout { grid-template-columns: 1fr; }
   .organization-layout { grid-template-columns: 1fr; }
   .organization-tree, .organization-details { min-height: auto; }

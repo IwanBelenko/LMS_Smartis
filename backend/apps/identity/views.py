@@ -101,6 +101,7 @@ class UserDetailView(generics.RetrieveUpdateAPIView):
             "first_name": user.first_name,
             "last_name": user.last_name,
             "role": user.role,
+            "can_view_compensation": user.can_view_compensation,
             "department_id": user.department_id,
         }
         serializer = self.get_serializer(user, data=request.data, partial=partial)
@@ -111,6 +112,7 @@ class UserDetailView(generics.RetrieveUpdateAPIView):
             "first_name": user.first_name,
             "last_name": user.last_name,
             "role": user.role,
+            "can_view_compensation": user.can_view_compensation,
             "department_id": user.department_id,
         }
         record_audit(

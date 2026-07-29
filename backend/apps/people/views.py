@@ -46,7 +46,7 @@ from .models import (
     PerformanceScore,
     ProductUpdate,
 )
-from .permissions import IsHcmUser, IsRecruiter
+from .permissions import IsHcmRegistryUser, IsHcmUser, IsRecruiter
 from .serializers import (
     AbsenceRequestSerializer,
     CandidateSerializer,
@@ -978,13 +978,18 @@ class AbsenceCancelView(APIView):
 
 
 class EmployeeListCreateView(generics.ListCreateAPIView):
-    permission_classes = [IsHcmUser]
+    permission_classes = [IsHcmRegistryUser]
 
     def get_serializer_class(self):
         return EmployeeProfileWriteSerializer if self.request.method == "POST" else EmployeeProfileSerializer
 
     def get_queryset(self):
         queryset = EmployeeProfile.objects.select_related("user__department", "position")
+        if self.request.user.role == User.Role.LEADER:
+            queryset = (
+                queryset.filter(user__department_id=self.request.user.department_id)
+                if self.request.user.department_id else queryset.none()
+            )
         query = self.request.query_params.get("q", "").strip()
         if query:
             queryset = queryset.filter(
@@ -1167,10 +1172,16 @@ class LearningImportView(APIView):
 
 
 class EmployeeDetailView(generics.RetrieveUpdateAPIView):
-    permission_classes = [IsHcmUser]
+    permission_classes = [IsHcmRegistryUser]
 
     def get_queryset(self):
-        return EmployeeProfile.objects.select_related("user__department", "position")
+        queryset = EmployeeProfile.objects.select_related("user__department", "position")
+        if self.request.user.role == User.Role.LEADER:
+            queryset = (
+                queryset.filter(user__department_id=self.request.user.department_id)
+                if self.request.user.department_id else queryset.none()
+            )
+        return queryset
 
     def get_serializer_class(self):
         return EmployeeProfileSerializer if self.request.method == "GET" else EmployeeProfileWriteSerializer
@@ -1210,10 +1221,15 @@ class EmployeeDetailView(generics.RetrieveUpdateAPIView):
 
 
 class EmployeeScopedMixin:
-    permission_classes = [IsHcmUser]
+    permission_classes = [IsHcmRegistryUser]
 
     def get_employee(self):
         queryset = EmployeeProfile.objects.select_related("user__department")
+        if self.request.user.role == User.Role.LEADER:
+            queryset = (
+                queryset.filter(user__department_id=self.request.user.department_id)
+                if self.request.user.department_id else queryset.none()
+            )
         return get_object_or_404(queryset, pk=self.kwargs["employee_id"])
 
 
@@ -1262,13 +1278,16 @@ class EmployeeDocumentListCreateView(EmployeeScopedMixin, generics.ListCreateAPI
 
 
 class EmployeeOnboardingView(APIView):
-    permission_classes = [IsHcmUser]
+    permission_classes = [IsHcmRegistryUser]
 
     def get_employee(self, employee_id):
-        return get_object_or_404(
-            EmployeeProfile.objects.select_related("user__department", "position"),
-            pk=employee_id,
-        )
+        queryset = EmployeeProfile.objects.select_related("user__department", "position")
+        if self.request.user.role == User.Role.LEADER:
+            queryset = (
+                queryset.filter(user__department_id=self.request.user.department_id)
+                if self.request.user.department_id else queryset.none()
+            )
+        return get_object_or_404(queryset, pk=employee_id)
 
     def get(self, request, employee_id):
         plan = OnboardingPlan.objects.filter(employee=self.get_employee(employee_id)).select_related(
@@ -1728,7 +1747,7 @@ class OnboardingOptionsView(APIView):
 
 class PositionListView(generics.ListAPIView):
     serializer_class = PositionSerializer
-    permission_classes = [IsHcmUser]
+    permission_classes = [IsHcmRegistryUser]
     queryset = Position.objects.filter(is_active=True)
 
 
@@ -1761,10 +1780,15 @@ class StaffPositionDetailView(generics.RetrieveUpdateAPIView):
 
 
 class HcmSummaryView(APIView):
-    permission_classes = [IsHcmUser]
+    permission_classes = [IsHcmRegistryUser]
 
     def get(self, request):
         employees = EmployeeProfile.objects.all()
+        if request.user.role == User.Role.LEADER:
+            employees = (
+                employees.filter(user__department_id=request.user.department_id)
+                if request.user.department_id else employees.none()
+            )
         candidates = Candidate.objects.filter(hired_employee__isnull=True)
         return Response(
             {
@@ -1773,8 +1797,8 @@ class HcmSummaryView(APIView):
                 "average_development_progress": round(
                     sum(employees.values_list("development_progress", flat=True)) / max(employees.count(), 1)
                 ),
-                "candidates_total": candidates.count(),
-                "open_positions": Vacancy.objects.filter(status=Vacancy.Status.OPEN).count(),
+                "candidates_total": 0 if request.user.role == User.Role.LEADER else candidates.count(),
+                "open_positions": 0 if request.user.role == User.Role.LEADER else Vacancy.objects.filter(status=Vacancy.Status.OPEN).count(),
             }
         )
 

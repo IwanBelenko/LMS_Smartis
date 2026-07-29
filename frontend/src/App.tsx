@@ -80,6 +80,7 @@ type User = {
   role_label: string;
   status: string;
   status_label: string;
+  can_view_compensation: boolean;
   department: number | null;
   department_name: string | null;
 };
@@ -885,9 +886,11 @@ const adminNav = [
 ];
 
 function visibleHcmNav(user: User) {
-  return user.role === "admin" || user.role === "hr"
-    ? hcmNav
-    : hcmNav.filter((item) => item.id === "tasks" || item.id === "documents");
+  if (user.role === "admin" || user.role === "hr") return hcmNav;
+  if (user.role === "leader") {
+    return hcmNav.filter((item) => ["tasks", "documents", "absences", "employees"].includes(item.id));
+  }
+  return hcmNav.filter((item) => item.id === "tasks" || item.id === "documents");
 }
 
 function visibleAdminNav(user: User) {
@@ -1630,7 +1633,7 @@ const roleAccessCards = [
   { role: "author", title: "Автор курсов", access: "Создаёт и редактирует свои курсы и проекты обучения." },
   { role: "hr", title: "HR-менеджер", access: "Работает с сотрудниками, подбором и HR-аналитикой." },
   { role: "admin", title: "Администратор", access: "Полный доступ, пользователи, роли, HCM и все курсы." },
-  { role: "leader", title: "Руководитель", access: "Проходит обучение как сотрудник; управленческие отчёты добавим отдельно." },
+  { role: "leader", title: "Руководитель", access: "Видит сотрудников только своего отдела. Зарплаты — по отдельному разрешению." },
 ];
 
 function UsersView({ token }: { token: string }) {
@@ -1643,11 +1646,11 @@ function UsersView({ token }: { token: string }) {
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [userBusy, setUserBusy] = useState(false);
   const [form, setForm] = useState({
-    email: "", first_name: "", last_name: "", role: "employee", department: "",
+    email: "", first_name: "", last_name: "", role: "employee", department: "", can_view_compensation: false,
   });
   const [departmentName, setDepartmentName] = useState("");
   const [userForm, setUserForm] = useState({
-    email: "", first_name: "", last_name: "", role: "employee", department: "",
+    email: "", first_name: "", last_name: "", role: "employee", department: "", can_view_compensation: false,
   });
 
   async function load() {
@@ -1677,7 +1680,7 @@ function UsersView({ token }: { token: string }) {
           department: form.department ? Number(form.department) : null,
         }),
       });
-      setForm({ email: "", first_name: "", last_name: "", role: "employee", department: "" });
+      setForm({ email: "", first_name: "", last_name: "", role: "employee", department: "", can_view_compensation: false });
       setShowForm(false);
       setNotice("Пользователь создан, приглашение отправлено на корпоративную почту");
       await load();
@@ -1710,6 +1713,7 @@ function UsersView({ token }: { token: string }) {
       last_name: user.last_name,
       role: user.role,
       department: user.department ? String(user.department) : "",
+      can_view_compensation: user.can_view_compensation,
     });
   }
 
@@ -1799,7 +1803,7 @@ function UsersView({ token }: { token: string }) {
             <label>Имя<input value={form.first_name} onChange={(e) => setForm({ ...form, first_name: e.target.value })} required /></label>
             <label>Фамилия<input value={form.last_name} onChange={(e) => setForm({ ...form, last_name: e.target.value })} required /></label>
             <label>Email<input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required /></label>
-            <label>Роль<select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
+            <label>Роль<select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value, can_view_compensation: ["hr", "leader"].includes(e.target.value) ? form.can_view_compensation : false })}>
               <option value="employee">Сотрудник</option><option value="hr">HR-менеджер</option>
               <option value="admin">Администратор</option><option value="author">Автор курсов</option>
               <option value="leader">Руководитель</option>
@@ -1807,6 +1811,7 @@ function UsersView({ token }: { token: string }) {
             <label>Отдел<select value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })}>
               <option value="">Без отдела</option>{departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
             </select></label>
+            {["hr", "leader"].includes(form.role) && <label className="user-compensation-access"><input type="checkbox" checked={form.can_view_compensation} onChange={(event) => setForm({ ...form, can_view_compensation: event.target.checked })} /><span><strong>Доступ к оплате труда</strong><small>Показывать оклад и премии в карточках сотрудников</small></span></label>}
             <button className="primary-button" type="submit">Создать приглашение</button>
           </form>
         </section>
@@ -1828,7 +1833,7 @@ function UsersView({ token }: { token: string }) {
               {users.map((item) => (
                 <tr key={item.id}>
                   <td><strong>{item.first_name} {item.last_name}</strong><span>{item.email}</span></td>
-                  <td>{item.department_name || "—"}</td><td>{item.role_label}</td>
+                  <td>{item.department_name || "—"}</td><td>{item.role_label}{item.can_view_compensation && item.role !== "admin" && <span>Оплата труда</span>}</td>
                   <td><span className={"status status--" + item.status}>{item.status_label}</span></td>
                   <td><button className="secondary-button user-invite-button" type="button" onClick={() => openUser(item)}><Settings2 />Управлять</button></td>
                 </tr>
@@ -1851,8 +1856,9 @@ function UsersView({ token }: { token: string }) {
                 <label>Имя<input value={userForm.first_name} onChange={(event) => setUserForm({ ...userForm, first_name: event.target.value })} required /></label>
                 <label>Фамилия<input value={userForm.last_name} onChange={(event) => setUserForm({ ...userForm, last_name: event.target.value })} required /></label>
                 <label className="hcm-form__wide">Корпоративная почта<input type="email" value={userForm.email} onChange={(event) => setUserForm({ ...userForm, email: event.target.value })} required /></label>
-                <label>Роль<select value={userForm.role} onChange={(event) => setUserForm({ ...userForm, role: event.target.value })}><option value="employee">Сотрудник</option><option value="hr">HR-менеджер</option><option value="admin">Администратор</option><option value="author">Автор курсов</option><option value="leader">Руководитель</option></select></label>
+                <label>Роль<select value={userForm.role} onChange={(event) => setUserForm({ ...userForm, role: event.target.value, can_view_compensation: ["hr", "leader"].includes(event.target.value) ? userForm.can_view_compensation : false })}><option value="employee">Сотрудник</option><option value="hr">HR-менеджер</option><option value="admin">Администратор</option><option value="author">Автор курсов</option><option value="leader">Руководитель</option></select></label>
                 <label>Отдел<select value={userForm.department} onChange={(event) => setUserForm({ ...userForm, department: event.target.value })}><option value="">Без отдела</option>{departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+                {["hr", "leader"].includes(userForm.role) && <label className="hcm-form__wide user-compensation-access"><input type="checkbox" checked={userForm.can_view_compensation} onChange={(event) => setUserForm({ ...userForm, can_view_compensation: event.target.checked })} /><span><strong>Разрешить просмотр оплаты труда</strong><small>Пользователь увидит оклады, месячные и квартальные премии.</small></span></label>}
               </div>
               <div className="user-access-state">
                 <span className={"status status--" + editingUser.status}>{editingUser.status_label}</span>
@@ -1891,6 +1897,7 @@ const auditFieldLabels: Record<string, string> = {
   updated: "Обновлено",
   row_number: "Строка импорта",
   batch_id: "Пакет импорта",
+  can_view_compensation: "Доступ к оплате труда",
 };
 
 function auditValue(value: unknown): string {
@@ -2100,12 +2107,12 @@ function SettingsView({ token }: { token: string }) {
   );
 }
 
-function HcmMetricCards({ summary }: { summary: HcmSummary | null }) {
+function HcmMetricCards({ summary, leaderView = false }: { summary: HcmSummary | null; leaderView?: boolean }) {
   const metrics = [
     ["Сотрудники", summary?.employees_total ?? "—", "Активные карточки"],
     ["Испытательный срок", summary?.on_probation ?? "—", "Требуют внимания"],
     ["План развития", summary ? `${summary.average_development_progress}%` : "—", "Средний прогресс"],
-    ["Кандидаты", summary?.candidates_total ?? "—", `${summary?.open_positions ?? "—"} открытых позиций`],
+    ...(!leaderView ? [["Кандидаты", summary?.candidates_total ?? "—", `${summary?.open_positions ?? "—"} открытых позиций`]] : []),
   ];
   return (
     <section className="hcm-metrics">
@@ -2316,6 +2323,16 @@ function EmployeeProfileView({
             <div className="section-heading"><div><h2>Компетенции</h2><p>Ключевые навыки и зоны экспертизы</p></div></div>
             <div>{employee.competencies ? employee.competencies.split(/[,;\n]/).filter(Boolean).map((item) => <span key={item.trim()}>{item.trim()}</span>) : <p>Компетенции пока не заполнены</p>}</div>
           </section>
+          {"salary_base" in employee && (
+            <section className="panel employee-compensation">
+              <div className="section-heading"><div><h2>Оплата труда</h2><p>Доступна только пользователям с отдельным разрешением</p></div></div>
+              <dl>
+                <div><dt>Оклад</dt><dd>{employee.salary_base ? `${Number(employee.salary_base).toLocaleString("ru-RU")} ₽` : "—"}</dd></div>
+                <div><dt>Месячная премия</dt><dd>{employee.monthly_bonus ? `${Number(employee.monthly_bonus).toLocaleString("ru-RU")} ₽` : "—"}</dd></div>
+                <div><dt>Квартальная премия</dt><dd>{employee.quarterly_bonus ? `${Number(employee.quarterly_bonus).toLocaleString("ru-RU")} ₽` : "—"}</dd></div>
+              </dl>
+            </section>
+          )}
         </div>
       )}
 
@@ -2339,7 +2356,7 @@ function EmployeeProfileView({
                   <div className="section-heading"><div><h3>Чек-лист адаптации</h3><p>Задачи сотрудника и ответственного</p></div></div>
                   <div>{onboarding.checklist.map((item) => (
                     <label key={item.id} className={item.done ? "onboarding-task onboarding-task--done" : "onboarding-task"}>
-                      <input type="checkbox" checked={item.done} onChange={() => void toggleOnboardingItem(item.id)} />
+                      <input type="checkbox" checked={item.done} disabled={!canManage} onChange={() => void toggleOnboardingItem(item.id)} />
                       <span>{item.title}</span>
                     </label>
                   ))}</div>
@@ -2702,6 +2719,7 @@ const emptyEmployeeForm = {
 };
 
 function EmployeesView({ token, user }: { token: string; user: User }) {
+  const canViewCompensation = user.role === "admin" || user.can_view_compensation;
   const [employees, setEmployees] = useState<EmployeeProfile[]>([]);
   const [summary, setSummary] = useState<HcmSummary | null>(null);
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -2782,9 +2800,11 @@ function EmployeesView({ token, user }: { token: string; user: User }) {
         dismissal_date: form.dismissal_date || null,
         checklist_score: Number(form.checklist_score),
         development_progress: Number(form.development_progress),
-        salary_base: form.salary_base || null,
-        monthly_bonus: form.monthly_bonus || null,
-        quarterly_bonus: form.quarterly_bonus || null,
+        ...(canViewCompensation ? {
+          salary_base: form.salary_base || null,
+          monthly_bonus: form.monthly_bonus || null,
+          quarterly_bonus: form.quarterly_bonus || null,
+        } : {}),
       };
       await apiRequest<EmployeeProfile>(editing ? `/employees/${editing.id}/` : "/employees/", token, {
         method: editing ? "PATCH" : "POST",
@@ -2907,7 +2927,7 @@ function EmployeesView({ token, user }: { token: string; user: User }) {
           </div>
         ) : undefined}
       />
-      <HcmMetricCards summary={summary} />
+      <HcmMetricCards summary={summary} leaderView={user.role === "leader"} />
       <section className="hcm-toolbar">
         <label className="hcm-search">
           <Search aria-hidden="true" />
@@ -3113,6 +3133,7 @@ function EmployeesView({ token, user }: { token: string; user: User }) {
                 {form.status === "dismissed" && <div className="employee-dismissal-warning"><span>Доступ будет заблокирован</span><small>История, документы и результаты обучения сохранятся.</small></div>}
                 <label>План развития, %<input type="number" min="0" max="100" value={form.development_progress} onChange={(e) => setForm({ ...form, development_progress: e.target.value })} /></label>
                 <label>Чек-лист, %<input type="number" min="0" max="100" value={form.checklist_score} onChange={(e) => setForm({ ...form, checklist_score: e.target.value })} /></label>
+                {canViewCompensation && <><label>Оклад<input type="number" min="0" value={form.salary_base} onChange={(e) => setForm({ ...form, salary_base: e.target.value })} /></label><label>Месячная премия<input type="number" min="0" value={form.monthly_bonus} onChange={(e) => setForm({ ...form, monthly_bonus: e.target.value })} /></label><label>Квартальная премия<input type="number" min="0" value={form.quarterly_bonus} onChange={(e) => setForm({ ...form, quarterly_bonus: e.target.value })} /></label></>}
                 <label className="hcm-form__wide">Компетенции<textarea value={form.competencies} onChange={(e) => setForm({ ...form, competencies: e.target.value })} placeholder="Ключевые навыки сотрудника" /></label>
               </div>
               {error && <p className="form-error">{error}</p>}

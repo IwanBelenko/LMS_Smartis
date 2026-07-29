@@ -54,6 +54,7 @@ class UserManager(BaseUserManager):
         extra_fields.setdefault("is_superuser", True)
         extra_fields.setdefault("role", User.Role.ADMIN)
         extra_fields.setdefault("status", User.Status.ACTIVE)
+        extra_fields.setdefault("can_view_compensation", True)
         return self.create_user(email, password, **extra_fields)
 
 
@@ -74,6 +75,7 @@ class User(AbstractUser):
     email = models.EmailField("Email", unique=True)
     role = models.CharField("Роль", max_length=20, choices=Role.choices, default=Role.EMPLOYEE)
     status = models.CharField("Статус", max_length=20, choices=Status.choices, default=Status.INVITED)
+    can_view_compensation = models.BooleanField("Может видеть оплату труда", default=False)
     department = models.ForeignKey(
         Department,
         verbose_name="Отдел",

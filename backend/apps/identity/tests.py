@@ -94,6 +94,31 @@ class IdentityApiTests(TestCase):
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.json()["role"], User.Role.HR)
 
+    def test_administrator_controls_compensation_permission_by_role(self):
+        self.authenticate()
+        response = self.client.post(
+            "/api/v1/users/",
+            {
+                "email": "leader.compensation@test.local",
+                "first_name": "Анна",
+                "last_name": "Руководитель",
+                "role": User.Role.LEADER,
+                "department": self.department.pk,
+                "can_view_compensation": True,
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(response.json()["can_view_compensation"])
+
+        changed = self.client.patch(
+            f"/api/v1/users/{response.json()['id']}/",
+            {"role": User.Role.EMPLOYEE},
+            format="json",
+        )
+        self.assertEqual(changed.status_code, 200)
+        self.assertFalse(changed.json()["can_view_compensation"])
+
     def test_ensure_admin_creates_only_initial_administrator(self):
         with patch.dict(
             "os.environ",

@@ -181,7 +181,11 @@ class EmployeeProfileSerializer(serializers.ModelSerializer):
         request = self.context.get("request")
         can_view_salary = bool(
             request
-            and (request.user.is_superuser or request.user.role in {User.Role.ADMIN, User.Role.HR})
+            and (
+                request.user.is_superuser
+                or request.user.role == User.Role.ADMIN
+                or request.user.can_view_compensation
+            )
         )
         if not can_view_salary:
             for field in ("salary_base", "monthly_bonus", "quarterly_bonus"):
@@ -216,6 +220,23 @@ class EmployeeProfileWriteSerializer(serializers.ModelSerializer):
         if queryset.exists():
             raise serializers.ValidationError("Пользователь с таким email уже существует")
         return value
+
+    def validate(self, attrs):
+        request = self.context.get("request")
+        compensation_fields = {"salary_base", "monthly_bonus", "quarterly_bonus"}
+        can_manage_compensation = bool(
+            request
+            and (
+                request.user.is_superuser
+                or request.user.role == User.Role.ADMIN
+                or request.user.can_view_compensation
+            )
+        )
+        if compensation_fields.intersection(self.initial_data) and not can_manage_compensation:
+            raise serializers.ValidationError({
+                "compensation": "Нет разрешения на просмотр и изменение оплаты труда",
+            })
+        return attrs
 
     @transaction.atomic
     def create(self, validated_data):

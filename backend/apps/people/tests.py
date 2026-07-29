@@ -97,10 +97,39 @@ class PeopleApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("salary_base", response.json()[0])
 
-    def test_leader_cannot_open_hcm_registry(self):
+    def test_leader_sees_only_own_department_without_compensation(self):
         self.client.force_authenticate(self.leader)
         response = self.client.get("/api/v1/employees/")
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json()), 1)
+        self.assertEqual(response.json()[0]["email"], self.employee.email)
+        self.assertNotIn("salary_base", response.json()[0])
+        self.assertEqual(
+            self.client.get(f"/api/v1/employees/{self.other_employee.employee_profile.pk}/").status_code,
+            404,
+        )
+        self.assertEqual(
+            self.client.post(
+                "/api/v1/employees/",
+                {
+                    "email": "new@test.local",
+                    "first_name": "Новый",
+                    "last_name": "Сотрудник",
+                    "employee_number": "SM-103",
+                },
+                format="json",
+            ).status_code,
+            403,
+        )
+
+    def test_leader_with_permission_sees_own_department_compensation(self):
+        self.leader.can_view_compensation = True
+        self.leader.save(update_fields=["can_view_compensation"])
+        self.client.force_authenticate(self.leader)
+        response = self.client.get("/api/v1/employees/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json()), 1)
+        self.assertIn("salary_base", response.json()[0])
 
     def test_employee_cannot_open_hcm_registry(self):
         self.client.force_authenticate(self.employee)
@@ -112,7 +141,7 @@ class PeopleApiTests(TestCase):
         self.assertEqual(self.client.get("/api/v1/candidates/").status_code, 403)
         self.assertEqual(self.client.get("/api/v1/hcm/summary/").status_code, 403)
 
-    def test_hr_has_hcm_access_and_sees_compensation(self):
+    def test_hr_has_hcm_access_but_compensation_requires_permission(self):
         self.client.force_authenticate(self.hr)
         employees = self.client.get("/api/v1/employees/")
         candidates = self.client.get("/api/v1/candidates/")
@@ -120,7 +149,18 @@ class PeopleApiTests(TestCase):
         self.assertEqual(employees.status_code, 200)
         self.assertEqual(candidates.status_code, 200)
         self.assertEqual(analytics.status_code, 200)
-        self.assertIn("salary_base", employees.json()[0])
+        self.assertNotIn("salary_base", employees.json()[0])
+        forbidden_update = self.client.patch(
+            f"/api/v1/employees/{self.profile.pk}/",
+            {"salary_base": "175000.00"},
+            format="json",
+        )
+        self.assertEqual(forbidden_update.status_code, 400)
+
+        self.hr.can_view_compensation = True
+        self.hr.save(update_fields=["can_view_compensation"])
+        allowed = self.client.get("/api/v1/employees/")
+        self.assertIn("salary_base", allowed.json()[0])
 
     def test_admin_sees_recruitment_board_and_summary(self):
         self.client.force_authenticate(self.admin)
@@ -490,7 +530,7 @@ class PeopleApiTests(TestCase):
         self.assertEqual(document.status_code, 201)
         self.assertTrue(EmployeeDocument.objects.filter(employee=self.profile).exists())
 
-    def test_leader_cannot_read_or_change_employee_profile(self):
+    def test_leader_reads_own_department_profile_but_cannot_change_it(self):
         EmployeeGoal.objects.create(employee=self.profile, title="Цель отдела")
         self.client.force_authenticate(self.leader)
         response = self.client.get(f"/api/v1/employees/{self.profile.pk}/goals/")
@@ -499,8 +539,13 @@ class PeopleApiTests(TestCase):
             {"title": "Новая цель", "progress": 0},
             format="json",
         )
-        self.assertEqual(response.status_code, 403)
+        other_department = self.client.get(
+            f"/api/v1/employees/{self.other_employee.employee_profile.pk}/goals/",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json()), 1)
         self.assertEqual(forbidden.status_code, 403)
+        self.assertEqual(other_department.status_code, 404)
 
     def test_hr_manages_organization_and_staffing(self):
         self.client.force_authenticate(self.hr)

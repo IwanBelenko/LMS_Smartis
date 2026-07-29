@@ -32,6 +32,7 @@ class UserSerializer(serializers.ModelSerializer):
             "role_label",
             "status",
             "status_label",
+            "can_view_compensation",
             "department",
             "department_name",
             "date_joined",
@@ -41,11 +42,19 @@ class UserSerializer(serializers.ModelSerializer):
 class UserCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ["id", "email", "first_name", "last_name", "role", "department"]
+        fields = ["id", "email", "first_name", "last_name", "role", "department", "can_view_compensation"]
         read_only_fields = ["id"]
 
     def validate_email(self, value):
         return validate_corporate_email(value)
+
+    def validate(self, attrs):
+        role = attrs.get("role", User.Role.EMPLOYEE)
+        attrs["can_view_compensation"] = bool(
+            role == User.Role.ADMIN
+            or (role in {User.Role.HR, User.Role.LEADER} and attrs.get("can_view_compensation", False))
+        )
+        return attrs
 
     def create(self, validated_data):
         user = User.objects.create_user(password=None, **validated_data)
@@ -58,7 +67,7 @@ class UserCreateSerializer(serializers.ModelSerializer):
 class UserUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ["email", "first_name", "last_name", "role", "department"]
+        fields = ["email", "first_name", "last_name", "role", "department", "can_view_compensation"]
 
     def validate_email(self, value):
         value = validate_corporate_email(value)
@@ -81,6 +90,15 @@ class UserUpdateSerializer(serializers.ModelSerializer):
         ):
             raise serializers.ValidationError("В системе должен остаться хотя бы один активный администратор")
         return value
+
+    def validate(self, attrs):
+        role = attrs.get("role", self.instance.role)
+        requested = attrs.get("can_view_compensation", self.instance.can_view_compensation)
+        attrs["can_view_compensation"] = bool(
+            role == User.Role.ADMIN
+            or (role in {User.Role.HR, User.Role.LEADER} and requested)
+        )
+        return attrs
 
 
 class LoginSerializer(serializers.Serializer):
