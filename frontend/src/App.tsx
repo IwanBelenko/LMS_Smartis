@@ -525,6 +525,8 @@ type QuizQuestion = {
   type?: QuizQuestionType;
   prompt: string;
   image_url?: string;
+  image_asset_id?: number | null;
+  image_original_name?: string;
   learner_view?: boolean;
   options: QuizOption[];
   correct_boolean?: boolean;
@@ -4192,6 +4194,8 @@ function createQuizQuestion(type: QuizQuestionType = "single_choice"): QuizQuest
     type,
     prompt: type === "fill_blank" ? "Вставьте пропущенное слово: ___" : "",
     image_url: "",
+    image_asset_id: null,
+    image_original_name: "",
     options: [],
   };
   if (type === "single_choice" || type === "multiple_choice") {
@@ -4454,14 +4458,75 @@ function QuizPreview({ lesson }: { lesson: Lesson }) {
   );
 }
 
-function QuizEditor({ value, onChange }: { value: QuizData; onChange: (value: QuizData) => void }) {
+function QuizEditor({ value, onChange, token }: { value: QuizData; onChange: (value: QuizData) => void; token: string }) {
   const quiz = value?.questions?.length ? value : emptyQuiz();
+  const [uploadingQuestion, setUploadingQuestion] = useState<number | null>(null);
+  const [imageError, setImageError] = useState("");
   const updateQuestion = (questionIndex: number, update: Partial<QuizQuestion>) => onChange({ ...quiz, questions: quiz.questions.map((question, index) => index === questionIndex ? { ...question, ...update } : question) });
   const replaceQuestionType = (questionIndex: number, type: QuizQuestionType) => {
     const current = quiz.questions[questionIndex];
     const replacement = createQuizQuestion(type);
-    onChange({ ...quiz, questions: quiz.questions.map((question, index) => index === questionIndex ? { ...replacement, prompt: type === "fill_blank" ? replacement.prompt : current.prompt, image_url: current.image_url || "" } : question) });
+    onChange({ ...quiz, questions: quiz.questions.map((question, index) => index === questionIndex ? {
+      ...replacement,
+      prompt: type === "fill_blank" ? replacement.prompt : current.prompt,
+      image_url: current.image_url || "",
+      image_asset_id: current.image_asset_id || null,
+      image_original_name: current.image_original_name || "",
+    } : question) });
   };
+
+  async function uploadQuestionImage(questionIndex: number, file: File) {
+    setImageError("");
+    setUploadingQuestion(questionIndex);
+    try {
+      const body = new FormData();
+      body.append("image", file);
+      const uploaded = await apiUpload<{ id: number; url: string; original_name: string; size: number }>(
+        "/courses/question-image/",
+        token,
+        body,
+      );
+      const previousAssetId = quiz.questions[questionIndex]?.image_asset_id;
+      updateQuestion(questionIndex, {
+        image_url: uploaded.url,
+        image_asset_id: uploaded.id,
+        image_original_name: uploaded.original_name,
+      });
+      if (previousAssetId) {
+        await apiRequest(`/courses/question-image/?asset_id=${previousAssetId}`, token, { method: "DELETE" }).catch(() => undefined);
+      }
+    } catch (reason) {
+      setImageError(reason instanceof Error ? reason.message : "Не удалось загрузить изображение");
+    } finally {
+      setUploadingQuestion(null);
+    }
+  }
+
+  async function removeQuestionImage(questionIndex: number) {
+    const assetId = quiz.questions[questionIndex]?.image_asset_id;
+    setImageError("");
+    try {
+      if (assetId) {
+        await apiRequest(`/courses/question-image/?asset_id=${assetId}`, token, { method: "DELETE" });
+      }
+      updateQuestion(questionIndex, { image_url: "", image_asset_id: null, image_original_name: "" });
+    } catch (reason) {
+      setImageError(reason instanceof Error ? reason.message : "Не удалось удалить изображение");
+    }
+  }
+
+  async function removeQuizQuestion(questionIndex: number) {
+    const assetId = quiz.questions[questionIndex]?.image_asset_id;
+    setImageError("");
+    try {
+      if (assetId) {
+        await apiRequest(`/courses/question-image/?asset_id=${assetId}`, token, { method: "DELETE" });
+      }
+      onChange({ ...quiz, questions: quiz.questions.filter((_, index) => index !== questionIndex) });
+    } catch (reason) {
+      setImageError(reason instanceof Error ? reason.message : "Не удалось удалить вопрос");
+    }
+  }
 
   return (
     <div className="quiz-editor">
@@ -4476,9 +4541,54 @@ function QuizEditor({ value, onChange }: { value: QuizData; onChange: (value: Qu
         const kind = questionType(question);
         return (
           <fieldset className="quiz-editor__question" key={questionIndex}>
-            <div className="quiz-editor__question-top"><span>Вопрос {questionIndex + 1}</span><div><select aria-label={`Тип вопроса ${questionIndex + 1}`} value={kind} onChange={(event) => replaceQuestionType(questionIndex, event.target.value as QuizQuestionType)}>{Object.entries(quizQuestionTypeLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select>{quiz.questions.length > 1 && <button className="mini-button mini-button--danger" type="button" onClick={() => onChange({ ...quiz, questions: quiz.questions.filter((_, index) => index !== questionIndex) })} aria-label={`Удалить вопрос ${questionIndex + 1}`}><Trash2 /></button>}</div></div>
+            <div className="quiz-editor__question-top"><span>Вопрос {questionIndex + 1}</span><div><select aria-label={`Тип вопроса ${questionIndex + 1}`} value={kind} onChange={(event) => replaceQuestionType(questionIndex, event.target.value as QuizQuestionType)}>{Object.entries(quizQuestionTypeLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select>{quiz.questions.length > 1 && <button className="mini-button mini-button--danger" type="button" onClick={() => void removeQuizQuestion(questionIndex)} aria-label={`Удалить вопрос ${questionIndex + 1}`}><Trash2 /></button>}</div></div>
             <input value={question.prompt} onChange={(event) => updateQuestion(questionIndex, { prompt: event.target.value })} placeholder={kind === "fill_blank" ? "Используйте ___ для обозначения пропуска" : "Введите вопрос"} aria-label={`Текст вопроса ${questionIndex + 1}`} required />
-            <label className="quiz-editor__image-url">Изображение к вопросу — необязательно<input value={question.image_url || ""} onChange={(event) => updateQuestion(questionIndex, { image_url: event.target.value })} placeholder="https://… или путь из медиатеки" /></label>
+            <div className={question.image_url ? "quiz-editor__image quiz-editor__image--filled" : "quiz-editor__image"}>
+              {question.image_url ? (
+                <>
+                  <img src={question.image_url} alt="" />
+                  <div>
+                    <strong>{question.image_original_name || "Изображение вопроса"}</strong>
+                    <span>Картинка будет показана перед вариантами ответа</span>
+                    <div className="quiz-editor__image-actions">
+                      <label className="secondary-button">
+                        <Upload /> Заменить
+                        <input
+                          type="file"
+                          accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+                          disabled={uploadingQuestion === questionIndex}
+                          onChange={(event) => {
+                            const file = event.target.files?.[0];
+                            if (file) void uploadQuestionImage(questionIndex, file);
+                            event.target.value = "";
+                          }}
+                        />
+                      </label>
+                      <button className="secondary-button" type="button" onClick={() => void removeQuestionImage(questionIndex)}><Trash2 /> Удалить</button>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <label className="quiz-editor__image-empty">
+                  <Upload />
+                  <span><strong>{uploadingQuestion === questionIndex ? "Загружаем…" : "Добавить изображение"}</strong><small>JPG, PNG или WebP · до 10 МБ</small></span>
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+                    disabled={uploadingQuestion === questionIndex}
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (file) void uploadQuestionImage(questionIndex, file);
+                      event.target.value = "";
+                    }}
+                  />
+                </label>
+              )}
+              <details>
+                <summary>Или вставить ссылку</summary>
+                <input value={question.image_url || ""} onChange={(event) => updateQuestion(questionIndex, { image_url: event.target.value })} placeholder="https://…" aria-label={`Ссылка на изображение вопроса ${questionIndex + 1}`} />
+              </details>
+            </div>
             {(kind === "single_choice" || kind === "multiple_choice") && <>
               <div className="quiz-editor__options">{question.options.map((option, optionIndex) => <div className="quiz-editor__option" key={optionIndex}><input className="quiz-editor__correct" type={kind === "single_choice" ? "radio" : "checkbox"} name={kind === "single_choice" ? `correct-${questionIndex}` : undefined} checked={option.correct} onChange={() => updateQuestion(questionIndex, { options: question.options.map((item, index) => ({ ...item, correct: kind === "single_choice" ? index === optionIndex : index === optionIndex ? !item.correct : item.correct })) })} aria-label={`Правильный ответ ${optionIndex + 1}`} /><input value={option.text} onChange={(event) => updateQuestion(questionIndex, { options: question.options.map((item, index) => index === optionIndex ? { ...item, text: event.target.value } : item) })} placeholder={`Вариант ${optionIndex + 1}`} required />{question.options.length > 2 && <button className="mini-button mini-button--danger" type="button" onClick={() => updateQuestion(questionIndex, { options: question.options.filter((_, index) => index !== optionIndex) })} aria-label={`Удалить вариант ${optionIndex + 1}`}><X /></button>}</div>)}</div>
               <button className="secondary-button quiz-editor__add-option" type="button" onClick={() => updateQuestion(questionIndex, { options: [...question.options, { text: "", correct: false }] })}><Plus /> Добавить вариант</button>
@@ -4490,6 +4600,7 @@ function QuizEditor({ value, onChange }: { value: QuizData; onChange: (value: Qu
           </fieldset>
         );
       })}
+      {imageError && <p className="form-error quiz-editor__image-error">{imageError}</p>}
       <button className="secondary-button quiz-editor__add-question" type="button" onClick={() => onChange({ ...quiz, questions: [...quiz.questions, createQuizQuestion()] })}><Plus /> Добавить вопрос</button>
     </div>
   );
@@ -5597,7 +5708,7 @@ function CoursesView({ token, user }: { token: string; user: User }) {
                     />
                   </Suspense>
                 ) : activeLesson.lesson_type === "quiz" ? (
-                  <QuizEditor value={activeLesson.quiz_data} onChange={(quiz_data) => updateLesson(activeLessonIndex, { quiz_data })} />
+                  <QuizEditor value={activeLesson.quiz_data} onChange={(quiz_data) => updateLesson(activeLessonIndex, { quiz_data })} token={token} />
                 ) : activeLesson.lesson_type === "video" ? (
                   <div className="longread-media-editor">
                     {activeLesson.video_url && !videoFiles[activeLesson.client_key] && (
@@ -5862,7 +5973,7 @@ function CoursesView({ token, user }: { token: string; user: User }) {
                       </Suspense>
                     </div>
                   ) : lesson.lesson_type === "quiz" ? (
-                    <div className="field-wide"><QuizEditor value={lesson.quiz_data} onChange={(quiz_data) => updateLesson(index, { quiz_data })} /></div>
+                    <div className="field-wide"><QuizEditor value={lesson.quiz_data} onChange={(quiz_data) => updateLesson(index, { quiz_data })} token={token} /></div>
                   ) : lesson.lesson_type === "video" ? (
                     <div className="field-wide video-upload-field">
                       <span className="field-label">Видеофайл</span>

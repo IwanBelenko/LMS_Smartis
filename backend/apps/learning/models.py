@@ -22,6 +22,32 @@ def scorm_package_path(instance, filename):
     return f"courses/{instance.id}/scorm/{uuid.uuid4().hex}.zip"
 
 
+def question_image_path(instance, filename):
+    suffix = Path(filename).suffix.lower()
+    return f"courses/question-images/{instance.uploaded_by_id}/{uuid.uuid4().hex}{suffix}"
+
+
+class LearningImageAsset(models.Model):
+    file = models.FileField("Изображение", upload_to=question_image_path)
+    original_name = models.CharField("Исходное имя", max_length=255)
+    size = models.PositiveBigIntegerField("Размер", default=0)
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        verbose_name="Загрузил",
+        related_name="learning_image_assets",
+        on_delete=models.CASCADE,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "Изображение обучения"
+        verbose_name_plural = "Изображения обучения"
+
+    def __str__(self) -> str:
+        return self.original_name
+
+
 class ContentProject(models.Model):
     name = models.CharField("Название", max_length=180)
     description = models.TextField("Описание", blank=True)
@@ -338,6 +364,12 @@ class QuizAttempt(models.Model):
 def delete_lesson_video(sender, instance, **kwargs):
     if instance.video_file:
         instance.video_file.delete(save=False)
+
+
+@receiver(post_delete, sender=LearningImageAsset)
+def delete_learning_image(sender, instance, **kwargs):
+    if instance.file:
+        instance.file.delete(save=False)
 
 
 @receiver(post_delete, sender=Course)

@@ -5,6 +5,7 @@ from .models import (
     ContentProject,
     Course,
     CourseEnrollment,
+    LearningImageAsset,
     LearningPath,
     Lesson,
     LessonProgress,
@@ -46,3 +47,4 @@ class LearningPathAdmin(admin.ModelAdmin):
 admin.site.register(CourseEnrollment)
 admin.site.register(LessonProgress)
 admin.site.register(QuizAttempt)
+admin.site.register(LearningImageAsset)

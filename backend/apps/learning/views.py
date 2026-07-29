@@ -25,6 +25,7 @@ from .models import (
     ContentProject,
     Course,
     CourseEnrollment,
+    LearningImageAsset,
     LearningPath,
     Lesson,
     LessonProgress,
@@ -386,6 +387,69 @@ class CourseViewSet(viewsets.ModelViewSet):
             action="deleted",
             changes={"title": title},
             request=self.request,
+        )
+
+    @action(
+        detail=False,
+        methods=["post", "delete"],
+        url_path="question-image",
+        parser_classes=[MultiPartParser, FormParser],
+    )
+    def question_image(self, request):
+        if request.method == "DELETE":
+            asset_id = request.query_params.get("asset_id") or request.data.get("asset_id")
+            if not asset_id:
+                return Response(
+                    {"detail": "Не указано изображение для удаления"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            asset = get_object_or_404(LearningImageAsset, pk=asset_id)
+            if not (
+                request.user.is_superuser
+                or request.user.role == User.Role.ADMIN
+                or asset.uploaded_by_id == request.user.id
+            ):
+                return Response(
+                    {"detail": "Можно удалять только собственные изображения"},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            asset.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
+        image = request.FILES.get("image")
+        if not image:
+            return Response(
+                {"detail": "Выберите изображение для вопроса"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        suffix = Path(image.name).suffix.lower()
+        allowed_suffixes = {".jpg", ".jpeg", ".png", ".webp"}
+        allowed_types = {"image/jpeg", "image/png", "image/webp"}
+        if suffix not in allowed_suffixes or image.content_type not in allowed_types:
+            return Response(
+                {"detail": "Поддерживаются изображения JPG, PNG и WebP"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if image.size > settings.MAX_QUESTION_IMAGE_UPLOAD_SIZE:
+            max_mb = settings.MAX_QUESTION_IMAGE_UPLOAD_SIZE // (1024 * 1024)
+            return Response(
+                {"detail": f"Размер изображения не должен превышать {max_mb} МБ"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        asset = LearningImageAsset.objects.create(
+            file=image,
+            original_name=Path(image.name).name[:255],
+            size=image.size,
+            uploaded_by=request.user,
+        )
+        return Response(
+            {
+                "id": asset.pk,
+                "url": request.build_absolute_uri(asset.file.url),
+                "original_name": asset.original_name,
+                "size": asset.size,
+            },
+            status=status.HTTP_201_CREATED,
         )
 
     @action(

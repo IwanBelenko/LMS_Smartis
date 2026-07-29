@@ -11,7 +11,7 @@ from rest_framework.test import APIClient
 from apps.identity.models import User
 from apps.people.models import AuditEvent
 
-from .models import ContentProject, Course, CourseEnrollment, LearningPath, Lesson
+from .models import ContentProject, Course, CourseEnrollment, LearningImageAsset, LearningPath, Lesson
 
 
 def make_scorm_12_package(title="Курс из SCORM", filename="course-scorm.zip", extra_files=None):
@@ -220,6 +220,49 @@ class CourseApiTests(TestCase):
             self.assertEqual(response.status_code, 200)
             self.assertEqual(response.data["cover_style"], Course.CoverStyle.STANDARD)
             self.assertEqual(response.data["cover_url"], "")
+
+    def test_question_image_is_uploaded_and_deleted(self):
+        self.client.force_authenticate(self.author)
+        with tempfile.TemporaryDirectory() as media_root, self.settings(MEDIA_ROOT=media_root):
+            image = SimpleUploadedFile("diagram.png", b"fake-image-content", content_type="image/png")
+            response = self.client.post(
+                "/api/v1/courses/question-image/",
+                {"image": image},
+                format="multipart",
+            )
+
+            self.assertEqual(response.status_code, 201)
+            self.assertEqual(response.data["original_name"], "diagram.png")
+            self.assertTrue(response.data["url"].endswith(".png"))
+            asset = LearningImageAsset.objects.get(pk=response.data["id"])
+            self.assertTrue(Path(asset.file.path).exists())
+
+            response = self.client.delete(
+                f"/api/v1/courses/question-image/?asset_id={asset.pk}",
+            )
+            self.assertEqual(response.status_code, 204)
+            self.assertFalse(LearningImageAsset.objects.filter(pk=asset.pk).exists())
+            self.assertFalse(Path(asset.file.path).exists())
+
+    def test_employee_cannot_upload_question_image(self):
+        self.client.force_authenticate(self.employee)
+        image = SimpleUploadedFile("diagram.png", b"fake-image-content", content_type="image/png")
+        response = self.client.post(
+            "/api/v1/courses/question-image/",
+            {"image": image},
+            format="multipart",
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_question_image_rejects_unsupported_format(self):
+        self.client.force_authenticate(self.admin)
+        image = SimpleUploadedFile("diagram.gif", b"fake-image-content", content_type="image/gif")
+        response = self.client.post(
+            "/api/v1/courses/question-image/",
+            {"image": image},
+            format="multipart",
+        )
+        self.assertEqual(response.status_code, 400)
 
     def test_scorm_12_package_is_imported_as_course(self):
         self.client.force_authenticate(self.admin)
