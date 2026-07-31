@@ -117,7 +117,10 @@ jobs:
               rm -f /tmp/smartis-release.tar.gz /tmp/smartis.env
               cd /opt/smartis
               docker compose config --quiet
-              docker compose up --detach --build
+              docker compose pull db proxy
+              docker compose build api
+              docker compose build web
+              docker compose up --detach --no-build
 
               attempt=0
               until docker compose exec -T api python -c "import urllib.request; urllib.request.urlopen('\''http://127.0.0.1:8000/api/v1/health/'\'')"; do
