@@ -117,15 +117,29 @@ jobs:
               rm -f /tmp/smartis-release.tar.gz /tmp/smartis.env
               cd /opt/smartis
               docker compose config --quiet
-              docker compose pull db proxy
-              docker compose build api
-              docker compose build web
-              docker compose up --detach --no-build
+              if ! docker compose pull db proxy; then
+                echo "::error title=Smartis deployment::Не удалось скачать базовые образы"
+                exit 1
+              fi
+              if ! docker compose build api; then
+                echo "::error title=Smartis deployment::Не удалось собрать API"
+                exit 1
+              fi
+              if ! docker compose build web; then
+                echo "::error title=Smartis deployment::Не удалось собрать веб-интерфейс"
+                exit 1
+              fi
+              if ! docker compose up --detach --no-build; then
+                echo "::error title=Smartis deployment::Не удалось запустить контейнеры"
+                docker compose ps --all || true
+                exit 1
+              fi
 
               attempt=0
               until docker compose exec -T api python -c "import urllib.request; urllib.request.urlopen('\''http://127.0.0.1:8000/api/v1/health/'\'')"; do
                 attempt=$((attempt + 1))
                 if [ "$attempt" -ge 24 ]; then
+                  echo "::error title=Smartis deployment::API не прошёл проверку готовности"
                   docker compose ps
                   docker compose logs --tail 150 api proxy web db
                   exit 1
