@@ -2,6 +2,11 @@ name: Smartis server diagnostics
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - codex/publish-smartis-lms
+    paths:
+      - .github/workflows/server-diagnostics.yml
 
 permissions:
   contents: read
