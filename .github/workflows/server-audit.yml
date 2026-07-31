@@ -1,0 +1,55 @@
+name: Server connectivity audit
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - codex/publish-smartis-lms
+    paths:
+      - .github/workflows/server-audit.yml
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: Read-only server audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Install SSH password helper
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes sshpass
+
+      - name: Inspect server without changes
+        env:
+          SSHPASS: ${{ secrets.SERVER_PASSWORD }}
+        run: |
+          test -n "$SSHPASS"
+
+          sshpass -e ssh \
+            -o ConnectTimeout=20 \
+            -o StrictHostKeyChecking=accept-new \
+            -o PreferredAuthentications=password \
+            -o PubkeyAuthentication=no \
+            "root@89.108.88.157" '
+              set -u
+              echo "== SYSTEM =="
+              hostnamectl 2>/dev/null || uname -a
+              echo "== UPTIME =="
+              uptime
+              echo "== MEMORY =="
+              free -h
+              echo "== DISKS =="
+              df -hT
+              echo "== LISTENING PORTS =="
+              ss -ltnp 2>/dev/null || true
+              echo "== DOCKER =="
+              docker --version 2>/dev/null || echo "Docker is not installed"
+              docker compose version 2>/dev/null || true
+              docker ps --format "table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null || true
+              echo "== DEPLOYMENT DIRECTORIES =="
+              ls -la /opt /srv /var/www 2>/dev/null || true
+            '
