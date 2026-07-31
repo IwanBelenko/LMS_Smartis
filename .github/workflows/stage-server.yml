@@ -1,0 +1,86 @@
+name: Stage Smartis LMS on server
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - codex/publish-smartis-lms
+    paths:
+      - .github/workflows/stage-server.yml
+
+permissions:
+  contents: read
+
+jobs:
+  stage:
+    name: Install Docker and upload application
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out the selected revision
+        uses: actions/checkout@v4
+
+      - name: Build release archive
+        run: |
+          tar \
+            --exclude=.git \
+            --exclude=.env \
+            --exclude=backend/.venv \
+            --exclude=frontend/node_modules \
+            --exclude=frontend/dist \
+            --exclude=backups \
+            -czf /tmp/smartis-release.tar.gz .
+
+      - name: Install SSH password helper
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes sshpass
+
+      - name: Upload release archive
+        env:
+          SSHPASS: ${{ secrets.SERVER_PASSWORD }}
+        run: |
+          test -n "$SSHPASS"
+          sshpass -e scp \
+            -o ConnectTimeout=20 \
+            -o StrictHostKeyChecking=accept-new \
+            -o PreferredAuthentications=password \
+            -o PubkeyAuthentication=no \
+            /tmp/smartis-release.tar.gz \
+            root@89.108.88.157:/tmp/smartis-release.tar.gz
+
+      - name: Prepare server and unpack application
+        env:
+          SSHPASS: ${{ secrets.SERVER_PASSWORD }}
+        run: |
+          sshpass -e ssh \
+            -o ConnectTimeout=20 \
+            -o StrictHostKeyChecking=accept-new \
+            -o PreferredAuthentications=password \
+            -o PubkeyAuthentication=no \
+            root@89.108.88.157 '
+              set -eu
+
+              if ! command -v docker >/dev/null 2>&1; then
+                export DEBIAN_FRONTEND=noninteractive
+                apt-get update
+                apt-get install --yes docker.io docker-compose-v2
+              fi
+
+              systemctl enable --now docker
+              install -d -m 0750 /opt/smartis
+              tar -xzf /tmp/smartis-release.tar.gz -C /opt/smartis
+              chown -R root:root /opt/smartis
+              rm -f /tmp/smartis-release.tar.gz
+
+              echo "== STAGED REVISION =="
+              printf "%s\n" "${{ github.sha }}" > /opt/smartis/.deployed-revision
+              cat /opt/smartis/.deployed-revision
+              echo "== DOCKER =="
+              docker --version
+              docker compose version
+              echo "== APPLICATION DIRECTORY =="
+              du -sh /opt/smartis
+              ls -la /opt/smartis
+            '
