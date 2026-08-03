@@ -1,0 +1,16 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+!.env.production.example
+node_modules/
+dist/
+__pycache__/
+*.py[cod]
+*.tsbuildinfo
+.venv/
+staticfiles/
+media/
+*.sqlite3
+*.log
+backups/

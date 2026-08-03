@@ -1,0 +1,389 @@
+import uuid
+import shutil
+from pathlib import Path
+
+from django.conf import settings
+from django.db import models
+from django.db.models.signals import post_delete
+from django.dispatch import receiver
+
+
+def lesson_video_path(instance, filename):
+    suffix = Path(filename).suffix.lower()
+    return f"courses/{instance.course_id}/videos/{uuid.uuid4().hex}{suffix}"
+
+
+def course_cover_path(instance, filename):
+    suffix = Path(filename).suffix.lower()
+    return f"courses/{instance.id}/cover/{uuid.uuid4().hex}{suffix}"
+
+
+def scorm_package_path(instance, filename):
+    return f"courses/{instance.id}/scorm/{uuid.uuid4().hex}.zip"
+
+
+def question_image_path(instance, filename):
+    suffix = Path(filename).suffix.lower()
+    return f"courses/question-images/{instance.uploaded_by_id}/{uuid.uuid4().hex}{suffix}"
+
+
+class LearningImageAsset(models.Model):
+    file = models.FileField("Изображение", upload_to=question_image_path)
+    original_name = models.CharField("Исходное имя", max_length=255)
+    size = models.PositiveBigIntegerField("Размер", default=0)
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        verbose_name="Загрузил",
+        related_name="learning_image_assets",
+        on_delete=models.CASCADE,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "Изображение обучения"
+        verbose_name_plural = "Изображения обучения"
+
+    def __str__(self) -> str:
+        return self.original_name
+
+
+class ContentProject(models.Model):
+    name = models.CharField("Название", max_length=180)
+    description = models.TextField("Описание", blank=True)
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        verbose_name="Владелец",
+        related_name="learning_projects",
+        on_delete=models.CASCADE,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name", "id"]
+        verbose_name = "Проект обучения"
+        verbose_name_plural = "Проекты обучения"
+        constraints = [
+            models.UniqueConstraint(fields=["owner", "name"], name="unique_learning_project_name_per_owner"),
+        ]
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class ContentFolder(models.Model):
+    name = models.CharField("Название", max_length=180)
+    project = models.ForeignKey(
+        ContentProject,
+        verbose_name="Проект",
+        related_name="folders",
+        on_delete=models.CASCADE,
+    )
+    parent = models.ForeignKey(
+        "self",
+        verbose_name="Родительская папка",
+        related_name="children",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name", "id"]
+        verbose_name = "Папка материалов"
+        verbose_name_plural = "Папки материалов"
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class Course(models.Model):
+    class Status(models.TextChoices):
+        DRAFT = "draft", "Черновик"
+        PUBLISHED = "published", "Опубликован"
+        ARCHIVED = "archived", "В архиве"
+
+    class CoverStyle(models.TextChoices):
+        STANDARD = "standard", "Стандартная"
+        CUSTOM = "custom", "Своя обложка"
+
+    class SourceFormat(models.TextChoices):
+        NATIVE = "native", "Курс Smartis"
+        SCORM_12 = "scorm_12", "SCORM 1.2"
+
+    title = models.CharField("Название", max_length=220)
+    description = models.TextField("Описание", blank=True)
+    cover_style = models.CharField(
+        "Тип обложки", max_length=20, choices=CoverStyle.choices, default=CoverStyle.STANDARD
+    )
+    cover_file = models.FileField("Файл обложки", upload_to=course_cover_path, blank=True)
+    cover_original_name = models.CharField("Исходное имя обложки", max_length=255, blank=True)
+    cover_size = models.PositiveBigIntegerField("Размер обложки", default=0)
+    cover_uploaded_at = models.DateTimeField("Дата загрузки обложки", null=True, blank=True)
+    source_format = models.CharField(
+        "Формат источника", max_length=20, choices=SourceFormat.choices, default=SourceFormat.NATIVE
+    )
+    scorm_package = models.FileField("SCORM-пакет", upload_to=scorm_package_path, blank=True)
+    scorm_identifier = models.CharField("Идентификатор SCORM", max_length=255, blank=True)
+    scorm_entry_point = models.CharField("Стартовый файл SCORM", max_length=500, blank=True)
+    scorm_content_dir = models.CharField("Каталог SCORM", max_length=500, blank=True)
+    scorm_original_name = models.CharField("Исходное имя SCORM", max_length=255, blank=True)
+    scorm_size = models.PositiveBigIntegerField("Размер SCORM", default=0)
+    scorm_imported_at = models.DateTimeField("Дата импорта SCORM", null=True, blank=True)
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        verbose_name="Автор",
+        related_name="authored_courses",
+        on_delete=models.PROTECT,
+    )
+    project = models.ForeignKey(
+        ContentProject,
+        verbose_name="Проект",
+        related_name="courses",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    folder = models.ForeignKey(
+        ContentFolder,
+        verbose_name="Папка",
+        related_name="courses",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    status = models.CharField("Статус", max_length=20, choices=Status.choices, default=Status.DRAFT)
+    estimated_minutes = models.PositiveIntegerField("Длительность, минут", default=30)
+    version = models.PositiveIntegerField("Версия", default=1)
+    published_at = models.DateTimeField("Дата публикации", null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-updated_at"]
+        verbose_name = "Курс"
+        verbose_name_plural = "Курсы"
+
+    def __str__(self) -> str:
+        return self.title
+
+
+class LearningPath(models.Model):
+    class Status(models.TextChoices):
+        DRAFT = "draft", "Черновик"
+        PUBLISHED = "published", "Опубликована"
+        ARCHIVED = "archived", "В архиве"
+
+    title = models.CharField("Название", max_length=220)
+    description = models.TextField("Описание", blank=True)
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        verbose_name="Автор",
+        related_name="authored_learning_paths",
+        on_delete=models.PROTECT,
+    )
+    project = models.ForeignKey(
+        ContentProject,
+        verbose_name="Проект",
+        related_name="learning_paths",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    folder = models.ForeignKey(
+        ContentFolder,
+        verbose_name="Папка",
+        related_name="learning_paths",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    courses = models.ManyToManyField(Course, through="LearningPathCourse", related_name="learning_paths", blank=True)
+    status = models.CharField("Статус", max_length=20, choices=Status.choices, default=Status.DRAFT)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-updated_at"]
+        verbose_name = "Траектория"
+        verbose_name_plural = "Траектории"
+
+    def __str__(self) -> str:
+        return self.title
+
+
+class LearningPathCourse(models.Model):
+    learning_path = models.ForeignKey(LearningPath, related_name="path_courses", on_delete=models.CASCADE)
+    course = models.ForeignKey(Course, related_name="path_entries", on_delete=models.CASCADE)
+    position = models.PositiveIntegerField("Позиция", default=0)
+
+    class Meta:
+        ordering = ["position", "id"]
+        constraints = [
+            models.UniqueConstraint(fields=["learning_path", "course"], name="unique_course_in_learning_path"),
+            models.UniqueConstraint(fields=["learning_path", "position"], name="unique_learning_path_position"),
+        ]
+
+
+class Lesson(models.Model):
+    class Type(models.TextChoices):
+        TEXT = "text", "Текст"
+        VIDEO = "video", "Видео"
+        LINK = "link", "Ссылка"
+        FILE = "file", "Файл"
+        QUIZ = "quiz", "Тест"
+        SCORM = "scorm", "SCORM 1.2"
+
+    course = models.ForeignKey(Course, related_name="lessons", on_delete=models.CASCADE)
+    title = models.CharField("Название", max_length=220)
+    lesson_type = models.CharField("Тип", max_length=20, choices=Type.choices, default=Type.TEXT)
+    content = models.TextField("Содержание", blank=True)
+    quiz_data = models.JSONField("Настройки теста", default=dict, blank=True)
+    media_url = models.URLField("Ссылка на материал", blank=True)
+    video_file = models.FileField("Видеофайл", upload_to=lesson_video_path, blank=True)
+    video_original_name = models.CharField("Исходное имя видео", max_length=255, blank=True)
+    video_size = models.PositiveBigIntegerField("Размер видео", default=0)
+    video_uploaded_at = models.DateTimeField("Дата загрузки видео", null=True, blank=True)
+    duration_minutes = models.PositiveIntegerField("Длительность, минут", default=5)
+    position = models.PositiveIntegerField("Позиция", default=0)
+    is_required = models.BooleanField("Обязательный", default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["position", "id"]
+        verbose_name = "Урок"
+        verbose_name_plural = "Уроки"
+        constraints = [
+            models.UniqueConstraint(fields=["course", "position"], name="unique_lesson_position"),
+        ]
+
+    def __str__(self) -> str:
+        return self.title
+
+
+class CourseEnrollment(models.Model):
+    class Status(models.TextChoices):
+        LOCKED = "locked", "Недоступен"
+        AVAILABLE = "available", "Доступен"
+        IN_PROGRESS = "in_progress", "В процессе"
+        COMPLETED = "completed", "Завершён"
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="course_enrollments",
+        on_delete=models.CASCADE,
+    )
+    course = models.ForeignKey(Course, related_name="enrollments", on_delete=models.CASCADE)
+    learning_path = models.ForeignKey(
+        LearningPath,
+        related_name="enrollments",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+    )
+    position = models.PositiveIntegerField("Позиция в траектории", default=0)
+    status = models.CharField(
+        "Статус",
+        max_length=20,
+        choices=Status.choices,
+        default=Status.AVAILABLE,
+    )
+    progress = models.PositiveSmallIntegerField("Прогресс, %", default=0)
+    score = models.PositiveSmallIntegerField("Итоговый балл, %", null=True, blank=True)
+    started_at = models.DateTimeField("Начат", null=True, blank=True)
+    completed_at = models.DateTimeField("Завершён", null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["learning_path_id", "position", "created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "course", "learning_path"],
+                name="unique_user_course_path_enrollment",
+            ),
+        ]
+        verbose_name = "Прохождение курса"
+        verbose_name_plural = "Прохождение курсов"
+
+
+class LessonProgress(models.Model):
+    enrollment = models.ForeignKey(
+        CourseEnrollment,
+        related_name="lesson_progress",
+        on_delete=models.CASCADE,
+    )
+    lesson = models.ForeignKey(Lesson, related_name="learner_progress", on_delete=models.CASCADE)
+    completed = models.BooleanField("Завершён", default=False)
+    best_score = models.PositiveSmallIntegerField("Лучший балл, %", null=True, blank=True)
+    attempts_count = models.PositiveSmallIntegerField("Количество попыток", default=0)
+    completed_at = models.DateTimeField("Завершён", null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["enrollment", "lesson"],
+                name="unique_lesson_progress_per_enrollment",
+            ),
+        ]
+        verbose_name = "Прогресс урока"
+        verbose_name_plural = "Прогресс уроков"
+
+
+class QuizAttempt(models.Model):
+    enrollment = models.ForeignKey(
+        CourseEnrollment,
+        related_name="quiz_attempts",
+        on_delete=models.CASCADE,
+    )
+    lesson = models.ForeignKey(Lesson, related_name="quiz_attempts", on_delete=models.CASCADE)
+    attempt_number = models.PositiveSmallIntegerField("Номер попытки")
+    answers = models.JSONField("Ответы", default=list)
+    score = models.PositiveSmallIntegerField("Результат, %")
+    passed = models.BooleanField("Пройден", default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["enrollment", "lesson", "attempt_number"],
+                name="unique_quiz_attempt_number",
+            ),
+        ]
+        verbose_name = "Попытка теста"
+        verbose_name_plural = "Попытки тестов"
+
+
+@receiver(post_delete, sender=Lesson)
+def delete_lesson_video(sender, instance, **kwargs):
+    if instance.video_file:
+        instance.video_file.delete(save=False)
+
+
+@receiver(post_delete, sender=LearningImageAsset)
+def delete_learning_image(sender, instance, **kwargs):
+    if instance.file:
+        instance.file.delete(save=False)
+
+
+@receiver(post_delete, sender=Course)
+def delete_course_cover(sender, instance, **kwargs):
+    if instance.cover_file:
+        instance.cover_file.delete(save=False)
+    if instance.scorm_package:
+        instance.scorm_package.delete(save=False)
+    if instance.scorm_content_dir:
+        content_dir = (Path(settings.MEDIA_ROOT) / instance.scorm_content_dir).resolve()
+        media_root = Path(settings.MEDIA_ROOT).resolve()
+        if content_dir != media_root and media_root in content_dir.parents:
+            shutil.rmtree(content_dir, ignore_errors=True)
+    imported_assets = (Path(settings.MEDIA_ROOT) / "courses" / str(instance.id) / "assets" / "scorm-import").resolve()
+    media_root = Path(settings.MEDIA_ROOT).resolve()
+    if imported_assets != media_root and media_root in imported_assets.parents:
+        shutil.rmtree(imported_assets, ignore_errors=True)
