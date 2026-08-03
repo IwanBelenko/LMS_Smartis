@@ -124,7 +124,7 @@ jobs:
           releases_root=/opt/smartis-releases
           release_dir="$releases_root/$REVISION"
           release_tmp="$release_dir.tmp.$$"
-          current_link=/opt/smartis-current
+          current_link="$releases_root/current"
           archive="/tmp/smartis-$REVISION.tar.gz"
           previous_target=""
 
