@@ -7,6 +7,7 @@ from .models import (
     AuditEvent,
     Candidate,
     CandidateOffer,
+    CandidateResume,
     CandidateStage,
     EmployeeDocument,
     EmployeeGoal,
@@ -31,6 +32,6 @@ admin.site.register([
     Position, StaffPosition, EmployeeProfile, EmployeeGoal, EmploymentEvent, EmployeeLearning,
     EmployeeDocument, AbsenceRequest, PerformanceCycle, Competency, PerformanceReview, PerformanceScore,
     DailyTranscript, ProductUpdate,
-    OnboardingTemplate, OnboardingPlan, CandidateStage, Vacancy, Candidate, CandidateOffer, AuditEvent,
+    OnboardingTemplate, OnboardingPlan, CandidateStage, Vacancy, Candidate, CandidateResume, CandidateOffer, AuditEvent,
     Interview, InterviewFeedback, HrImportBatch,
 ])

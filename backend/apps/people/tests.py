@@ -1,5 +1,6 @@
 from datetime import date, timedelta
 from io import BytesIO
+from pathlib import Path
 import tempfile
 from zipfile import ZIP_DEFLATED, ZipFile
 
@@ -15,6 +16,7 @@ from .models import (
     AuditEvent,
     Candidate,
     CandidateOffer,
+    CandidateResume,
     CandidateStage,
     Competency,
     DailyTranscript,
@@ -516,6 +518,91 @@ class PeopleApiTests(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["stage_name"], "Интервью")
+
+    def test_hr_uploads_versions_downloads_and_deletes_candidate_resumes(self):
+        candidate = Candidate.objects.get(full_name="Мария Тестова")
+        with tempfile.TemporaryDirectory() as media_root, self.settings(MEDIA_ROOT=media_root):
+            self.client.force_authenticate(self.hr)
+            docx_content = BytesIO()
+            with ZipFile(docx_content, "w", ZIP_DEFLATED) as archive:
+                archive.writestr("[Content_Types].xml", "<Types />")
+                archive.writestr("word/document.xml", "<document />")
+            first = self.client.post(
+                f"/api/v1/candidates/{candidate.pk}/resumes/",
+                {"file": SimpleUploadedFile("resume.pdf", b"%PDF-1.4 resume", content_type="application/pdf")},
+                format="multipart",
+            )
+            second = self.client.post(
+                f"/api/v1/candidates/{candidate.pk}/resumes/",
+                {"file": SimpleUploadedFile("resume-new.txt", "Опыт работы".encode(), content_type="text/plain")},
+                format="multipart",
+            )
+            third = self.client.post(
+                f"/api/v1/candidates/{candidate.pk}/resumes/",
+                {
+                    "file": SimpleUploadedFile(
+                        "resume-latest.docx",
+                        docx_content.getvalue(),
+                        content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    ),
+                },
+                format="multipart",
+            )
+            self.assertEqual(first.status_code, 201)
+            self.assertEqual(second.status_code, 201)
+            self.assertEqual(third.status_code, 201)
+            self.assertEqual(CandidateResume.objects.filter(candidate=candidate).count(), 3)
+
+            listing = self.client.get(f"/api/v1/candidates/{candidate.pk}/resumes/")
+            self.assertEqual(listing.status_code, 200)
+            self.assertEqual(
+                [item["file_original_name"] for item in listing.json()],
+                ["resume-latest.docx", "resume-new.txt", "resume.pdf"],
+            )
+            self.assertTrue(listing.json()[0]["file_url"].endswith(f"/candidate-resumes/{third.json()['id']}/download/"))
+            candidate_payload = self.client.get(f"/api/v1/candidates/{candidate.pk}/").json()
+            self.assertEqual(candidate_payload["resume_count"], 3)
+
+            downloaded = self.client.get(f"/api/v1/candidate-resumes/{first.json()['id']}/download/")
+            self.assertEqual(downloaded.status_code, 200)
+            self.assertEqual(b"".join(downloaded.streaming_content), b"%PDF-1.4 resume")
+            self.assertEqual(downloaded["Cache-Control"], "no-store, private")
+
+            stored = CandidateResume.objects.get(pk=second.json()["id"])
+            stored_path = stored.file.path
+            deleted = self.client.delete(f"/api/v1/candidate-resumes/{stored.pk}/")
+            self.assertEqual(deleted.status_code, 204)
+            self.assertFalse(CandidateResume.objects.filter(pk=stored.pk).exists())
+            self.assertFalse(Path(stored_path).exists())
+            self.assertTrue(AuditEvent.objects.filter(entity_type="candidate_resume", action="uploaded").exists())
+            self.assertTrue(AuditEvent.objects.filter(entity_type="candidate_resume", action="downloaded").exists())
+            self.assertTrue(AuditEvent.objects.filter(entity_type="candidate_resume", action="deleted").exists())
+
+    def test_candidate_resume_rejects_spoofed_files_and_non_recruiters(self):
+        candidate = Candidate.objects.get(full_name="Мария Тестова")
+        with tempfile.TemporaryDirectory() as media_root, self.settings(MEDIA_ROOT=media_root):
+            self.client.force_authenticate(self.hr)
+            invalid = self.client.post(
+                f"/api/v1/candidates/{candidate.pk}/resumes/",
+                {"file": SimpleUploadedFile("resume.pdf", b"not a pdf", content_type="application/pdf")},
+                format="multipart",
+            )
+            self.assertEqual(invalid.status_code, 400)
+            self.assertIn("корректным PDF", str(invalid.json()))
+
+            created = self.client.post(
+                f"/api/v1/candidates/{candidate.pk}/resumes/",
+                {"file": SimpleUploadedFile("resume.txt", b"Experience", content_type="text/plain")},
+                format="multipart",
+            )
+            self.assertEqual(created.status_code, 201)
+            self.client.force_authenticate(self.employee)
+            self.assertEqual(self.client.get(f"/api/v1/candidates/{candidate.pk}/resumes/").status_code, 403)
+            self.assertEqual(
+                self.client.get(f"/api/v1/candidate-resumes/{created.json()['id']}/download/").status_code,
+                403,
+            )
+            self.assertEqual(self.client.delete(f"/api/v1/candidate-resumes/{created.json()['id']}/").status_code, 403)
 
     def test_admin_manages_employee_development_profile(self):
         course = Course.objects.create(title="Основы аналитики", author=self.admin)
