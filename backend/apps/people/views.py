@@ -1,8 +1,10 @@
+import csv
 from datetime import date, datetime, time, timedelta
 from html import escape
+from io import StringIO
 import mimetypes
 
-from django.http import FileResponse
+from django.http import FileResponse, HttpResponse
 from django.db import transaction
 from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404
@@ -1017,6 +1019,90 @@ class EmployeeListCreateView(generics.ListCreateAPIView):
         )
 
 
+def _safe_csv_value(value):
+    """Prevent spreadsheet formula injection in exported user-controlled fields."""
+    if value is None:
+        return ""
+    text = str(value)
+    if text.startswith(("=", "+", "-", "@", "\t", "\r")):
+        return f"'{text}"
+    return text
+
+
+class EmployeeExportView(APIView):
+    permission_classes = [IsHcmUser]
+
+    def get(self, request):
+        can_export_compensation = bool(
+            request.user.is_superuser
+            or request.user.role == User.Role.ADMIN
+            or request.user.can_view_compensation
+        )
+        queryset = EmployeeProfile.objects.select_related(
+            "user__department", "position"
+        ).order_by("user__last_name", "user__first_name", "user__email")
+
+        output = StringIO(newline="")
+        writer = csv.writer(output, delimiter=";", lineterminator="\r\n")
+        headers = [
+            "Табельный номер", "Фамилия", "Имя", "Корпоративная почта",
+            "Подразделение", "Должность", "Грейд", "Дата рождения",
+            "Дата приёма", "Дата увольнения", "Статус", "Образование",
+            "Компетенции", "Чек-лист, %", "План развития, %",
+        ]
+        if can_export_compensation:
+            headers.extend(["Оклад", "Месячная премия", "Квартальная премия"])
+        writer.writerow(headers)
+
+        for employee in queryset:
+            row = [
+                employee.employee_number,
+                employee.user.last_name,
+                employee.user.first_name,
+                employee.user.email,
+                employee.user.department.name if employee.user.department else "",
+                employee.position.name if employee.position else "",
+                employee.grade,
+                employee.birth_date.isoformat() if employee.birth_date else "",
+                employee.hire_date.isoformat() if employee.hire_date else "",
+                employee.dismissal_date.isoformat() if employee.dismissal_date else "",
+                employee.get_status_display(),
+                employee.education,
+                employee.competencies,
+                employee.checklist_score,
+                employee.development_progress,
+            ]
+            if can_export_compensation:
+                row.extend([
+                    employee.salary_base,
+                    employee.monthly_bonus,
+                    employee.quarterly_bonus,
+                ])
+            writer.writerow([_safe_csv_value(value) for value in row])
+
+        record_audit(
+            actor=request.user,
+            entity_type="employee",
+            entity_id="export",
+            action="exported",
+            changes={
+                "rows": queryset.count(),
+                "compensation_included": can_export_compensation,
+            },
+            request=request,
+        )
+        response = HttpResponse(
+            "\ufeff" + output.getvalue(),
+            content_type="text/csv; charset=utf-8",
+        )
+        response["Content-Disposition"] = (
+            f'attachment; filename="smartis-employees-{timezone.localdate():%Y%m%d}.csv"'
+        )
+        response["Cache-Control"] = "no-store, private"
+        response["X-Content-Type-Options"] = "nosniff"
+        return response
+
+
 class EmployeeImportView(APIView):
     permission_classes = [IsHcmUser]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
@@ -1437,6 +1523,25 @@ class CandidateOfferDetailView(generics.RetrieveUpdateAPIView):
         if offer.status != CandidateOffer.Status.DRAFT:
             raise ValidationError("Редактировать можно только черновик оффера")
         return super().update(request, *args, **kwargs)
+
+
+class CandidateOfferDownloadView(APIView):
+    permission_classes = [IsRecruiter]
+
+    def get(self, request, pk):
+        offer = get_object_or_404(CandidateOffer, pk=pk)
+        if not offer.file:
+            return Response({"detail": "Файл не загружен"}, status=status.HTTP_404_NOT_FOUND)
+        content_type = mimetypes.guess_type(offer.file_original_name)[0] or "application/octet-stream"
+        response = FileResponse(
+            offer.file.open("rb"),
+            content_type=content_type,
+            as_attachment=content_type != "application/pdf",
+            filename=offer.file_original_name or f"offer-{offer.pk}",
+        )
+        response["Cache-Control"] = "no-store, private"
+        response["X-Content-Type-Options"] = "nosniff"
+        return response
 
 
 class CandidateOfferSubmitView(APIView):

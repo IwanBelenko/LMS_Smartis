@@ -2908,6 +2908,25 @@ function EmployeesView({ token, user }: { token: string; user: User }) {
     }
   }
 
+  async function exportEmployees() {
+    setError("");
+    try {
+      const response = await fetch(`${API}/employees/export/`, {
+        headers: { Authorization: `Token ${token}` },
+      });
+      if (!response.ok) throw new Error("Не удалось выгрузить сотрудников");
+      const blob = await response.blob();
+      const href = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = href;
+      anchor.download = `smartis-employees-${new Date().toISOString().slice(0, 10)}.csv`;
+      anchor.click();
+      window.setTimeout(() => URL.revokeObjectURL(href), 1000);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось выгрузить сотрудников");
+    }
+  }
+
   const visible = employees.filter((employee) =>
     `${employee.full_name} ${employee.email} ${employee.department_name || ""} ${employee.position_name || ""}`
       .toLowerCase()
@@ -2936,6 +2955,9 @@ function EmployeesView({ token, user }: { token: string; user: User }) {
         subtitle="Единый реестр команды, должностей и развития"
         action={user.role !== "leader" ? (
           <div className="page-actions">
+            <button className="secondary-button" type="button" onClick={() => void exportEmployees()}>
+              <Download /> Экспорт CSV
+            </button>
             <button className="secondary-button" type="button" onClick={openEmployeeImport}>
               <Upload /> Импорт CSV/XLSX
             </button>
@@ -3490,6 +3512,25 @@ function RecruitmentView({ token, user }: { token: string; user: User }) {
     }
   }
 
+  async function downloadOffer(offer: CandidateOffer) {
+    setError("");
+    try {
+      const response = await fetch(offer.file_url, {
+        headers: { Authorization: `Token ${token}` },
+      });
+      if (!response.ok) throw new Error("Не удалось открыть файл оффера");
+      const blob = await response.blob();
+      const href = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = href;
+      anchor.download = offer.file_original_name || `offer-${offer.id}`;
+      anchor.click();
+      window.setTimeout(() => URL.revokeObjectURL(href), 1000);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось открыть файл оффера");
+    }
+  }
+
   function localDateTimeInput(date: Date) {
     return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
   }
@@ -3808,7 +3849,7 @@ function RecruitmentView({ token, user }: { token: string; user: User }) {
                     <label className="offer-file-field">Файл PDF/DOCX<input type="file" accept=".pdf,.doc,.docx" onChange={(event) => setOfferFile(event.target.files?.[0] || null)} /></label>
                     <label className="hcm-form__wide">Условия<textarea value={offerForm.conditions} onChange={(event) => setOfferForm({ ...offerForm, conditions: event.target.value })} placeholder="График, бонусы, ДМС и дополнительные договорённости" /></label>
                   </div>
-                  {offerDialog.offer?.file_url && <a className="offer-file-link" href={offerDialog.offer.file_url} target="_blank" rel="noreferrer"><FileText />{offerDialog.offer.file_original_name || "Открыть текущий файл"}</a>}
+                  {offerDialog.offer?.file_url && <button className="offer-file-link" type="button" onClick={() => void downloadOffer(offerDialog.offer!)}><FileText />{offerDialog.offer.file_original_name || "Скачать текущий файл"}</button>}
                   {error && <p className="form-error">{error}</p>}
                   <footer><button className="secondary-button" type="button" onClick={() => setOfferDialog(null)}>Закрыть</button><button className="primary-button" type="submit" disabled={saving}>{saving ? "Сохраняем…" : offerDialog.offer ? "Сохранить изменения" : "Создать черновик"}</button></footer>
                 </form>
@@ -3825,7 +3866,7 @@ function RecruitmentView({ token, user }: { token: string; user: User }) {
                   <div><dt>Испытательный срок</dt><dd>{offerDialog.offer.probation_months} мес.</dd></div>
                 </dl>
                 {offerDialog.offer.conditions && <div className="offer-review__conditions"><span>Условия</span><p>{offerDialog.offer.conditions}</p></div>}
-                {offerDialog.offer.file_url && <a className="offer-file-link" href={offerDialog.offer.file_url} target="_blank" rel="noreferrer"><FileText />{offerDialog.offer.file_original_name || "Открыть файл оффера"}</a>}
+                {offerDialog.offer.file_url && <button className="offer-file-link" type="button" onClick={() => void downloadOffer(offerDialog.offer!)}><FileText />{offerDialog.offer.file_original_name || "Скачать файл оффера"}</button>}
                 {error && <p className="form-error">{error}</p>}
                 <div className="offer-review__actions">
                   {offerDialog.offer.status === "pending" && <button className="primary-button" type="button" disabled={saving} onClick={() => void changeOfferStatus("approve")}><CheckCircle2 />Согласовать</button>}

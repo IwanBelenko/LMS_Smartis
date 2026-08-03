@@ -162,6 +162,26 @@ class PeopleApiTests(TestCase):
         allowed = self.client.get("/api/v1/employees/")
         self.assertIn("salary_base", allowed.json()[0])
 
+    def test_employee_export_is_role_scoped_and_compensation_aware(self):
+        self.employee.last_name = "=HYPERLINK(\"https://example.invalid\")"
+        self.employee.save(update_fields=["last_name"])
+
+        self.client.force_authenticate(self.employee)
+        self.assertEqual(self.client.get("/api/v1/employees/export/").status_code, 403)
+
+        self.client.force_authenticate(self.hr)
+        hr_export = self.client.get("/api/v1/employees/export/")
+        self.assertEqual(hr_export.status_code, 200)
+        hr_text = hr_export.content.decode("utf-8-sig")
+        self.assertNotIn("Оклад", hr_text.splitlines()[0])
+        self.assertIn("'=HYPERLINK", hr_text)
+
+        self.client.force_authenticate(self.admin)
+        admin_export = self.client.get("/api/v1/employees/export/")
+        self.assertEqual(admin_export.status_code, 200)
+        self.assertIn("Оклад", admin_export.content.decode("utf-8-sig").splitlines()[0])
+        self.assertTrue(AuditEvent.objects.filter(action="exported", entity_id="export").exists())
+
     def test_admin_sees_recruitment_board_and_summary(self):
         self.client.force_authenticate(self.admin)
         stages = self.client.get("/api/v1/candidate-stages/")
@@ -795,6 +815,27 @@ class PeopleApiTests(TestCase):
         CandidateOffer.objects.create(candidate=candidate, position_title="Аналитик", created_by=self.hr)
         self.client.force_authenticate(self.employee)
         self.assertEqual(self.client.get("/api/v1/offers/").status_code, 403)
+
+    def test_offer_file_is_only_downloaded_through_authorized_api(self):
+        candidate = Candidate.objects.get(full_name="Мария Тестова")
+        with tempfile.TemporaryDirectory() as media_root, self.settings(MEDIA_ROOT=media_root):
+            offer = CandidateOffer.objects.create(
+                candidate=candidate,
+                position_title="Аналитик",
+                created_by=self.hr,
+                file=SimpleUploadedFile("offer.pdf", b"%PDF-1.4 protected", content_type="application/pdf"),
+                file_original_name="offer.pdf",
+            )
+            self.client.force_authenticate(self.hr)
+            detail = self.client.get(f"/api/v1/offers/{offer.pk}/")
+            self.assertEqual(detail.status_code, 200)
+            self.assertTrue(detail.json()["file_url"].endswith(f"/api/v1/offers/{offer.pk}/download/"))
+            downloaded = self.client.get(f"/api/v1/offers/{offer.pk}/download/")
+            self.assertEqual(downloaded.status_code, 200)
+            self.assertEqual(b"".join(downloaded.streaming_content), b"%PDF-1.4 protected")
+
+            self.client.force_authenticate(self.employee)
+            self.assertEqual(self.client.get(f"/api/v1/offers/{offer.pk}/download/").status_code, 403)
 
     def test_employee_creates_and_sees_only_own_absence_requests(self):
         other_profile = self.other_employee.employee_profile

@@ -1,6 +1,8 @@
 import os
 from pathlib import Path
 
+from django.core.exceptions import ImproperlyConfigured
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
@@ -15,6 +17,12 @@ def env_list(name: str, default: str = "") -> list[str]:
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "unsafe-development-key-change-me")
 DEBUG = env_bool("DJANGO_DEBUG", True)
 ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1,api,testserver")
+
+if not DEBUG:
+    if SECRET_KEY.startswith("unsafe-development-key") or len(SECRET_KEY) < 50:
+        raise ImproperlyConfigured("DJANGO_SECRET_KEY must be a unique value of at least 50 characters")
+    if not ALLOWED_HOSTS or "*" in ALLOWED_HOSTS:
+        raise ImproperlyConfigured("DJANGO_ALLOWED_HOSTS must explicitly list production hosts")
 CSRF_TRUSTED_ORIGINS = env_list(
     "DJANGO_CSRF_TRUSTED_ORIGINS",
     "http://localhost,http://127.0.0.1,http://localhost:5173",
@@ -62,6 +70,12 @@ TEMPLATES = [
 ]
 WSGI_APPLICATION = "config.wsgi.application"
 ASGI_APPLICATION = "config.asgi.application"
+POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "smartis")
+if not DEBUG and not env_bool("USE_SQLITE", False) and POSTGRES_PASSWORD in {
+    "", "smartis", "smartis_local_password",
+}:
+    raise ImproperlyConfigured("POSTGRES_PASSWORD must be changed for production")
+
 if env_bool("USE_SQLITE", False):
     DATABASES = {
         "default": {
@@ -75,7 +89,7 @@ else:
             "ENGINE": "django.db.backends.postgresql",
             "NAME": os.getenv("POSTGRES_DB", "smartis_lms"),
             "USER": os.getenv("POSTGRES_USER", "smartis"),
-            "PASSWORD": os.getenv("POSTGRES_PASSWORD", "smartis"),
+            "PASSWORD": POSTGRES_PASSWORD,
             "HOST": os.getenv("POSTGRES_HOST", "db"),
             "PORT": os.getenv("POSTGRES_PORT", "5432"),
             "CONN_MAX_AGE": 60,
@@ -138,6 +152,11 @@ SECURE_SSL_REDIRECT = env_bool("DJANGO_SECURE_SSL_REDIRECT", False)
 SECURE_HSTS_SECONDS = int(os.getenv("DJANGO_SECURE_HSTS_SECONDS", "0"))
 SECURE_HSTS_INCLUDE_SUBDOMAINS = env_bool("DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS", False)
 SECURE_HSTS_PRELOAD = env_bool("DJANGO_SECURE_HSTS_PRELOAD", False)
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_REFERRER_POLICY = "same-origin"
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = "Lax"
+CSRF_COOKIE_SAMESITE = "Lax"
 
 APP_PUBLIC_URL = os.getenv("APP_PUBLIC_URL", "http://localhost:5173").rstrip("/")
 EMAIL_BACKEND = os.getenv(

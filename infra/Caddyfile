@@ -6,10 +6,18 @@
 
 {$APP_SITE_ADDRESS:http://localhost} {
 	encode zstd gzip
+	header {
+		-X-Powered-By
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "same-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
+	}
 	handle /api/* { reverse_proxy api:8000 }
 	handle /admin/* { reverse_proxy api:8000 }
 	handle /static/* { reverse_proxy api:8000 }
 	handle /scorm-content/* { respond 404 }
+	handle /media/people/* { respond 404 }
+	handle /media/recruitment/* { respond 404 }
 	handle /media/* {
 		root * /srv
 		file_server

@@ -820,7 +820,8 @@ class CandidateOfferSerializer(serializers.ModelSerializer):
         if not obj.file:
             return ""
         request = self.context.get("request")
-        return request.build_absolute_uri(obj.file.url) if request else obj.file.url
+        path = f"/api/v1/offers/{obj.pk}/download/"
+        return request.build_absolute_uri(path) if request else path
 
     def validate_file(self, value):
         if value.size > 10 * 1024 * 1024:

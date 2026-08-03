@@ -1,6 +1,11 @@
 #!/bin/sh
 set -eu
 
+if [ "${DJANGO_DEBUG:-true}" = "false" ] && [ "${BOOTSTRAP_DEMO:-false}" = "true" ]; then
+  echo "BOOTSTRAP_DEMO cannot be enabled in production" >&2
+  exit 1
+fi
+
 python manage.py migrate --noinput
 python manage.py collectstatic --noinput
 

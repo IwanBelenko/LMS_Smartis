@@ -2072,7 +2072,7 @@ button.vacancy-card { padding: 13px; display: grid; align-content: center; gap: 
 .offer-status--approved, .offer-status--accepted { background: color-mix(in srgb, var(--brand) 15%, var(--surface)); color: var(--brand-hover); }
 .offer-status--declined { background: color-mix(in srgb, var(--danger) 10%, var(--surface)); color: var(--danger); }
 .offer-file-field input { padding: 6px; font-size: .7rem; }
-.offer-file-link { width: max-content; display: inline-flex; align-items: center; gap: 7px; color: var(--brand-hover); font-size: .7rem; font-weight: 650; text-decoration: none; }
+.offer-file-link { width: max-content; padding: 0; border: 0; background: transparent; display: inline-flex; align-items: center; gap: 7px; color: var(--brand-hover); font: inherit; font-size: .7rem; font-weight: 650; text-decoration: none; cursor: pointer; }
 .offer-file-link:hover { text-decoration: underline; }
 .offer-file-link svg { width: 15px; }
 .offer-next-action {

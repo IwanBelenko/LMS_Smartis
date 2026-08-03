@@ -129,9 +129,20 @@ jobs:
                 echo "::error title=Smartis deployment::Не удалось собрать веб-интерфейс"
                 exit 1
               fi
-              if ! docker compose up --detach --no-build; then
-                echo "::error title=Smartis deployment::Не удалось запустить контейнеры"
+              if ! docker compose up --detach --no-build db; then
+                echo "::error title=Smartis deployment::Не удалось запустить базу данных"
                 docker compose ps --all || true
+                exit 1
+              fi
+              if ! docker compose --profile maintenance run --rm backup; then
+                echo "::error title=Smartis deployment::Не удалось создать резервную копию перед обновлением"
+                exit 1
+              fi
+              if ! docker compose up --detach --no-build api; then
+                echo "::error title=Smartis deployment::Не удалось запустить API"
+                docker compose logs --no-color --tail 40 api db | while IFS= read -r line; do
+                  echo "::error title=Журнал контейнера::$line"
+                done
                 exit 1
               fi
 
@@ -141,11 +152,21 @@ jobs:
                 if [ "$attempt" -ge 24 ]; then
                   echo "::error title=Smartis deployment::API не прошёл проверку готовности"
                   docker compose ps
-                  docker compose logs --tail 150 api proxy web db
+                  docker compose logs --no-color --tail 40 api db | while IFS= read -r line; do
+                    echo "::error title=Журнал контейнера::$line"
+                  done
                   exit 1
                 fi
                 sleep 5
               done
+
+              if ! docker compose up --detach --no-build web proxy; then
+                echo "::error title=Smartis deployment::Не удалось запустить веб-интерфейс или HTTPS-прокси"
+                docker compose logs --no-color --tail 40 web proxy | while IFS= read -r line; do
+                  echo "::error title=Журнал контейнера::$line"
+                done
+                exit 1
+              fi
 
               sed -i "s/^INITIAL_ADMIN_EMAIL=.*/INITIAL_ADMIN_EMAIL=/" .env
               sed -i "s/^INITIAL_ADMIN_PASSWORD=.*/INITIAL_ADMIN_PASSWORD=/" .env
