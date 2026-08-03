@@ -101,5 +101,8 @@ jobs:
       - name: Validate Compose configuration
         run: cp .env.production.example .env && docker compose config --quiet
 
+      - name: Validate deployment script
+        run: bash -n infra/deploy-production.sh
+
       - name: Check whitespace errors
         run: git diff --check origin/main...HEAD
