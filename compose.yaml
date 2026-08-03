@@ -38,6 +38,7 @@ services:
       DJANGO_SECURE_HSTS_SECONDS: "${DJANGO_SECURE_HSTS_SECONDS:-0}"
       DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS: "${DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS:-false}"
       DJANGO_SECURE_HSTS_PRELOAD: "${DJANGO_SECURE_HSTS_PRELOAD:-false}"
+      API_TOKEN_TTL_SECONDS: "${API_TOKEN_TTL_SECONDS:-43200}"
       SCORM_CONTENT_ORIGIN: "${SCORM_CONTENT_ORIGIN:-http://scorm.localhost}"
       POSTGRES_DB: "${POSTGRES_DB:-smartis_lms}"
       POSTGRES_USER: "${POSTGRES_USER:-smartis}"
@@ -73,7 +74,11 @@ services:
       db: { condition: service_healthy }
     volumes: ["media_data:/app/media"]
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health/')"]
+      test:
+        - "CMD"
+        - "python"
+        - "-c"
+        - "import urllib.request; request = urllib.request.Request('http://127.0.0.1:8000/api/v1/health/', headers={'Host': 'api', 'X-Forwarded-Proto': 'https'}); urllib.request.urlopen(request)"
       interval: 10s
       timeout: 5s
       retries: 8
