@@ -49,8 +49,10 @@ printf '%s\n' "$backup_output"
 backup_path="$(printf '%s\n' "$backup_output" | sed -n 's/^Backup created: //p' | tail -1)"
 backup_id="$(basename "$backup_path")"
 test -n "$backup_id"
-test -s "/opt/smartis-backups/$backup_id/database.dump"
-test -s "/opt/smartis-backups/$backup_id/media.tar.gz"
+compose --profile maintenance run --rm --no-deps \
+  --entrypoint /bin/sh restore -c \
+  'test -s "$1/database.dump" && test -s "$1/media.tar.gz" && test "$(cat "$1/backup-id.txt")" = "$2"' \
+  sh "/backups/$backup_id" "$backup_id"
 
 ln -sfn "$release_dir" "$current_link"
 
