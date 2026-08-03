@@ -1,3 +1,4 @@
+from datetime import timedelta
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
 import re
@@ -5,6 +6,7 @@ import re
 from django.core.management import call_command
 from django.core import mail
 from django.test import TestCase, override_settings
+from django.utils import timezone
 from rest_framework.authtoken.models import Token
 from rest_framework.test import APIClient
 
@@ -41,6 +43,36 @@ class IdentityApiTests(TestCase):
         response = self.client.get("/api/v1/auth/me/")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["role"], User.Role.ADMIN)
+
+    def test_new_login_rotates_existing_token(self):
+        first = self.client.post(
+            "/api/v1/auth/login/",
+            {"email": "admin@test.local", "password": "StrongPassword123!"},
+            format="json",
+        )
+        second = self.client.post(
+            "/api/v1/auth/login/",
+            {"email": "admin@test.local", "password": "StrongPassword123!"},
+            format="json",
+        )
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        self.assertNotEqual(first.json()["token"], second.json()["token"])
+        self.assertIn("expires_at", second.json())
+        self.client.credentials(HTTP_AUTHORIZATION="Token " + first.json()["token"])
+        self.assertEqual(self.client.get("/api/v1/auth/me/").status_code, 401)
+
+    @override_settings(API_TOKEN_TTL_SECONDS=3600)
+    def test_expired_token_is_rejected_and_revoked(self):
+        token = Token.objects.create(user=self.admin)
+        Token.objects.filter(pk=token.pk).update(created=timezone.now() - timedelta(hours=2))
+        self.client.credentials(HTTP_AUTHORIZATION="Token " + token.key)
+
+        response = self.client.get("/api/v1/auth/me/")
+
+        self.assertEqual(response.status_code, 401)
+        self.assertFalse(Token.objects.filter(pk=token.pk).exists())
 
     def test_administrator_creates_department_and_invited_user(self):
         self.authenticate()

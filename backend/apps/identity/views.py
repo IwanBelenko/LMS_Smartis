@@ -1,6 +1,7 @@
 from datetime import timedelta
 import uuid
 
+from django.conf import settings
 from django.contrib.auth.tokens import default_token_generator
 from django.db import transaction
 from django.shortcuts import get_object_or_404
@@ -38,8 +39,16 @@ class LoginView(APIView):
         serializer = LoginSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.validated_data["user"]
-        token, _ = Token.objects.get_or_create(user=user)
-        return Response({"token": token.key, "user": UserSerializer(user).data})
+        Token.objects.filter(user=user).delete()
+        token = Token.objects.create(user=user)
+        expires_at = token.created + timedelta(seconds=settings.API_TOKEN_TTL_SECONDS)
+        return Response(
+            {
+                "token": token.key,
+                "expires_at": expires_at,
+                "user": UserSerializer(user).data,
+            }
+        )
 
 
 class LogoutView(APIView):

@@ -662,6 +662,13 @@ type MyLearning = {
 };
 
 const API = "/api/v1";
+const AUTH_EXPIRED_EVENT = "smartis-auth-expired";
+
+function notifyAuthenticationExpired(response: Response, token: string | null) {
+  if (response.status !== 401 || !token) return;
+  localStorage.removeItem("smartis-token");
+  window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
+}
 
 async function apiRequest<T>(
   path: string,
@@ -677,6 +684,7 @@ async function apiRequest<T>(
     },
   });
   if (!response.ok) {
+    notifyAuthenticationExpired(response, token);
     const data = await response.json().catch(() => ({}));
     const message =
       data.detail ||
@@ -695,6 +703,7 @@ async function apiUpload<T>(path: string, token: string, body: FormData, method 
     body,
   });
   if (!response.ok) {
+    notifyAuthenticationExpired(response, token);
     const data = await response.json().catch(() => ({}));
     throw new Error(data.detail || Object.values(data).flat().join(" ") || "Не удалось загрузить файл");
   }
@@ -7568,6 +7577,16 @@ function App() {
     document.documentElement.dataset.theme = dark ? "dark" : "light";
     localStorage.setItem("smartis-theme", dark ? "dark" : "light");
   }, [dark]);
+
+  useEffect(() => {
+    const clearExpiredSession = () => {
+      setToken(null);
+      setUser(null);
+      setInbox({ total: 0, urgent: 0, unread: 0, items: [] });
+    };
+    window.addEventListener(AUTH_EXPIRED_EVENT, clearExpiredSession);
+    return () => window.removeEventListener(AUTH_EXPIRED_EVENT, clearExpiredSession);
+  }, []);
 
   useEffect(() => {
     if (!token) return;

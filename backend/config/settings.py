@@ -121,6 +121,9 @@ MAX_HR_DOCUMENT_UPLOAD_SIZE = int(os.getenv("MAX_HR_DOCUMENT_UPLOAD_SIZE", 20 * 
 MAX_SCORM_UPLOAD_SIZE = int(os.getenv("MAX_SCORM_UPLOAD_SIZE", 1024 * 1024 * 1024))
 MAX_SCORM_UNPACKED_SIZE = int(os.getenv("MAX_SCORM_UNPACKED_SIZE", 2 * 1024 * 1024 * 1024))
 MAX_SCORM_FILES = int(os.getenv("MAX_SCORM_FILES", 10000))
+API_TOKEN_TTL_SECONDS = int(os.getenv("API_TOKEN_TTL_SECONDS", 12 * 60 * 60))
+if API_TOKEN_TTL_SECONDS <= 0:
+    raise ImproperlyConfigured("API_TOKEN_TTL_SECONDS must be a positive integer")
 FILE_UPLOAD_MAX_MEMORY_SIZE = 5 * 1024 * 1024
 STORAGES = {
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
@@ -133,7 +136,7 @@ CORS_ALLOWED_ORIGINS = env_list(
 )
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
-        "rest_framework.authentication.TokenAuthentication",
+        "apps.identity.authentication.ExpiringTokenAuthentication",
     ],
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
