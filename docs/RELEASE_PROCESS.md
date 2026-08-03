@@ -43,7 +43,8 @@ Workflow повторно запускает CI, создаёт immutable-арх
 Релизы хранятся в `/opt/smartis-releases/<commit>`, активный релиз отмечен
 ссылкой `/opt/smartis-current`, а production-секреты остаются в
 `/opt/smartis/.env`. Docker volumes не удаляются и используются одним Compose
-project `smartis-lms`.
+project `smartis-lms`. Файл `/opt/smartis/.env` доступен deploy-пользователю
+только для чтения; запись выполняется лишь в каталог релизов.
 
 ## Откат
 
