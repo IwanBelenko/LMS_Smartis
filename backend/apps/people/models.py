@@ -1,5 +1,7 @@
 from django.conf import settings
 from django.db import models
+from django.db.models.signals import post_delete
+from django.dispatch import receiver
 from pathlib import Path
 from uuid import uuid4
 
@@ -581,6 +583,40 @@ class Candidate(models.Model):
 def candidate_offer_path(instance, filename):
     suffix = Path(filename).suffix.lower()
     return f"recruitment/candidates/{instance.candidate_id}/offers/{uuid4().hex}{suffix}"
+
+
+def candidate_resume_path(instance, filename):
+    suffix = Path(filename).suffix.lower()
+    return f"recruitment/candidates/{instance.candidate_id}/resumes/{uuid4().hex}{suffix}"
+
+
+class CandidateResume(models.Model):
+    candidate = models.ForeignKey(Candidate, related_name="resumes", on_delete=models.CASCADE)
+    file = models.FileField("Файл резюме", upload_to=candidate_resume_path)
+    file_original_name = models.CharField("Исходное имя файла", max_length=255)
+    content_type = models.CharField("Тип файла", max_length=120, blank=True)
+    file_size = models.PositiveBigIntegerField("Размер файла", default=0)
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="uploaded_candidate_resumes",
+        null=True,
+        on_delete=models.SET_NULL,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        verbose_name = "Резюме кандидата"
+        verbose_name_plural = "Резюме кандидатов"
+
+    def __str__(self):
+        return f"{self.candidate}: {self.file_original_name}"
+
+
+@receiver(post_delete, sender=CandidateResume)
+def delete_candidate_resume_file(sender, instance, **kwargs):
+    if instance.file:
+        instance.file.delete(save=False)
 
 
 class CandidateOffer(models.Model):

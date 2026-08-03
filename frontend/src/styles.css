@@ -1956,6 +1956,12 @@ button.vacancy-card { padding: 13px; display: grid; align-content: center; gap: 
 }
 .candidate-card__edit:hover { background: var(--surface-soft); color: var(--foreground); }
 .candidate-card__edit svg { width: 15px; height: 15px; }
+.candidate-card__resume {
+  min-height: 27px; padding: 5px 7px; border-radius: 5px; display: flex; align-items: center; gap: 6px;
+  background: var(--surface-soft); color: var(--muted); font-size: .67rem; font-weight: 650;
+}
+.candidate-card__resume--ready { background: color-mix(in srgb, var(--brand) 10%, var(--surface)); color: var(--brand-hover); }
+.candidate-card__resume svg { width: 13px; height: 13px; }
 .candidate-card footer { padding-top: 8px; border-top: 1px solid var(--border); display: grid; gap: 3px; color: var(--muted); font-size: 0.7rem; }
 .candidate-card__hire {
   width: 100%; min-height: 32px; padding: 6px 9px; border: 1px solid var(--brand); border-radius: 5px;
@@ -2218,6 +2224,27 @@ button.vacancy-card { padding: 13px; display: grid; align-content: center; gap: 
 .hcm-form__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .hcm-form__wide { grid-column: 1 / -1; }
 .hcm-form textarea { min-height: 78px; }
+.candidate-resumes {
+  padding: 12px; border: 1px solid var(--border); border-radius: 8px; display: grid; gap: 10px; background: var(--surface-soft);
+}
+.candidate-resumes > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.candidate-resumes > header > div { display: grid; gap: 3px; }
+.candidate-resumes > header strong { font-size: .82rem; }
+.candidate-resumes > header small { color: var(--muted); font-size: .66rem; }
+.candidate-resumes__upload { position: relative; overflow: hidden; white-space: nowrap; cursor: pointer; }
+.candidate-resumes__upload input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.candidate-resumes__upload--busy { opacity: .65; cursor: wait; }
+.candidate-resumes__list { display: grid; gap: 6px; }
+.candidate-resumes__list article {
+  min-height: 48px; padding: 7px 8px; border: 1px solid var(--border); border-radius: 6px;
+  display: grid; grid-template-columns: 24px minmax(0, 1fr) 30px 30px; align-items: center; gap: 7px; background: var(--surface);
+}
+.candidate-resumes__list article > svg { width: 17px; color: var(--brand-hover); }
+.candidate-resumes__list article > div { min-width: 0; display: grid; gap: 3px; }
+.candidate-resumes__list article strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .73rem; }
+.candidate-resumes__list article small, .candidate-resumes__list > p { color: var(--muted); font-size: .63rem; }
+.candidate-resumes__list > p { padding: 8px 2px; }
+.candidate-resumes .icon-button--danger { color: var(--danger); }
 .hcm-form > footer {
   margin: 0 -20px -20px; padding: 14px 20px 20px; position: sticky; bottom: -20px;
   border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 8px;

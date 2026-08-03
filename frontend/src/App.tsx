@@ -280,8 +280,19 @@ type Candidate = {
   hired_employee: number | null;
   hired_employee_name: string | null;
   hired_at: string | null;
+  resume_count: number;
   next_action_at: string | null;
   comment: string;
+};
+type CandidateResume = {
+  id: number;
+  candidate: number;
+  file_url: string;
+  file_original_name: string;
+  content_type: string;
+  file_size: number;
+  uploaded_by_name: string;
+  created_at: string;
 };
 type CandidateOffer = {
   id: number;
@@ -3236,6 +3247,8 @@ function RecruitmentView({ token, user }: { token: string; user: User }) {
   const [activeInterview, setActiveInterview] = useState<Interview | null>(null);
   const [offerDialog, setOfferDialog] = useState<{ candidate: Candidate; offer: CandidateOffer | null } | null>(null);
   const [offerFile, setOfferFile] = useState<File | null>(null);
+  const [resumes, setResumes] = useState<CandidateResume[]>([]);
+  const [resumeBusy, setResumeBusy] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(emptyCandidateForm);
   const [vacancyForm, setVacancyForm] = useState(emptyVacancyForm);
@@ -3289,6 +3302,12 @@ function RecruitmentView({ token, user }: { token: string; user: User }) {
   function openCandidate(candidate?: Candidate) {
     setError("");
     setEditing(candidate || null);
+    setResumes([]);
+    if (candidate) {
+      void apiRequest<CandidateResume[]>(`/candidates/${candidate.id}/resumes/`, token)
+        .then(setResumes)
+        .catch((reason) => setError(reason instanceof Error ? reason.message : "Не удалось загрузить резюме"));
+    }
     setForm(candidate ? {
       full_name: candidate.full_name,
       email: candidate.email || "",
@@ -3310,6 +3329,55 @@ function RecruitmentView({ token, user }: { token: string; user: User }) {
       department: selectedVacancy === "all" ? "" : String(vacancies.find((item) => item.id === selectedVacancy)?.department || ""),
     });
     setShowForm(true);
+  }
+
+  async function uploadCandidateResume(file: File) {
+    if (!editing) return;
+    setResumeBusy(true);
+    setError("");
+    try {
+      const body = new FormData();
+      body.append("file", file);
+      await apiUpload<CandidateResume>(`/candidates/${editing.id}/resumes/`, token, body);
+      setResumes(await apiRequest<CandidateResume[]>(`/candidates/${editing.id}/resumes/`, token));
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось загрузить резюме");
+    } finally {
+      setResumeBusy(false);
+    }
+  }
+
+  async function downloadCandidateResume(resume: CandidateResume) {
+    setError("");
+    try {
+      const response = await fetch(resume.file_url, { headers: { Authorization: `Token ${token}` } });
+      if (!response.ok) throw new Error("Не удалось скачать резюме");
+      const blob = await response.blob();
+      const href = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = href;
+      anchor.download = resume.file_original_name || `resume-${resume.id}`;
+      anchor.click();
+      window.setTimeout(() => URL.revokeObjectURL(href), 1000);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось скачать резюме");
+    }
+  }
+
+  async function deleteCandidateResume(resume: CandidateResume) {
+    if (!editing || !window.confirm(`Удалить версию «${resume.file_original_name}»?`)) return;
+    setResumeBusy(true);
+    setError("");
+    try {
+      await apiRequest(`/candidate-resumes/${resume.id}/`, token, { method: "DELETE" });
+      setResumes(await apiRequest<CandidateResume[]>(`/candidates/${editing.id}/resumes/`, token));
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось удалить резюме");
+    } finally {
+      setResumeBusy(false);
+    }
   }
 
   function selectCandidateVacancy(value: string) {
@@ -3705,6 +3773,10 @@ function RecruitmentView({ token, user }: { token: string; user: User }) {
                 <article className="candidate-card" key={candidate.id}>
                   <header><strong>{candidate.full_name}</strong><button className="candidate-card__edit" type="button" onClick={() => openCandidate(candidate)} aria-label={`Редактировать ${candidate.full_name}`}><Pencil /></button></header>
                   <p>{candidate.vacancy_title || candidate.desired_position}</p>
+                  <div className={candidate.resume_count ? "candidate-card__resume candidate-card__resume--ready" : "candidate-card__resume"}>
+                    <FileText />
+                    <span>{candidate.resume_count ? `Резюме: ${candidate.resume_count}` : "Резюме не загружено"}</span>
+                  </div>
                   <label>Этап<select value={candidate.stage} onChange={(event) => void changeCandidateStage(candidate, event.target.value)}>{stages.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
                   <footer><span>{candidate.department_name || "Без отдела"}</span><small>{candidate.source || "Источник не указан"}</small></footer>
                   {!candidate.hired_employee && (() => {
@@ -3808,6 +3880,37 @@ function RecruitmentView({ token, user }: { token: string; user: User }) {
                 <label>Ожидания по зарплате<input type="number" min="0" value={form.desired_salary} onChange={(e) => setForm({ ...form, desired_salary: e.target.value })} /></label>
                 <label className="hcm-form__wide">Навыки<textarea value={form.skills} onChange={(e) => setForm({ ...form, skills: e.target.value })} /></label>
                 <label className="hcm-form__wide">Комментарий<textarea value={form.comment} onChange={(e) => setForm({ ...form, comment: e.target.value })} /></label>
+                {editing && (
+                  <section className="candidate-resumes hcm-form__wide">
+                    <header>
+                      <div><strong>Резюме</strong><small>PDF, DOCX или TXT · до 20 МБ · новые файлы сохраняются отдельными версиями</small></div>
+                      <label className={resumeBusy ? "secondary-button candidate-resumes__upload candidate-resumes__upload--busy" : "secondary-button candidate-resumes__upload"}>
+                        <Upload />{resumeBusy ? "Загрузка…" : "Добавить версию"}
+                        <input
+                          type="file"
+                          accept=".pdf,.docx,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
+                          disabled={resumeBusy}
+                          onChange={(event) => {
+                            const file = event.target.files?.[0];
+                            if (file) void uploadCandidateResume(file);
+                            event.target.value = "";
+                          }}
+                        />
+                      </label>
+                    </header>
+                    <div className="candidate-resumes__list">
+                      {resumes.map((resume, index) => (
+                        <article key={resume.id}>
+                          <FileText />
+                          <div><strong>{resume.file_original_name}</strong><small>{index === 0 ? "Текущая версия" : `Версия от ${new Date(resume.created_at).toLocaleDateString("ru-RU")}`} · {resume.file_size < 1024 * 1024 ? `${Math.max(1, Math.round(resume.file_size / 1024))} КБ` : `${(resume.file_size / (1024 * 1024)).toFixed(1)} МБ`} · {resume.uploaded_by_name}</small></div>
+                          <button className="icon-button" type="button" onClick={() => void downloadCandidateResume(resume)} aria-label={`Скачать ${resume.file_original_name}`}><Download /></button>
+                          <button className="icon-button icon-button--danger" type="button" disabled={resumeBusy} onClick={() => void deleteCandidateResume(resume)} aria-label={`Удалить ${resume.file_original_name}`}><Trash2 /></button>
+                        </article>
+                      ))}
+                      {!resumes.length && <p>Резюме пока не загружено.</p>}
+                    </div>
+                  </section>
+                )}
               </div>
               {error && <p className="form-error">{error}</p>}
               <footer><button className="secondary-button" type="button" onClick={() => setShowForm(false)}>Отмена</button><button className="primary-button" type="submit" disabled={saving}>{saving ? "Сохраняем…" : "Сохранить"}</button></footer>

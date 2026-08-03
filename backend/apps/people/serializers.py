@@ -1,6 +1,7 @@
 from datetime import date
 import hashlib
 from pathlib import Path
+from zipfile import BadZipFile, ZipFile, is_zipfile
 
 from django.conf import settings
 from django.db import transaction
@@ -15,6 +16,7 @@ from .models import (
     AbsenceRequest,
     Candidate,
     CandidateOffer,
+    CandidateResume,
     CandidateStage,
     Competency,
     DailyTranscript,
@@ -772,6 +774,7 @@ class CandidateSerializer(serializers.ModelSerializer):
     recruiter_name = serializers.CharField(source="recruiter.get_full_name", read_only=True)
     vacancy_title = serializers.CharField(source="vacancy.title", read_only=True)
     hired_employee_name = serializers.CharField(source="hired_employee.user.get_full_name", read_only=True)
+    resume_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Candidate
@@ -780,7 +783,7 @@ class CandidateSerializer(serializers.ModelSerializer):
             "vacancy", "vacancy_title",
             "skills", "source", "stage", "stage_name", "department", "department_name",
             "recruiter", "recruiter_name", "hired_employee", "hired_employee_name", "hired_at",
-            "next_action_at", "comment", "created_at", "updated_at",
+            "resume_count", "next_action_at", "comment", "created_at", "updated_at",
         ]
         read_only_fields = ["id", "created_at", "updated_at", "recruiter", "hired_employee", "hired_at"]
 
@@ -790,6 +793,86 @@ class CandidateSerializer(serializers.ModelSerializer):
             attrs["department"] = vacancy.department
             attrs["desired_position"] = vacancy.position.name
         return attrs
+
+    def get_resume_count(self, obj):
+        annotated_count = getattr(obj, "resume_count", None)
+        return annotated_count if annotated_count is not None else obj.resumes.count()
+
+
+class CandidateResumeSerializer(serializers.ModelSerializer):
+    uploaded_by_name = serializers.SerializerMethodField()
+    file_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CandidateResume
+        fields = [
+            "id", "candidate", "file", "file_url", "file_original_name", "content_type",
+            "file_size", "uploaded_by", "uploaded_by_name", "created_at",
+        ]
+        read_only_fields = [
+            "id", "candidate", "file_url", "file_original_name", "content_type",
+            "file_size", "uploaded_by", "uploaded_by_name", "created_at",
+        ]
+        extra_kwargs = {"file": {"write_only": True, "required": True}}
+
+    def get_uploaded_by_name(self, obj):
+        if not obj.uploaded_by:
+            return ""
+        return obj.uploaded_by.get_full_name() or obj.uploaded_by.email
+
+    def get_file_url(self, obj):
+        request = self.context.get("request")
+        path = f"/api/v1/candidate-resumes/{obj.pk}/download/"
+        return request.build_absolute_uri(path) if request else path
+
+    def validate_file(self, value):
+        if value.size > settings.MAX_HR_DOCUMENT_UPLOAD_SIZE:
+            max_mb = settings.MAX_HR_DOCUMENT_UPLOAD_SIZE // (1024 * 1024)
+            raise serializers.ValidationError(f"Резюме не должно превышать {max_mb} МБ")
+
+        suffix = Path(value.name).suffix.lower()
+        if suffix not in {".pdf", ".docx", ".txt"}:
+            raise serializers.ValidationError("Поддерживаются PDF, DOCX и TXT")
+
+        try:
+            value.seek(0)
+            if suffix == ".pdf":
+                if value.read(5) != b"%PDF-":
+                    raise serializers.ValidationError("Файл не является корректным PDF")
+            elif suffix == ".docx":
+                if not is_zipfile(value):
+                    raise serializers.ValidationError("Файл не является корректным DOCX")
+                value.seek(0)
+                with ZipFile(value) as archive:
+                    names = set(archive.namelist())
+                    if "[Content_Types].xml" not in names or "word/document.xml" not in names:
+                        raise serializers.ValidationError("Файл не является корректным DOCX")
+            else:
+                content = value.read()
+                if b"\x00" in content:
+                    raise serializers.ValidationError("TXT-файл содержит бинарные данные")
+                for encoding in ("utf-8-sig", "cp1251"):
+                    try:
+                        content.decode(encoding)
+                        break
+                    except UnicodeDecodeError:
+                        continue
+                else:
+                    raise serializers.ValidationError("TXT-файл должен быть в UTF-8 или Windows-1251")
+        except BadZipFile as exc:
+            raise serializers.ValidationError("Файл не является корректным DOCX") from exc
+        finally:
+            value.seek(0)
+        return value
+
+    def create(self, validated_data):
+        uploaded = validated_data["file"]
+        validated_data.update(
+            file_original_name=Path(uploaded.name).name[:255],
+            content_type=str(uploaded.content_type or "")[:120],
+            file_size=uploaded.size,
+        )
+        return super().create(validated_data)
 
 
 class CandidateOfferSerializer(serializers.ModelSerializer):

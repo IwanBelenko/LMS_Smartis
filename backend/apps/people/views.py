@@ -25,6 +25,7 @@ from .models import (
     AuditEvent,
     Candidate,
     CandidateOffer,
+    CandidateResume,
     CandidateStage,
     Competency,
     DailyTranscript,
@@ -54,6 +55,7 @@ from .serializers import (
     CandidateSerializer,
     CandidateHireSerializer,
     CandidateOfferSerializer,
+    CandidateResumeSerializer,
     CandidateStageSerializer,
     CompetencySerializer,
     DailyTranscriptSerializer,
@@ -99,6 +101,7 @@ AUDIT_ENTITY_LABELS = {
     "document": "Документы",
     "absence": "Отсутствия",
     "candidate": "Подбор",
+    "candidate_resume": "Резюме кандидатов",
     "vacancy": "Вакансии",
     "interview": "Собеседования",
     "offer": "Офферы",
@@ -132,6 +135,8 @@ AUDIT_ACTION_LABELS = {
     "approved": "Согласование",
     "rejected": "Отклонение",
     "cancelled": "Отмена",
+    "uploaded": "Загрузка",
+    "downloaded": "Скачивание",
 }
 
 
@@ -1420,7 +1425,9 @@ class CandidateListCreateView(generics.ListCreateAPIView):
     permission_classes = [IsRecruiter]
 
     def get_queryset(self):
-        queryset = Candidate.objects.select_related("stage", "department", "recruiter", "vacancy", "hired_employee__user")
+        queryset = Candidate.objects.select_related(
+            "stage", "department", "recruiter", "vacancy", "hired_employee__user"
+        ).annotate(resume_count=Count("resumes"))
         stage = self.request.query_params.get("stage")
         vacancy = self.request.query_params.get("vacancy")
         if stage:
@@ -1439,13 +1446,83 @@ class CandidateListCreateView(generics.ListCreateAPIView):
 class CandidateDetailView(generics.RetrieveUpdateAPIView):
     serializer_class = CandidateSerializer
     permission_classes = [IsRecruiter]
-    queryset = Candidate.objects.select_related("stage", "department", "recruiter", "vacancy", "hired_employee__user")
+    queryset = Candidate.objects.select_related(
+        "stage", "department", "recruiter", "vacancy", "hired_employee__user"
+    ).annotate(resume_count=Count("resumes"))
 
     def perform_update(self, serializer):
         candidate = serializer.save()
         AuditEvent.objects.create(
             actor=self.request.user, entity_type="candidate", entity_id=str(candidate.pk), action="updated"
         )
+
+
+class CandidateResumeListCreateView(generics.ListCreateAPIView):
+    serializer_class = CandidateResumeSerializer
+    permission_classes = [IsRecruiter]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def get_candidate(self):
+        if not hasattr(self, "_candidate"):
+            self._candidate = get_object_or_404(Candidate, pk=self.kwargs["candidate_id"])
+        return self._candidate
+
+    def get_queryset(self):
+        return CandidateResume.objects.filter(candidate=self.get_candidate()).select_related("uploaded_by")
+
+    def perform_create(self, serializer):
+        resume = serializer.save(candidate=self.get_candidate(), uploaded_by=self.request.user)
+        AuditEvent.objects.create(
+            actor=self.request.user,
+            entity_type="candidate_resume",
+            entity_id=str(resume.pk),
+            action="uploaded",
+            changes={"candidate_id": resume.candidate_id, "filename": resume.file_original_name},
+        )
+
+
+class CandidateResumeDownloadView(APIView):
+    permission_classes = [IsRecruiter]
+
+    def get(self, request, pk):
+        resume = get_object_or_404(CandidateResume.objects.select_related("candidate"), pk=pk)
+        if not resume.file:
+            return Response({"detail": "Файл резюме не найден"}, status=status.HTTP_404_NOT_FOUND)
+        AuditEvent.objects.create(
+            actor=request.user,
+            entity_type="candidate_resume",
+            entity_id=str(resume.pk),
+            action="downloaded",
+            changes={"candidate_id": resume.candidate_id},
+        )
+        content_type = resume.content_type or mimetypes.guess_type(resume.file_original_name)[0] or "application/octet-stream"
+        response = FileResponse(
+            resume.file.open("rb"),
+            content_type=content_type,
+            as_attachment=True,
+            filename=resume.file_original_name or f"resume-{resume.pk}",
+        )
+        response["Cache-Control"] = "no-store, private"
+        response["X-Content-Type-Options"] = "nosniff"
+        return response
+
+
+class CandidateResumeDetailView(APIView):
+    permission_classes = [IsRecruiter]
+
+    def delete(self, request, pk):
+        resume = get_object_or_404(CandidateResume, pk=pk)
+        candidate_id = resume.candidate_id
+        filename = resume.file_original_name
+        resume.delete()
+        AuditEvent.objects.create(
+            actor=request.user,
+            entity_type="candidate_resume",
+            entity_id=str(pk),
+            action="deleted",
+            changes={"candidate_id": candidate_id, "filename": filename},
+        )
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class CandidateStageListView(generics.ListAPIView):
