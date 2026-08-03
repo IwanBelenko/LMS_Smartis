@@ -102,7 +102,9 @@ jobs:
         run: cp .env.production.example .env && docker compose config --quiet
 
       - name: Validate deployment script
-        run: bash -n infra/deploy-production.sh
+        run: |
+          bash -n infra/deploy-production.sh
+          bash -n infra/verify-production-backup.sh
 
       - name: Check whitespace errors
         run: git diff --check origin/main...HEAD
