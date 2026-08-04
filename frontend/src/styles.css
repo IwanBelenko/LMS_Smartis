@@ -111,7 +111,11 @@ svg { width: 20px; height: 20px; flex: 0 0 auto; }
   margin-top: auto; padding-top: 18px; border-top: 1px solid var(--border);
   display: grid; gap: 14px;
 }
-.user-chip { min-width: 0; display: flex; align-items: center; gap: 9px; }
+.user-chip {
+  min-width: 0; padding: 0; border: 0; display: flex; align-items: center; gap: 9px;
+  background: transparent; color: var(--foreground); text-align: left; cursor: pointer;
+}
+.user-chip:hover strong { color: var(--brand-hover); }
 .user-chip > svg { width: 28px; height: 28px; color: var(--muted); }
 .user-chip div { min-width: 0; display: grid; gap: 2px; }
 .user-chip span { color: var(--muted); font-size: 0.76rem; }
@@ -1040,6 +1044,22 @@ td:first-child span { color: var(--muted); font-size: 0.8rem; }
 .user-access-state p { color: var(--muted); font-size: .7rem; }
 .hcm-form > footer.user-access-actions { justify-content: space-between; }
 .user-access-actions > div { display: flex; align-items: center; gap: 8px; }
+.temporary-password-dialog, .password-change-dialog { width: min(560px, 100%); }
+.temporary-password-account {
+  padding: 11px 12px; border: 1px solid var(--border); border-radius: 8px;
+  display: grid; gap: 3px; background: var(--surface-soft);
+}
+.temporary-password-account span { color: var(--muted); font-size: .68rem; }
+.temporary-password-value { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 8px; }
+.temporary-password-value input { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .95rem; letter-spacing: .04em; }
+.temporary-password-value .secondary-button { white-space: nowrap; }
+.temporary-password-warning {
+  padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--warning) 45%, var(--border)); border-radius: 8px;
+  color: var(--muted); background: color-mix(in srgb, var(--warning) 8%, var(--surface)); font-size: .72rem; line-height: 1.45;
+}
+.temporary-password-dialog > footer { display: flex; justify-content: flex-end; }
+.password-change-fields { display: grid; gap: 12px; }
+.password-visibility-toggle { width: max-content; }
 .employee-dismissal-warning {
   padding: 9px 11px; border: 1px solid color-mix(in srgb, var(--danger) 40%, var(--border)); border-radius: 7px;
   display: grid; align-content: center; gap: 2px; background: color-mix(in srgb, var(--danger) 7%, var(--surface));
@@ -1592,12 +1612,14 @@ th { font-size: 0.72rem; text-transform: none; letter-spacing: 0.02em; }
   .learning-path-card { grid-template-columns: 38px minmax(0, 1fr); }
   .learning-path-card .content-placement { grid-column: 1 / -1; }
   .learning-path-card__edit { grid-column: 2; justify-self: start; }
+  .temporary-password-value { grid-template-columns: minmax(0, 1fr) auto; }
+  .temporary-password-value .secondary-button { grid-column: 1 / -1; }
 }
 
 /* Persistent drawer state and compact course cards */
 .sidebar-backdrop { pointer-events: auto; cursor: pointer; }
 .sidebar__header .brand__wordmark { max-width: 190px; }
-.icon-rail__user { cursor: default; }
+.icon-rail__user { cursor: pointer; }
 
 .course-card, .course-grid--cards .course-card, .course-grid--compact .course-card {
   min-height: 190px; gap: 12px; position: relative;

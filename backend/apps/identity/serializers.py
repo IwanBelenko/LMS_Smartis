@@ -3,6 +3,7 @@ from django.utils.text import slugify
 from rest_framework import serializers
 
 from .models import Department, Invitation, User
+from .passwords import generate_temporary_password
 from .validators import validate_corporate_email
 
 
@@ -40,9 +41,14 @@ class UserSerializer(serializers.ModelSerializer):
 
 
 class UserCreateSerializer(serializers.ModelSerializer):
+    generate_password = serializers.BooleanField(write_only=True, required=False, default=False)
+
     class Meta:
         model = User
-        fields = ["id", "email", "first_name", "last_name", "role", "department", "can_view_compensation"]
+        fields = [
+            "id", "email", "first_name", "last_name", "role", "department",
+            "can_view_compensation", "generate_password",
+        ]
         read_only_fields = ["id"]
 
     def validate_email(self, value):
@@ -57,10 +63,19 @@ class UserCreateSerializer(serializers.ModelSerializer):
         return attrs
 
     def create(self, validated_data):
-        user = User.objects.create_user(password=None, **validated_data)
-        user.set_unusable_password()
-        user.save(update_fields=["password"])
-        Invitation.objects.create(user=user, created_by=self.context["request"].user)
+        should_generate = validated_data.pop("generate_password", False)
+        temporary_password = generate_temporary_password() if should_generate else None
+        user = User.objects.create_user(
+            password=temporary_password,
+            status=User.Status.ACTIVE if temporary_password else User.Status.INVITED,
+            **validated_data,
+        )
+        if temporary_password:
+            user.temporary_password = temporary_password
+        else:
+            user.set_unusable_password()
+            user.save(update_fields=["password"])
+            Invitation.objects.create(user=user, created_by=self.context["request"].user)
         return user
 
 
@@ -110,7 +125,7 @@ class LoginSerializer(serializers.Serializer):
         if not user:
             raise serializers.ValidationError("Неверный email или пароль")
         if user.status == User.Status.INVITED:
-            raise serializers.ValidationError("Сначала активируйте учётную запись по ссылке из письма")
+            raise serializers.ValidationError("Пароль ещё не назначен. Обратитесь к администратору")
         if user.status == User.Status.BLOCKED:
             raise serializers.ValidationError("Учётная запись заблокирована")
         attrs["user"] = user
@@ -125,6 +140,23 @@ class PasswordPairSerializer(serializers.Serializer):
         if attrs["password"] != attrs["password_confirm"]:
             raise serializers.ValidationError({"password_confirm": "Пароли не совпадают"})
         password_validation.validate_password(attrs["password"], self.context.get("user"))
+        return attrs
+
+
+class PasswordChangeSerializer(serializers.Serializer):
+    current_password = serializers.CharField(trim_whitespace=False, write_only=True)
+    password = serializers.CharField(trim_whitespace=False, write_only=True)
+    password_confirm = serializers.CharField(trim_whitespace=False, write_only=True)
+
+    def validate_current_password(self, value):
+        if not self.context["user"].check_password(value):
+            raise serializers.ValidationError("Текущий пароль указан неверно")
+        return value
+
+    def validate(self, attrs):
+        if attrs["password"] != attrs["password_confirm"]:
+            raise serializers.ValidationError({"password_confirm": "Пароли не совпадают"})
+        password_validation.validate_password(attrs["password"], self.context["user"])
         return attrs
 
 

@@ -162,6 +162,8 @@ AUDIT_ACTION_LABELS = {
     "invitation_resent": "Повторное приглашение",
     "invitation_accepted": "Активация учётной записи",
     "password_reset": "Смена пароля",
+    "password_changed": "Смена своего пароля",
+    "password_generated": "Генерация временного пароля",
     "completed": "Завершение",
     "sent": "Отправка",
     "signed": "Подтверждение",
@@ -1053,10 +1055,11 @@ class EmployeeListCreateView(generics.ListCreateAPIView):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         self.perform_create(serializer)
-        return Response(
-            EmployeeProfileSerializer(serializer.instance, context={"request": request}).data,
-            status=201,
-        )
+        response = EmployeeProfileSerializer(serializer.instance, context={"request": request}).data
+        temporary_password = getattr(serializer.instance, "temporary_password", None)
+        if temporary_password:
+            response["temporary_password"] = temporary_password
+        return Response(response, status=201)
 
 
 def _safe_csv_value(value):

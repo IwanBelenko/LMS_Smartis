@@ -18,10 +18,12 @@ from rest_framework.views import APIView
 from apps.core.audit import record_audit
 from .emails import send_invitation_email, send_password_reset_email
 from .models import Department, Invitation, User
+from .passwords import generate_temporary_password
 from .permissions import IsAdministrator
 from .serializers import (
     DepartmentSerializer,
     LoginSerializer,
+    PasswordChangeSerializer,
     PasswordPairSerializer,
     PasswordResetRequestSerializer,
     UserCreateSerializer,
@@ -83,7 +85,6 @@ class UserListCreateView(generics.ListCreateAPIView):
             serializer = self.get_serializer(data=request.data)
             serializer.is_valid(raise_exception=True)
             user = serializer.save()
-            send_invitation_email(user.invitation)
             record_audit(
                 actor=request.user,
                 entity_type="user",
@@ -92,7 +93,47 @@ class UserListCreateView(generics.ListCreateAPIView):
                 changes={"email": user.email, "role": user.role, "department_id": user.department_id},
                 request=request,
             )
-        return Response(UserSerializer(user).data, status=status.HTTP_201_CREATED)
+        response = UserSerializer(user).data
+        temporary_password = getattr(user, "temporary_password", None)
+        if temporary_password:
+            response["temporary_password"] = temporary_password
+        return Response(response, status=status.HTTP_201_CREATED)
+
+
+class UserGeneratePasswordView(APIView):
+    permission_classes = [IsAdministrator]
+
+    @transaction.atomic
+    def post(self, request, pk):
+        user = get_object_or_404(User, pk=pk)
+        if user.pk == request.user.pk:
+            return Response(
+                {"detail": "Свой пароль измените через профиль"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if user.status == User.Status.BLOCKED:
+            return Response(
+                {"detail": "Сначала восстановите доступ пользователя"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        temporary_password = generate_temporary_password()
+        user.set_password(temporary_password)
+        user.status = User.Status.ACTIVE
+        user.save(update_fields=["password", "status"])
+        Invitation.objects.filter(user=user).delete()
+        Token.objects.filter(user=user).delete()
+        record_audit(
+            actor=request.user,
+            entity_type="user",
+            entity_id=user.pk,
+            action="password_generated",
+            changes={"email": user.email},
+            request=request,
+        )
+        return Response({
+            "temporary_password": temporary_password,
+            "user": UserSerializer(user).data,
+        })
 
 
 class UserDetailView(generics.RetrieveUpdateAPIView):
@@ -339,3 +380,27 @@ class PasswordResetConfirmView(APIView):
             request=request,
         )
         return Response({"detail": "Пароль изменён"})
+
+
+class PasswordChangeView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request):
+        serializer = PasswordChangeSerializer(
+            data=request.data,
+            context={"user": request.user},
+        )
+        serializer.is_valid(raise_exception=True)
+        request.user.set_password(serializer.validated_data["password"])
+        request.user.save(update_fields=["password"])
+        Token.objects.filter(user=request.user).delete()
+        record_audit(
+            actor=request.user,
+            entity_type="user",
+            entity_id=request.user.pk,
+            action="password_changed",
+            changes={},
+            request=request,
+        )
+        return Response({"detail": "Пароль изменён. Войдите с новым паролем"})

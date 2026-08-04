@@ -9,7 +9,7 @@ from django.test import TestCase
 from rest_framework.test import APIClient
 from rest_framework.authtoken.models import Token
 
-from apps.identity.models import Department, User
+from apps.identity.models import Department, Invitation, User
 from apps.learning.models import Course, LearningPath, LearningPathCourse, Lesson
 from .models import (
     AbsenceRequest,
@@ -315,6 +315,30 @@ class PeopleApiTests(TestCase):
         self.assertEqual(updated.json()["grade"], "Middle")
         self.assertEqual(updated.json()["development_progress"], 55)
         self.assertFalse(User.objects.get(email="new.employee@test.local").has_usable_password())
+
+    def test_admin_creates_employee_with_one_time_generated_password(self):
+        self.client.force_authenticate(self.admin)
+        created = self.client.post(
+            "/api/v1/employees/",
+            {
+                "email": "manual.employee@test.local",
+                "first_name": "Анна",
+                "last_name": "Ручная",
+                "employee_number": "SM-201",
+                "department": self.department.pk,
+                "position": self.position.pk,
+                "status": EmployeeProfile.Status.EMPLOYED,
+                "generate_password": True,
+            },
+            format="json",
+        )
+
+        self.assertEqual(created.status_code, 201)
+        password = created.json()["temporary_password"]
+        user = User.objects.get(email="manual.employee@test.local")
+        self.assertTrue(user.check_password(password))
+        self.assertEqual(user.status, User.Status.ACTIVE)
+        self.assertFalse(Invitation.objects.filter(user=user).exists())
 
     def test_dismissal_blocks_access_and_preserves_employee_history(self):
         token = Token.objects.create(user=self.employee)

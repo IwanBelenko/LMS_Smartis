@@ -11,6 +11,7 @@ from rest_framework import serializers
 from rest_framework.authtoken.models import Token
 
 from apps.identity.models import Department, Invitation, User
+from apps.identity.passwords import generate_temporary_password
 from apps.identity.validators import validate_corporate_email
 from .models import (
     AbsenceRequest,
@@ -211,6 +212,7 @@ class EmployeeProfileSerializer(serializers.ModelSerializer):
 
 
 class EmployeeProfileWriteSerializer(serializers.ModelSerializer):
+    generate_password = serializers.BooleanField(write_only=True, required=False, default=False)
     email = serializers.EmailField(source="user.email")
     first_name = serializers.CharField(source="user.first_name", max_length=150)
     last_name = serializers.CharField(source="user.last_name", max_length=150)
@@ -227,6 +229,7 @@ class EmployeeProfileWriteSerializer(serializers.ModelSerializer):
             "email", "first_name", "last_name", "employee_number", "department", "position",
             "grade", "birth_date", "hire_date", "dismissal_date", "education", "competencies", "status",
             "checklist_score", "development_progress", "salary_base", "monthly_bonus", "quarterly_bonus",
+            "generate_password",
         ]
 
     def validate_email(self, value):
@@ -258,16 +261,22 @@ class EmployeeProfileWriteSerializer(serializers.ModelSerializer):
     @transaction.atomic
     def create(self, validated_data):
         user_data = validated_data.pop("user")
+        should_generate = validated_data.pop("generate_password", False)
+        temporary_password = generate_temporary_password() if should_generate else None
         user = User.objects.create_user(
-            password=None,
+            password=temporary_password,
             role=User.Role.EMPLOYEE,
-            status=User.Status.INVITED,
+            status=User.Status.ACTIVE if temporary_password else User.Status.INVITED,
             **user_data,
         )
-        user.set_unusable_password()
-        user.save(update_fields=["password"])
-        Invitation.objects.create(user=user, created_by=self.context["request"].user)
-        return EmployeeProfile.objects.create(user=user, **validated_data)
+        if not temporary_password:
+            user.set_unusable_password()
+            user.save(update_fields=["password"])
+            Invitation.objects.create(user=user, created_by=self.context["request"].user)
+        profile = EmployeeProfile.objects.create(user=user, **validated_data)
+        if temporary_password:
+            profile.temporary_password = temporary_password
+        return profile
 
     @transaction.atomic
     def update(self, instance, validated_data):
