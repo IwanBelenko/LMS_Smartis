@@ -15,9 +15,13 @@ from .models import (
     AbsenceRequest,
     AuditEvent,
     Candidate,
+    CandidateAssignment,
+    CandidateComment,
+    CandidateExperience,
     CandidateOffer,
     CandidateResume,
     CandidateStage,
+    CandidateStageEvent,
     Competency,
     DailyTranscript,
     EmployeeDocument,
@@ -191,6 +195,36 @@ class PeopleApiTests(TestCase):
         self.assertEqual(stages.status_code, 200)
         self.assertEqual(stages.json()[0]["candidates_count"], 1)
         self.assertEqual(summary.json()["employees_total"], 2)
+
+    def test_only_admin_configures_candidate_stages(self):
+        self.client.force_authenticate(self.hr)
+        self.assertEqual(
+            self.client.post(
+                "/api/v1/candidate-stages/",
+                {"name": "Тестовое задание", "position": 3, "is_terminal": False},
+                format="json",
+            ).status_code,
+            403,
+        )
+
+        self.client.force_authenticate(self.admin)
+        created = self.client.post(
+            "/api/v1/candidate-stages/",
+            {"name": "Тестовое задание", "position": 3, "is_terminal": False},
+            format="json",
+        )
+        self.assertEqual(created.status_code, 201)
+        stage_id = created.json()["id"]
+        updated = self.client.patch(
+            f"/api/v1/candidate-stages/{stage_id}/",
+            {"name": "Тестовое", "is_terminal": True},
+            format="json",
+        )
+        self.assertEqual(updated.status_code, 200)
+        self.assertTrue(updated.json()["is_terminal"])
+        self.assertEqual(self.client.delete(f"/api/v1/candidate-stages/{self.stage.pk}/").status_code, 409)
+        self.assertEqual(self.client.delete(f"/api/v1/candidate-stages/{stage_id}/").status_code, 204)
+        self.assertTrue(AuditEvent.objects.filter(entity_type="candidate_stage", action="created").exists())
 
     def test_hr_dashboard_highlights_overdue_onboarding_and_probation(self):
         self.profile.status = EmployeeProfile.Status.PROBATION
@@ -518,6 +552,83 @@ class PeopleApiTests(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["stage_name"], "Интервью")
+        event = CandidateStageEvent.objects.get(candidate=candidate)
+        self.assertEqual(event.from_stage, self.stage)
+        self.assertEqual(event.to_stage, next_stage)
+        self.assertEqual(event.changed_by, self.admin)
+
+    def test_hr_manages_candidate_experience_assignment_and_leader_comments(self):
+        candidate = Candidate.objects.get(full_name="Мария Тестова")
+        self.client.force_authenticate(self.hr)
+        experience = self.client.post(
+            f"/api/v1/candidates/{candidate.pk}/experiences/",
+            {
+                "company": "Smartis",
+                "position": "Стажёр-аналитик",
+                "started_on": "2023-01-10",
+                "ended_on": "2024-02-20",
+                "description": "Исследования и отчётность",
+            },
+            format="json",
+        )
+        self.assertEqual(experience.status_code, 201)
+        self.assertEqual(CandidateExperience.objects.get().company, "Smartis")
+
+        assignment = self.client.put(
+            f"/api/v1/candidates/{candidate.pk}/assignment/",
+            {"leader": self.leader.pk},
+            format="json",
+        )
+        self.assertEqual(assignment.status_code, 200)
+        self.assertEqual(CandidateAssignment.objects.get().leader, self.leader)
+
+        self.client.force_authenticate(self.leader)
+        listing = self.client.get("/api/v1/candidates/")
+        self.assertEqual(listing.status_code, 200)
+        self.assertEqual([item["id"] for item in listing.json()], [candidate.pk])
+        self.assertEqual(listing.json()[0]["assigned_leader"], self.leader.pk)
+        self.assertEqual(
+            self.client.get(f"/api/v1/candidates/{candidate.pk}/experiences/").status_code,
+            200,
+        )
+        comment = self.client.post(
+            f"/api/v1/candidates/{candidate.pk}/comments/",
+            {"text": "Готов провести финальное интервью"},
+            format="json",
+        )
+        self.assertEqual(comment.status_code, 201)
+        self.assertEqual(CandidateComment.objects.get().author, self.leader)
+        self.assertEqual(
+            self.client.patch(f"/api/v1/candidates/{candidate.pk}/", {"source": "manual"}, format="json").status_code,
+            403,
+        )
+        self.assertEqual(
+            self.client.post(
+                f"/api/v1/candidates/{candidate.pk}/experiences/",
+                {"company": "Other", "position": "Lead"},
+                format="json",
+            ).status_code,
+            403,
+        )
+
+    def test_leader_cannot_see_unassigned_candidates_and_hr_filters_candidates(self):
+        candidate = Candidate.objects.get(full_name="Мария Тестова")
+        candidate.source = "Рекомендация"
+        candidate.desired_salary = 180000
+        candidate.department = self.department
+        candidate.save(update_fields=["source", "desired_salary", "department", "updated_at"])
+
+        self.client.force_authenticate(self.leader)
+        self.assertEqual(self.client.get("/api/v1/candidates/").json(), [])
+        self.assertEqual(self.client.get(f"/api/v1/candidates/{candidate.pk}/").status_code, 404)
+
+        self.client.force_authenticate(self.hr)
+        response = self.client.get(
+            f"/api/v1/candidates/?q=Мария&department={self.department.pk}&source=Рекоменд&salary_min=170000&salary_max=190000"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([item["id"] for item in response.json()], [candidate.pk])
+        self.assertEqual(self.client.get("/api/v1/candidates/?salary_min=200000").json(), [])
 
     def test_hr_uploads_versions_downloads_and_deletes_candidate_resumes(self):
         candidate = Candidate.objects.get(full_name="Мария Тестова")
@@ -600,6 +711,34 @@ class PeopleApiTests(TestCase):
             self.assertEqual(self.client.get(f"/api/v1/candidates/{candidate.pk}/resumes/").status_code, 403)
             self.assertEqual(
                 self.client.get(f"/api/v1/candidate-resumes/{created.json()['id']}/download/").status_code,
+                403,
+            )
+            self.assertEqual(self.client.delete(f"/api/v1/candidate-resumes/{created.json()['id']}/").status_code, 403)
+
+    def test_assigned_leader_reads_candidate_resume_but_cannot_change_it(self):
+        candidate = Candidate.objects.get(full_name="Мария Тестова")
+        CandidateAssignment.objects.create(candidate=candidate, leader=self.leader, assigned_by=self.hr)
+        with tempfile.TemporaryDirectory() as media_root, self.settings(MEDIA_ROOT=media_root):
+            self.client.force_authenticate(self.hr)
+            created = self.client.post(
+                f"/api/v1/candidates/{candidate.pk}/resumes/",
+                {"file": SimpleUploadedFile("resume.txt", b"Experience", content_type="text/plain")},
+                format="multipart",
+            )
+            self.assertEqual(created.status_code, 201)
+
+            self.client.force_authenticate(self.leader)
+            listing = self.client.get(f"/api/v1/candidates/{candidate.pk}/resumes/")
+            downloaded = self.client.get(f"/api/v1/candidate-resumes/{created.json()['id']}/download/")
+            self.assertEqual(listing.status_code, 200)
+            self.assertEqual(downloaded.status_code, 200)
+            self.assertEqual(b"".join(downloaded.streaming_content), b"Experience")
+            self.assertEqual(
+                self.client.post(
+                    f"/api/v1/candidates/{candidate.pk}/resumes/",
+                    {"file": SimpleUploadedFile("second.txt", b"Other", content_type="text/plain")},
+                    format="multipart",
+                ).status_code,
                 403,
             )
             self.assertEqual(self.client.delete(f"/api/v1/candidate-resumes/{created.json()['id']}/").status_code, 403)

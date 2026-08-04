@@ -580,6 +580,102 @@ class Candidate(models.Model):
         return self.full_name
 
 
+class CandidateExperience(models.Model):
+    candidate = models.ForeignKey(Candidate, related_name="experiences", on_delete=models.CASCADE)
+    company = models.CharField("Компания", max_length=180)
+    position = models.CharField("Должность", max_length=180)
+    started_on = models.DateField("Начало работы", null=True, blank=True)
+    ended_on = models.DateField("Окончание работы", null=True, blank=True)
+    description = models.TextField("Обязанности и результаты", blank=True)
+    position_order = models.PositiveSmallIntegerField("Порядок", default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["position_order", "-started_on", "-id"]
+        verbose_name = "Опыт кандидата"
+        verbose_name_plural = "Опыт кандидатов"
+
+    def __str__(self):
+        return f"{self.candidate}: {self.company} — {self.position}"
+
+
+class CandidateComment(models.Model):
+    candidate = models.ForeignKey(Candidate, related_name="comments", on_delete=models.CASCADE)
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="candidate_comments",
+        null=True,
+        on_delete=models.SET_NULL,
+    )
+    text = models.TextField("Комментарий")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        verbose_name = "Комментарий к кандидату"
+        verbose_name_plural = "Комментарии к кандидатам"
+
+    def __str__(self):
+        return f"{self.candidate}: {self.text[:60]}"
+
+
+class CandidateStageEvent(models.Model):
+    candidate = models.ForeignKey(Candidate, related_name="stage_events", on_delete=models.CASCADE)
+    from_stage = models.ForeignKey(
+        CandidateStage,
+        related_name="candidate_events_from",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    to_stage = models.ForeignKey(
+        CandidateStage,
+        related_name="candidate_events_to",
+        on_delete=models.PROTECT,
+    )
+    changed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="candidate_stage_events",
+        null=True,
+        on_delete=models.SET_NULL,
+    )
+    note = models.CharField("Причина или примечание", max_length=500, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        verbose_name = "Событие этапа кандидата"
+        verbose_name_plural = "События этапов кандидатов"
+
+    def __str__(self):
+        return f"{self.candidate}: {self.from_stage or 'Создан'} → {self.to_stage}"
+
+
+class CandidateAssignment(models.Model):
+    candidate = models.OneToOneField(Candidate, related_name="assignment", on_delete=models.CASCADE)
+    leader = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="assigned_candidates",
+        on_delete=models.CASCADE,
+    )
+    assigned_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="candidate_assignments_created",
+        null=True,
+        on_delete=models.SET_NULL,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Назначение кандидата руководителю"
+        verbose_name_plural = "Назначения кандидатов руководителям"
+
+    def __str__(self):
+        return f"{self.candidate} → {self.leader}"
+
+
 def candidate_offer_path(instance, filename):
     suffix = Path(filename).suffix.lower()
     return f"recruitment/candidates/{instance.candidate_id}/offers/{uuid4().hex}{suffix}"
