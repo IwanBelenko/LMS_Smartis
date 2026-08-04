@@ -74,7 +74,7 @@ class IdentityApiTests(TestCase):
         self.assertEqual(response.status_code, 401)
         self.assertFalse(Token.objects.filter(pk=token.pk).exists())
 
-    def test_administrator_creates_department_and_invited_user(self):
+    def test_administrator_creates_department_and_invited_user_without_email(self):
         self.authenticate()
         department = self.client.post(
             "/api/v1/departments/",
@@ -96,9 +96,92 @@ class IdentityApiTests(TestCase):
         self.assertEqual(user.status_code, 201)
         self.assertEqual(user.json()["status"], User.Status.INVITED)
         self.assertTrue(Invitation.objects.filter(user__email="employee@test.local").exists())
-        self.assertEqual(len(mail.outbox), 1)
-        self.assertIn("HCM / LMS Smartis", mail.outbox[0].subject)
-        self.assertIn("?invite=", mail.outbox[0].body)
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_administrator_creates_user_with_one_time_generated_password(self):
+        self.authenticate()
+        response = self.client.post(
+            "/api/v1/users/",
+            {
+                "email": "manual.access@test.local",
+                "first_name": "Анна",
+                "last_name": "Тестова",
+                "role": User.Role.EMPLOYEE,
+                "generate_password": True,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        password = response.json()["temporary_password"]
+        user = User.objects.get(email="manual.access@test.local")
+        self.assertGreaterEqual(len(password), 12)
+        self.assertTrue(user.check_password(password))
+        self.assertEqual(user.status, User.Status.ACTIVE)
+        self.assertFalse(Invitation.objects.filter(user=user).exists())
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_administrator_generates_new_password_for_existing_user(self):
+        employee = User.objects.create_user(
+            email="generated@test.local",
+            password=None,
+            status=User.Status.INVITED,
+        )
+        employee.set_unusable_password()
+        employee.save(update_fields=["password"])
+        Invitation.objects.create(user=employee, created_by=self.admin)
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.post(f"/api/v1/users/{employee.pk}/generate-password/")
+
+        self.assertEqual(response.status_code, 200)
+        password = response.json()["temporary_password"]
+        employee.refresh_from_db()
+        self.assertTrue(employee.check_password(password))
+        self.assertEqual(employee.status, User.Status.ACTIVE)
+        self.assertFalse(Invitation.objects.filter(user=employee).exists())
+        self.assertTrue(AuditEvent.objects.filter(
+            actor=self.admin,
+            entity_type="user",
+            entity_id=str(employee.pk),
+            action="password_generated",
+        ).exists())
+
+    def test_user_changes_own_password_and_current_session_is_revoked(self):
+        token = Token.objects.create(user=self.admin)
+        self.client.credentials(HTTP_AUTHORIZATION="Token " + token.key)
+
+        response = self.client.post(
+            "/api/v1/auth/change-password/",
+            {
+                "current_password": "StrongPassword123!",
+                "password": "AnotherStrongPassword456!",
+                "password_confirm": "AnotherStrongPassword456!",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.admin.refresh_from_db()
+        self.assertTrue(self.admin.check_password("AnotherStrongPassword456!"))
+        self.assertFalse(Token.objects.filter(pk=token.pk).exists())
+        audit_changes = AuditEvent.objects.get(
+            entity_type="user",
+            entity_id=str(self.admin.pk),
+            action="password_changed",
+        ).changes
+        self.assertEqual(set(audit_changes), {"_context"})
+        self.assertNotIn("AnotherStrongPassword456!", str(audit_changes))
+
+    def test_administrator_cannot_replace_own_password_from_user_management(self):
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.post(f"/api/v1/users/{self.admin.pk}/generate-password/")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["detail"], "Свой пароль измените через профиль")
+        self.admin.refresh_from_db()
+        self.assertTrue(self.admin.check_password("StrongPassword123!"))
 
     def test_employee_cannot_manage_users(self):
         employee = User.objects.create_user(

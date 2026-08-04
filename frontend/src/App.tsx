@@ -85,6 +85,7 @@ type User = {
   department: number | null;
   department_name: string | null;
 };
+type TemporaryPassword = { email: string; password: string };
 type Department = { id: number; name: string; code: string; is_active: boolean };
 type Position = { id: number; name: string; is_active: boolean };
 type OrgDepartment = Department & {
@@ -901,12 +902,6 @@ function LoginPage({ onLogin }: { onLogin: (token: string, user: User) => void }
             {error && <p className="form-error">{error}</p>}
             {notice && <p className="form-notice login-notice"><CheckCircle2 />{notice}</p>}
             <button className="primary-button" type="submit" disabled={loading}>{loading ? "Входим…" : "Войти"}</button>
-            <button className="login-link" type="button" onClick={() => {
-              setMode("forgot");
-              setPassword("");
-              setError("");
-              setNotice("");
-            }}>Не помню пароль</button>
           </form>
         ) : mode === "forgot" ? (
           <form onSubmit={requestPasswordReset}>
@@ -985,6 +980,7 @@ function Sidebar({
   dark,
   onNavigate,
   onTheme,
+  onPassword,
   onLogout,
 }: {
   active: ViewId;
@@ -993,6 +989,7 @@ function Sidebar({
   dark: boolean;
   onNavigate: (view: ViewId) => void;
   onTheme: () => void;
+  onPassword: () => void;
   onLogout: () => void;
 }) {
   const availableHcmNav = visibleHcmNav(user);
@@ -1036,12 +1033,12 @@ function Sidebar({
         </>
       )}
       <div className="sidebar__footer">
-        <div className="user-chip">
+        <button className="user-chip" type="button" onClick={onPassword}>
           <div>
             <strong>{user.first_name || user.email}</strong>
-            <span>{user.role_label}</span>
+            <span>{user.role_label} · изменить пароль</span>
           </div>
-        </div>
+        </button>
         <div className="footer-actions">
           <ThemeSwitch dark={dark} onChange={onTheme} />
           <button className="icon-button" type="button" onClick={onLogout} aria-label="Выйти">
@@ -1060,6 +1057,7 @@ function IconRail({
   inbox,
   onNavigate,
   onOpen,
+  onPassword,
   onReadInbox,
 }: {
   active: ViewId;
@@ -1068,6 +1066,7 @@ function IconRail({
   inbox: Inbox;
   onNavigate: (view: ViewId) => void;
   onOpen: () => void;
+  onPassword: () => void;
   onReadInbox: (itemIds: string[]) => Promise<void>;
 }) {
   const [expanded, setExpanded] = useState<"learning" | "hr" | "admin" | null>(null);
@@ -1213,9 +1212,15 @@ function IconRail({
           </nav>
         </>
       )}
-      <div className="icon-rail__user" data-tooltip={`${user.first_name || user.email} · ${user.role_label}`}>
+      <button
+        className="icon-rail__user"
+        type="button"
+        onClick={onPassword}
+        aria-label={`${user.first_name || user.email}, изменить пароль`}
+        data-tooltip={`${user.first_name || user.email} · изменить пароль`}
+      >
         <CircleUserRound aria-hidden="true" />
-      </div>
+      </button>
     </aside>
   );
 }
@@ -1707,13 +1712,87 @@ const roleAccessCards = [
   { role: "leader", title: "Руководитель", access: "Видит сотрудников только своего отдела. Зарплаты — по отдельному разрешению." },
 ];
 
+function TemporaryPasswordDialog({ value, onClose }: { value: TemporaryPassword; onClose: () => void }) {
+  const [visible, setVisible] = useState(true);
+  const [copied, setCopied] = useState(false);
+
+  async function copyPassword() {
+    await navigator.clipboard.writeText(value.password);
+    setCopied(true);
+  }
+
+  return (
+    <div className="hcm-dialog-backdrop">
+      <section className="hcm-dialog temporary-password-dialog" role="dialog" aria-modal="true" aria-labelledby="temporary-password-title">
+        <header>
+          <div><span className="eyebrow">Доступ готов</span><h2 id="temporary-password-title">Временный пароль</h2><p>Передайте его пользователю безопасным способом</p></div>
+          <button className="icon-button" type="button" onClick={onClose} aria-label="Закрыть"><X /></button>
+        </header>
+        <div className="temporary-password-account"><span>Учётная запись</span><strong>{value.email}</strong></div>
+        <div className="temporary-password-value">
+          <input type={visible ? "text" : "password"} value={value.password} readOnly aria-label="Временный пароль" />
+          <button className="icon-button" type="button" onClick={() => setVisible((current) => !current)} aria-label={visible ? "Скрыть пароль" : "Показать пароль"}><Eye /></button>
+          <button className="secondary-button" type="button" onClick={() => void copyPassword()}><Copy />{copied ? "Скопировано" : "Копировать"}</button>
+        </div>
+        <p className="temporary-password-warning">Пароль показывается только сейчас. Система хранит его в защищённом виде и не сможет показать повторно.</p>
+        <footer><button className="primary-button" type="button" onClick={onClose}>Готово</button></footer>
+      </section>
+    </div>
+  );
+}
+
+function PasswordChangeDialog({ token, onClose, onChanged }: { token: string; onClose: () => void; onChanged: () => void }) {
+  const [form, setForm] = useState({ current_password: "", password: "", password_confirm: "" });
+  const [visible, setVisible] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      await apiRequest<{ detail: string }>("/auth/change-password/", token, {
+        method: "POST",
+        body: JSON.stringify(form),
+      });
+      onChanged();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось изменить пароль");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="hcm-dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onClose(); }}>
+      <section className="hcm-dialog password-change-dialog" role="dialog" aria-modal="true" aria-labelledby="password-change-title">
+        <header>
+          <div><span className="eyebrow">Безопасность</span><h2 id="password-change-title">Изменить пароль</h2><p>Текущий пароль нельзя восстановить или посмотреть — можно только заменить</p></div>
+          <button className="icon-button" type="button" disabled={busy} onClick={onClose} aria-label="Закрыть"><X /></button>
+        </header>
+        <form className="hcm-form" onSubmit={submit}>
+          <div className="password-change-fields">
+            <label>Текущий пароль<input type={visible ? "text" : "password"} autoComplete="current-password" value={form.current_password} onChange={(event) => setForm({ ...form, current_password: event.target.value })} required /></label>
+            <label>Новый пароль<input type={visible ? "text" : "password"} autoComplete="new-password" minLength={8} value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} required /></label>
+            <label>Повторите новый пароль<input type={visible ? "text" : "password"} autoComplete="new-password" minLength={8} value={form.password_confirm} onChange={(event) => setForm({ ...form, password_confirm: event.target.value })} required /></label>
+            <button className="text-button password-visibility-toggle" type="button" onClick={() => setVisible((current) => !current)}><Eye />{visible ? "Скрыть пароли" : "Показать пароли"}</button>
+          </div>
+          {error && <p className="form-error">{error}</p>}
+          <footer><button className="secondary-button" type="button" disabled={busy} onClick={onClose}>Отмена</button><button className="primary-button" type="submit" disabled={busy}>{busy ? "Сохраняем…" : "Изменить пароль"}</button></footer>
+        </form>
+      </section>
+    </div>
+  );
+}
+
 function UsersView({ token }: { token: string }) {
   const [users, setUsers] = useState<User[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [resendingUser, setResendingUser] = useState<number | null>(null);
+  const [temporaryPassword, setTemporaryPassword] = useState<TemporaryPassword | null>(null);
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [userBusy, setUserBusy] = useState(false);
   const [form, setForm] = useState({
@@ -1744,33 +1823,38 @@ function UsersView({ token }: { token: string }) {
     setError("");
     setNotice("");
     try {
-      await apiRequest<User>("/users/", token, {
+      const created = await apiRequest<User & { temporary_password: string }>("/users/", token, {
         method: "POST",
         body: JSON.stringify({
           ...form,
           department: form.department ? Number(form.department) : null,
+          generate_password: true,
         }),
       });
       setForm({ email: "", first_name: "", last_name: "", role: "employee", department: "", can_view_compensation: false });
       setShowForm(false);
-      setNotice("Пользователь создан, приглашение отправлено на корпоративную почту");
+      setNotice("Пользователь создан. Передайте ему временный пароль");
+      setTemporaryPassword({ email: created.email, password: created.temporary_password });
       await load();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Не удалось создать сотрудника");
     }
   }
 
-  async function resendInvitation(user: User) {
-    setResendingUser(user.id);
+  async function generatePassword(user: User) {
+    setUserBusy(true);
     setError("");
     setNotice("");
     try {
-      const response = await apiRequest<{ detail: string }>(`/users/${user.id}/resend-invitation/`, token, { method: "POST" });
-      setNotice(`${response.detail}: ${user.email}`);
+      const response = await apiRequest<{ temporary_password: string; user: User }>(`/users/${user.id}/generate-password/`, token, { method: "POST" });
+      setEditingUser(response.user);
+      setTemporaryPassword({ email: response.user.email, password: response.temporary_password });
+      setNotice(`Новый пароль создан для ${response.user.email}`);
+      await load();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Не удалось отправить приглашение");
+      setError(reason instanceof Error ? reason.message : "Не удалось создать пароль");
     } finally {
-      setResendingUser(null);
+      setUserBusy(false);
     }
   }
 
@@ -1849,7 +1933,7 @@ function UsersView({ token }: { token: string }) {
     <>
       <PageHeader
         title="Пользователи"
-        subtitle="Учётные записи, роли, отделы и приглашения"
+        subtitle="Учётные записи, роли, отделы и ручная выдача доступа"
         action={
           <button className="primary-button" type="button" onClick={() => setShowForm(true)}>
             <Plus /> Добавить пользователя
@@ -1867,7 +1951,7 @@ function UsersView({ token }: { token: string }) {
       {showForm && (
         <section className="panel form-panel">
           <div className="section-heading">
-            <div><h2>Новый пользователь</h2><p>Выберите роль — доступы применятся автоматически</p></div>
+            <div><h2>Новый пользователь</h2><p>После создания покажем временный пароль для передачи пользователю</p></div>
             <button className="icon-button" type="button" onClick={() => setShowForm(false)} aria-label="Закрыть"><X /></button>
           </div>
           <form className="user-form" onSubmit={createUser}>
@@ -1883,7 +1967,7 @@ function UsersView({ token }: { token: string }) {
               <option value="">Без отдела</option>{departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
             </select></label>
             {["hr", "leader"].includes(form.role) && <label className="user-compensation-access"><input type="checkbox" checked={form.can_view_compensation} onChange={(event) => setForm({ ...form, can_view_compensation: event.target.checked })} /><span><strong>Доступ к оплате труда</strong><small>Показывать оклад и премии в карточках сотрудников</small></span></label>}
-            <button className="primary-button" type="submit">Создать приглашение</button>
+            <button className="primary-button" type="submit">Создать и сгенерировать пароль</button>
           </form>
         </section>
       )}
@@ -1933,12 +2017,12 @@ function UsersView({ token }: { token: string }) {
               </div>
               <div className="user-access-state">
                 <span className={"status status--" + editingUser.status}>{editingUser.status_label}</span>
-                <p>{editingUser.status === "blocked" ? "Вход и действующие сессии отключены." : editingUser.status === "invited" ? "Пользователь ещё не активировал доступ." : "Пользователь может входить в систему."}</p>
+                <p>{editingUser.status === "blocked" ? "Вход и действующие сессии отключены." : editingUser.status === "invited" ? "Пароль ещё не назначен. Создайте его вручную." : "Пользователь может входить в систему."}</p>
               </div>
               {error && <p className="form-error">{error}</p>}
               <footer className="user-access-actions">
                 <div>
-                  {editingUser.status === "invited" && <button className="secondary-button" type="button" disabled={userBusy || resendingUser === editingUser.id} onClick={() => void resendInvitation(editingUser)}><RefreshCw />Отправить приглашение снова</button>}
+                  {editingUser.status !== "blocked" && <button className="secondary-button" type="button" disabled={userBusy} onClick={() => void generatePassword(editingUser)}><RefreshCw />{editingUser.status === "invited" ? "Сгенерировать пароль" : "Новый временный пароль"}</button>}
                   {editingUser.status === "blocked"
                     ? <button className="secondary-button" type="button" disabled={userBusy} onClick={() => void changeUserAccess("restore")}>Восстановить доступ</button>
                     : <button className="danger-button" type="button" disabled={userBusy} onClick={() => void changeUserAccess("block")}>Заблокировать</button>}
@@ -1949,6 +2033,7 @@ function UsersView({ token }: { token: string }) {
           </section>
         </div>
       )}
+      {temporaryPassword && <TemporaryPasswordDialog value={temporaryPassword} onClose={() => setTemporaryPassword(null)} />}
     </>
   );
 }
@@ -2851,6 +2936,7 @@ function EmployeesView({ token, user }: { token: string; user: User }) {
   const [showPositionCreate, setShowPositionCreate] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(emptyEmployeeForm);
+  const [temporaryPassword, setTemporaryPassword] = useState<TemporaryPassword | null>(null);
   const [showImport, setShowImport] = useState(false);
   const [importData, setImportData] = useState<EmployeeImportPreview | null>(null);
   const [importMapping, setImportMapping] = useState<Record<string, string>>({});
@@ -2925,11 +3011,15 @@ function EmployeesView({ token, user }: { token: string; user: User }) {
           monthly_bonus: form.monthly_bonus || null,
           quarterly_bonus: form.quarterly_bonus || null,
         } : {}),
+        ...(!editing ? { generate_password: true } : {}),
       };
-      await apiRequest<EmployeeProfile>(editing ? `/employees/${editing.id}/` : "/employees/", token, {
+      const saved = await apiRequest<EmployeeProfile & { temporary_password?: string }>(editing ? `/employees/${editing.id}/` : "/employees/", token, {
         method: editing ? "PATCH" : "POST",
         body: JSON.stringify(payload),
       });
+      if (saved.temporary_password) {
+        setTemporaryPassword({ email: saved.email, password: saved.temporary_password });
+      }
       setShowForm(false);
       setEditing(null);
       setForm(emptyEmployeeForm);
@@ -3279,7 +3369,7 @@ function EmployeesView({ token, user }: { token: string; user: User }) {
         }}>
           <section className="hcm-dialog" role="dialog" aria-modal="true" aria-labelledby="employee-dialog-title">
             <header>
-              <div><h2 id="employee-dialog-title">{editing ? "Карточка сотрудника" : "Новый сотрудник"}</h2><p>{editing ? "Основные данные и развитие" : "Будет создана учётная запись с приглашением"}</p></div>
+              <div><h2 id="employee-dialog-title">{editing ? "Карточка сотрудника" : "Новый сотрудник"}</h2><p>{editing ? "Основные данные и развитие" : "После сохранения покажем временный пароль"}</p></div>
               <button className="icon-button" type="button" onClick={() => setShowForm(false)} aria-label="Закрыть"><X /></button>
             </header>
             <form className="hcm-form" onSubmit={saveEmployee}>
@@ -3307,6 +3397,7 @@ function EmployeesView({ token, user }: { token: string; user: User }) {
         </div>
       )}
       {showPositionCreate && <PositionCreateDialog token={token} onClose={() => setShowPositionCreate(false)} onCreated={(position) => { setPositions((items) => [...items, position].sort((left, right) => left.name.localeCompare(right.name, "ru"))); setForm((current) => ({ ...current, position: String(position.id) })); }} />}
+      {temporaryPassword && <TemporaryPasswordDialog value={temporaryPassword} onClose={() => setTemporaryPassword(null)} />}
     </>
   );
 }
@@ -8062,6 +8153,7 @@ function App() {
   const [active, setActive] = useState<ViewId>("home");
   const [dark, setDark] = useState(() => localStorage.getItem("smartis-theme") === "dark");
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [showPasswordChange, setShowPasswordChange] = useState(false);
 
   useEffect(() => {
     document.documentElement.dataset.theme = dark ? "dark" : "light";
@@ -8147,6 +8239,7 @@ function App() {
         inbox={inbox}
         onNavigate={navigate}
         onOpen={() => setSidebarOpen((value) => !value)}
+        onPassword={() => setShowPasswordChange(true)}
         onReadInbox={readInbox}
       />
       <Sidebar
@@ -8156,6 +8249,7 @@ function App() {
         dark={dark}
         onNavigate={navigate}
         onTheme={() => setDark((value) => !value)}
+        onPassword={() => setShowPasswordChange(true)}
         onLogout={() => void logout()}
       />
       {sidebarOpen && (
@@ -8204,6 +8298,7 @@ function App() {
           <Placeholder active={active} />
         )}
       </main>
+      {showPasswordChange && <PasswordChangeDialog token={token} onClose={() => setShowPasswordChange(false)} onChanged={() => void logout()} />}
     </div>
   );
 }
