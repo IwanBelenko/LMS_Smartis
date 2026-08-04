@@ -113,6 +113,7 @@ AUDIT_ENTITY_LABELS = {
     "candidate_comment": "Комментарии к кандидатам",
     "candidate_experience": "Опыт кандидатов",
     "candidate_stage": "Этапы подбора",
+    "position": "Должности",
     "candidate_resume": "Резюме кандидатов",
     "vacancy": "Вакансии",
     "interview": "Собеседования",
@@ -2168,10 +2169,23 @@ class OnboardingOptionsView(APIView):
         )
 
 
-class PositionListView(generics.ListAPIView):
+class PositionListView(generics.ListCreateAPIView):
     serializer_class = PositionSerializer
-    permission_classes = [IsHcmRegistryUser]
     queryset = Position.objects.filter(is_active=True)
+
+    def get_permissions(self):
+        permission_classes = [IsHcmUser] if self.request.method == "POST" else [IsHcmRegistryUser]
+        return [permission() for permission in permission_classes]
+
+    def perform_create(self, serializer):
+        position = serializer.save()
+        AuditEvent.objects.create(
+            actor=self.request.user,
+            entity_type="position",
+            entity_id=str(position.pk),
+            action="created",
+            changes={"name": position.name},
+        )
 
 
 class OrganizationDepartmentListCreateView(generics.ListCreateAPIView):

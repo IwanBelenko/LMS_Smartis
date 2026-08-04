@@ -2256,6 +2256,11 @@ button.vacancy-card { padding: 13px; display: grid; align-content: center; gap: 
 .hcm-form__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .hcm-form__wide { grid-column: 1 / -1; }
 .hcm-form textarea { min-height: 78px; }
+.reference-field { min-width: 0; display: grid; align-content: start; gap: 5px; }
+.reference-field label { min-width: 0; }
+.reference-field .text-button { width: fit-content; display: inline-flex; align-items: center; gap: 4px; font-size: .63rem; }
+.reference-field .text-button svg { width: 13px; height: 13px; }
+.reference-create-dialog { width: min(520px, 100%); }
 .candidate-resumes {
   padding: 12px; border: 1px solid var(--border); border-radius: 8px; display: grid; gap: 10px; background: var(--surface-soft);
 }

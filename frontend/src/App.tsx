@@ -2465,6 +2465,43 @@ function EmployeeProfileView({
   );
 }
 
+function PositionCreateDialog({ token, onClose, onCreated }: { token: string; onClose: () => void; onCreated: (position: Position) => void }) {
+  const [name, setName] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  async function save(event: FormEvent) {
+    event.preventDefault();
+    setSaving(true);
+    setError("");
+    try {
+      const position = await apiRequest<Position>("/positions/", token, {
+        method: "POST",
+        body: JSON.stringify({ name }),
+      });
+      onCreated(position);
+      onClose();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось добавить должность");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="hcm-dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !saving) onClose(); }}>
+      <section className="hcm-dialog reference-create-dialog" role="dialog" aria-modal="true" aria-labelledby="position-create-title">
+        <header><div><h2 id="position-create-title">Новая должность</h2><p>Она появится в карточках сотрудников, штатном расписании и вакансиях</p></div><button className="icon-button" type="button" disabled={saving} onClick={onClose} aria-label="Закрыть"><X /></button></header>
+        <form className="hcm-form" onSubmit={save}>
+          <label>Название должности<input autoFocus value={name} maxLength={160} onChange={(event) => setName(event.target.value)} placeholder="Например, Продуктовый аналитик" required /></label>
+          {error && <p className="form-error">{error}</p>}
+          <footer><button className="secondary-button" type="button" disabled={saving} onClick={onClose}>Отмена</button><button className="primary-button" type="submit" disabled={saving || !name.trim()}>{saving ? "Добавляем…" : "Добавить"}</button></footer>
+        </form>
+      </section>
+    </div>
+  );
+}
+
 function OrganizationView({ token }: { token: string }) {
   const [departments, setDepartments] = useState<OrgDepartment[]>([]);
   const [staff, setStaff] = useState<StaffPosition[]>([]);
@@ -2476,6 +2513,7 @@ function OrganizationView({ token }: { token: string }) {
   const [departmentDialog, setDepartmentDialog] = useState<OrgDepartment | "new" | null>(null);
   const [staffDialog, setStaffDialog] = useState<StaffPosition | "new" | null>(null);
   const [onboardingDialog, setOnboardingDialog] = useState<StaffPosition | null>(null);
+  const [showPositionCreate, setShowPositionCreate] = useState(false);
   const [departmentForm, setDepartmentForm] = useState({ name: "", code: "", parent: "", manager: "" });
   const [staffForm, setStaffForm] = useState({ position: "", headcount: "1", note: "" });
   const [onboardingForm, setOnboardingForm] = useState({
@@ -2662,7 +2700,7 @@ function OrganizationView({ token }: { token: string }) {
       <PageHeader
         title="Оргструктура"
         subtitle="Подразделения, руководители и штатное расписание"
-        action={<button className="primary-button" type="button" onClick={() => openDepartment()}><Plus /> Подразделение</button>}
+        action={<div className="page-actions"><button className="secondary-button" type="button" onClick={() => setShowPositionCreate(true)}><Plus /> Должность</button><button className="primary-button" type="button" onClick={() => openDepartment()}><Plus /> Подразделение</button></div>}
       />
       <section className="organization-metrics">
         <article><span>Подразделений</span><strong>{departments.length}</strong></article>
@@ -2740,7 +2778,7 @@ function OrganizationView({ token }: { token: string }) {
                 <label>Название<input value={departmentForm.name} onChange={(event) => setDepartmentForm({ ...departmentForm, name: event.target.value })} required /></label>
                 <label>Код<input value={departmentForm.code} onChange={(event) => setDepartmentForm({ ...departmentForm, code: event.target.value })} placeholder="Создастся автоматически" /></label>
                 <label>Вышестоящее подразделение<select value={departmentForm.parent} onChange={(event) => setDepartmentForm({ ...departmentForm, parent: event.target.value })}><option value="">Нет — верхний уровень</option>{departments.filter((item) => departmentDialog === "new" || item.id !== departmentDialog.id).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-                <label>Руководитель<select value={departmentForm.manager} onChange={(event) => setDepartmentForm({ ...departmentForm, manager: event.target.value })}><option value="">Не назначен</option>{employees.map((item) => <option key={item.user} value={item.user}>{item.full_name}</option>)}</select></label>
+                <label>Руководитель<select value={departmentForm.manager} onChange={(event) => setDepartmentForm({ ...departmentForm, manager: event.target.value })}><option value="">{employees.length ? "Не назначен" : "Нет сотрудников — сначала добавьте сотрудника"}</option>{employees.map((item) => <option key={item.user} value={item.user}>{item.full_name}</option>)}</select></label>
               </div>
               <footer><button className="secondary-button" type="button" onClick={() => setDepartmentDialog(null)}>Отмена</button><button className="primary-button" type="submit">Сохранить</button></footer>
             </form>
@@ -2753,7 +2791,7 @@ function OrganizationView({ token }: { token: string }) {
             <header><div><h2>{staffDialog === "new" ? "Новая штатная позиция" : "Штатная позиция"}</h2><p>{activeDepartment?.name}</p></div><button className="icon-button" type="button" onClick={() => setStaffDialog(null)}><X /></button></header>
             <form className="hcm-form" onSubmit={saveStaff}>
               <div className="hcm-form__grid">
-                <label>Должность<select value={staffForm.position} onChange={(event) => setStaffForm({ ...staffForm, position: event.target.value })} required><option value="">Выберите должность</option>{positions.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+                <div className="reference-field"><label>Должность<select value={staffForm.position} onChange={(event) => setStaffForm({ ...staffForm, position: event.target.value })} required><option value="">{positions.length ? "Выберите должность" : "Должностей пока нет"}</option>{positions.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><button className="text-button" type="button" onClick={() => setShowPositionCreate(true)}><Plus />Новая должность</button></div>
                 <label>Штатных единиц<input type="number" min="1" value={staffForm.headcount} onChange={(event) => setStaffForm({ ...staffForm, headcount: event.target.value })} required /></label>
                 <label className="hcm-form__wide">Комментарий<input value={staffForm.note} onChange={(event) => setStaffForm({ ...staffForm, note: event.target.value })} /></label>
               </div>
@@ -2762,6 +2800,7 @@ function OrganizationView({ token }: { token: string }) {
           </section>
         </div>
       )}
+      {showPositionCreate && <PositionCreateDialog token={token} onClose={() => setShowPositionCreate(false)} onCreated={(position) => { setPositions((items) => [...items, position].sort((left, right) => left.name.localeCompare(right.name, "ru"))); setStaffForm((current) => ({ ...current, position: String(position.id) })); }} />}
       {onboardingDialog && (
         <div className="hcm-dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setOnboardingDialog(null); }}>
           <section className="hcm-dialog organization-dialog" role="dialog" aria-modal="true" aria-labelledby="onboarding-template-title">
@@ -2769,8 +2808,8 @@ function OrganizationView({ token }: { token: string }) {
             <form className="hcm-form" onSubmit={saveOnboardingTemplate}>
               <div className="hcm-form__grid">
                 <label className="hcm-form__wide">Название<input value={onboardingForm.name} onChange={(event) => setOnboardingForm({ ...onboardingForm, name: event.target.value })} required /></label>
-                <label>Траектория<select value={onboardingForm.learning_path} onChange={(event) => setOnboardingForm({ ...onboardingForm, learning_path: event.target.value })}><option value="">Без траектории</option>{learningPathOptions.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label>
-                <label>Ответственный<select value={onboardingForm.responsible} onChange={(event) => setOnboardingForm({ ...onboardingForm, responsible: event.target.value })}><option value="">Руководитель отдела</option>{employees.map((item) => <option key={item.user} value={item.user}>{item.full_name}</option>)}</select></label>
+                <label>Траектория<select value={onboardingForm.learning_path} onChange={(event) => setOnboardingForm({ ...onboardingForm, learning_path: event.target.value })}><option value="">{learningPathOptions.length ? "Без траектории" : "Нет траекторий — создайте в обучении"}</option>{learningPathOptions.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label>
+                <label>Ответственный<select value={onboardingForm.responsible} onChange={(event) => setOnboardingForm({ ...onboardingForm, responsible: event.target.value })}><option value="">{employees.length ? "Руководитель отдела" : "Нет сотрудников — сначала добавьте сотрудника"}</option>{employees.map((item) => <option key={item.user} value={item.user}>{item.full_name}</option>)}</select></label>
                 <label>Срок, дней<input type="number" min="1" value={onboardingForm.duration_days} onChange={(event) => setOnboardingForm({ ...onboardingForm, duration_days: event.target.value })} required /></label>
                 <label className="hcm-form__wide">Чек-лист<textarea className="onboarding-template-checklist" value={onboardingForm.checklist} onChange={(event) => setOnboardingForm({ ...onboardingForm, checklist: event.target.value })} placeholder="Одна задача на строку" required /></label>
               </div>
@@ -2809,6 +2848,7 @@ function EmployeesView({ token, user }: { token: string; user: User }) {
   const [editing, setEditing] = useState<EmployeeProfile | null>(null);
   const [selectedProfile, setSelectedProfile] = useState<EmployeeProfile | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [showPositionCreate, setShowPositionCreate] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(emptyEmployeeForm);
   const [showImport, setShowImport] = useState(false);
@@ -3249,8 +3289,8 @@ function EmployeesView({ token, user }: { token: string; user: User }) {
                 <label className="hcm-form__wide">Корпоративная почта<input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required /></label>
                 <label>Табельный номер<input value={form.employee_number} onChange={(e) => setForm({ ...form, employee_number: e.target.value })} required /></label>
                 <label>Дата выхода<input type="date" value={form.hire_date} onChange={(e) => setForm({ ...form, hire_date: e.target.value })} /></label>
-                <label>Отдел<select value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })}><option value="">Без отдела</option>{departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-                <label>Должность<select value={form.position} onChange={(e) => setForm({ ...form, position: e.target.value })}><option value="">Не указана</option>{positions.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+                <label>Отдел<select value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })}><option value="">{departments.length ? "Без отдела" : "Нет подразделений — создайте в оргструктуре"}</option>{departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+                <div className="reference-field"><label>Должность<select value={form.position} onChange={(e) => setForm({ ...form, position: e.target.value })}><option value="">{positions.length ? "Не указана" : "Должностей пока нет"}</option>{positions.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><button className="text-button" type="button" onClick={() => setShowPositionCreate(true)}><Plus />Новая должность</button></div>
                 <label>Грейд<input value={form.grade} onChange={(e) => setForm({ ...form, grade: e.target.value })} placeholder="Junior, Middle, Senior" /></label>
                 <label>Статус<select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value, dismissal_date: e.target.value === "dismissed" ? (form.dismissal_date || new Date().toISOString().slice(0, 10)) : "" })}><option value="employed">Работает</option><option value="probation">Испытательный срок</option><option value="dismissed" disabled={!editing}>Уволен</option></select></label>
                 {form.status === "dismissed" && <label>Дата увольнения<input type="date" value={form.dismissal_date} onChange={(e) => setForm({ ...form, dismissal_date: e.target.value })} required /></label>}
@@ -3266,6 +3306,7 @@ function EmployeesView({ token, user }: { token: string; user: User }) {
           </section>
         </div>
       )}
+      {showPositionCreate && <PositionCreateDialog token={token} onClose={() => setShowPositionCreate(false)} onCreated={(position) => { setPositions((items) => [...items, position].sort((left, right) => left.name.localeCompare(right.name, "ru"))); setForm((current) => ({ ...current, position: String(position.id) })); }} />}
     </>
   );
 }
@@ -3331,6 +3372,7 @@ function RecruitmentView({ token, user }: { token: string; user: User }) {
   const [candidateSalaryMax, setCandidateSalaryMax] = useState("");
   const [showCandidateFilters, setShowCandidateFilters] = useState(false);
   const [showStageSettings, setShowStageSettings] = useState(false);
+  const [showPositionCreate, setShowPositionCreate] = useState(false);
   const [stageForm, setStageForm] = useState<{ id: number | null; name: string; position: string; is_terminal: boolean }>({ id: null, name: "", position: "0", is_terminal: false });
   const [resumeBusy, setResumeBusy] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -4177,7 +4219,7 @@ function RecruitmentView({ token, user }: { token: string; user: User }) {
                 <label>Ожидания по зарплате<input disabled={!canManageRecruitment} type="number" min="0" value={form.desired_salary} onChange={(e) => setForm({ ...form, desired_salary: e.target.value })} /></label>
                 <label className="hcm-form__wide">Навыки<textarea disabled={!canManageRecruitment} value={form.skills} onChange={(e) => setForm({ ...form, skills: e.target.value })} /></label>
                 <label className="hcm-form__wide">Комментарий HR<textarea disabled={!canManageRecruitment} value={form.comment} onChange={(e) => setForm({ ...form, comment: e.target.value })} /></label>
-                {editing && canManageRecruitment && <label className="hcm-form__wide">Ответственный руководитель<select value={editing.assigned_leader || ""} disabled={saving} onChange={(event) => void assignCandidateLeader(event.target.value)}><option value="">Не назначен</option>{leaders.map((leader) => <option value={leader.id} key={leader.id}>{leader.name}</option>)}</select></label>}
+                {editing && canManageRecruitment && <label className="hcm-form__wide">Ответственный руководитель<select value={editing.assigned_leader || ""} disabled={saving} onChange={(event) => void assignCandidateLeader(event.target.value)}><option value="">{leaders.length ? "Не назначен" : "Нет руководителей — назначьте роль в пользователях"}</option>{leaders.map((leader) => <option value={leader.id} key={leader.id}>{leader.name}</option>)}</select></label>}
                 {editing && (
                   <section className="candidate-resumes hcm-form__wide">
                     <header>
@@ -4268,10 +4310,10 @@ function RecruitmentView({ token, user }: { token: string; user: User }) {
             <header><div><h2 id="vacancy-dialog-title">{vacancyDialog === "new" ? "Новая вакансия" : "Карточка вакансии"}</h2><p>Свяжите подбор со штатной потребностью</p></div><button className="icon-button" type="button" onClick={() => setVacancyDialog(null)} aria-label="Закрыть"><X /></button></header>
             <form className="hcm-form" onSubmit={saveVacancy}>
               <div className="hcm-form__grid">
-                <label className="hcm-form__wide">Штатная позиция<select value={vacancyForm.staff_position} onChange={(event) => selectStaffPosition(event.target.value)}><option value="">Без привязки</option>{staff.filter((item) => (item.vacancies > 0 && item.open_vacancy_count === 0) || Number(vacancyForm.staff_position) === item.id).map((item) => <option key={item.id} value={item.id}>{item.department_name} · {item.position_name} · свободно {item.vacancies}</option>)}</select></label>
+                <label className="hcm-form__wide">Штатная позиция<select value={vacancyForm.staff_position} onChange={(event) => selectStaffPosition(event.target.value)}><option value="">{staff.length ? "Без привязки" : "Нет штатных позиций — создайте в оргструктуре"}</option>{staff.filter((item) => (item.vacancies > 0 && item.open_vacancy_count === 0) || Number(vacancyForm.staff_position) === item.id).map((item) => <option key={item.id} value={item.id}>{item.department_name} · {item.position_name} · свободно {item.vacancies}</option>)}</select></label>
                 <label className="hcm-form__wide">Название<input value={vacancyForm.title} onChange={(event) => setVacancyForm({ ...vacancyForm, title: event.target.value })} required /></label>
-                <label>Отдел<select value={vacancyForm.department} onChange={(event) => setVacancyForm({ ...vacancyForm, department: event.target.value })} required><option value="">Выберите отдел</option>{departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-                <label>Должность<select value={vacancyForm.position} onChange={(event) => setVacancyForm({ ...vacancyForm, position: event.target.value })} required><option value="">Выберите должность</option>{positions.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+                <label>Отдел<select value={vacancyForm.department} onChange={(event) => setVacancyForm({ ...vacancyForm, department: event.target.value })} required><option value="">{departments.length ? "Выберите отдел" : "Нет подразделений — создайте в оргструктуре"}</option>{departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+                <div className="reference-field"><label>Должность<select value={vacancyForm.position} onChange={(event) => setVacancyForm({ ...vacancyForm, position: event.target.value })} required><option value="">{positions.length ? "Выберите должность" : "Должностей пока нет"}</option>{positions.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><button className="text-button" type="button" onClick={() => setShowPositionCreate(true)}><Plus />Новая должность</button></div>
                 <label>Количество мест<input type="number" min="1" value={vacancyForm.openings} onChange={(event) => setVacancyForm({ ...vacancyForm, openings: event.target.value })} required /></label>
                 <label>Статус<select value={vacancyForm.status} onChange={(event) => setVacancyForm({ ...vacancyForm, status: event.target.value })}><option value="open">Открыта</option><option value="paused">Приостановлена</option><option value="closed">Закрыта</option></select></label>
                 <label>Плановая дата закрытия<input type="date" value={vacancyForm.deadline} onChange={(event) => setVacancyForm({ ...vacancyForm, deadline: event.target.value })} /></label>
@@ -4354,6 +4396,7 @@ function RecruitmentView({ token, user }: { token: string; user: User }) {
           </section>
         </div>
       )}
+      {showPositionCreate && <PositionCreateDialog token={token} onClose={() => setShowPositionCreate(false)} onCreated={(position) => { setPositions((items) => [...items, position].sort((left, right) => left.name.localeCompare(right.name, "ru"))); setVacancyForm((current) => ({ ...current, position: String(position.id) })); }} />}
     </>
   );
 }

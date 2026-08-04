@@ -54,6 +54,17 @@ class PositionSerializer(serializers.ModelSerializer):
         model = Position
         fields = ["id", "name", "is_active"]
 
+    def validate_name(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("Введите название должности")
+        queryset = Position.objects.all()
+        if self.instance:
+            queryset = queryset.exclude(pk=self.instance.pk)
+        if any(name.casefold() == value.casefold() for name in queryset.values_list("name", flat=True)):
+            raise serializers.ValidationError("Такая должность уже существует")
+        return value
+
 
 class OrganizationDepartmentSerializer(serializers.ModelSerializer):
     parent_name = serializers.CharField(source="parent.name", read_only=True)

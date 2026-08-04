@@ -196,6 +196,22 @@ class PeopleApiTests(TestCase):
         self.assertEqual(stages.json()[0]["candidates_count"], 1)
         self.assertEqual(summary.json()["employees_total"], 2)
 
+    def test_hr_creates_position_and_leader_can_only_read_catalog(self):
+        self.client.force_authenticate(self.hr)
+        created = self.client.post("/api/v1/positions/", {"name": "Продуктовый аналитик"}, format="json")
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(created.json()["name"], "Продуктовый аналитик")
+        duplicate = self.client.post("/api/v1/positions/", {"name": " продуктовый аналитик "}, format="json")
+        self.assertEqual(duplicate.status_code, 400)
+        self.assertTrue(AuditEvent.objects.filter(entity_type="position", action="created").exists())
+
+        self.client.force_authenticate(self.leader)
+        self.assertEqual(self.client.get("/api/v1/positions/").status_code, 200)
+        self.assertEqual(
+            self.client.post("/api/v1/positions/", {"name": "Руководитель практики"}, format="json").status_code,
+            403,
+        )
+
     def test_only_admin_configures_candidate_stages(self):
         self.client.force_authenticate(self.hr)
         self.assertEqual(
