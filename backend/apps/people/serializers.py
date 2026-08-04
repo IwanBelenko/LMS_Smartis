@@ -15,9 +15,13 @@ from apps.identity.validators import validate_corporate_email
 from .models import (
     AbsenceRequest,
     Candidate,
+    CandidateAssignment,
+    CandidateComment,
+    CandidateExperience,
     CandidateOffer,
     CandidateResume,
     CandidateStage,
+    CandidateStageEvent,
     Competency,
     DailyTranscript,
     EmployeeDocument,
@@ -49,6 +53,17 @@ class PositionSerializer(serializers.ModelSerializer):
     class Meta:
         model = Position
         fields = ["id", "name", "is_active"]
+
+    def validate_name(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("Введите название должности")
+        queryset = Position.objects.all()
+        if self.instance:
+            queryset = queryset.exclude(pk=self.instance.pk)
+        if any(name.casefold() == value.casefold() for name in queryset.values_list("name", flat=True)):
+            raise serializers.ValidationError("Такая должность уже существует")
+        return value
 
 
 class OrganizationDepartmentSerializer(serializers.ModelSerializer):
@@ -775,6 +790,8 @@ class CandidateSerializer(serializers.ModelSerializer):
     vacancy_title = serializers.CharField(source="vacancy.title", read_only=True)
     hired_employee_name = serializers.CharField(source="hired_employee.user.get_full_name", read_only=True)
     resume_count = serializers.SerializerMethodField()
+    assigned_leader = serializers.SerializerMethodField()
+    assigned_leader_name = serializers.SerializerMethodField()
 
     class Meta:
         model = Candidate
@@ -783,7 +800,8 @@ class CandidateSerializer(serializers.ModelSerializer):
             "vacancy", "vacancy_title",
             "skills", "source", "stage", "stage_name", "department", "department_name",
             "recruiter", "recruiter_name", "hired_employee", "hired_employee_name", "hired_at",
-            "resume_count", "next_action_at", "comment", "created_at", "updated_at",
+            "resume_count", "assigned_leader", "assigned_leader_name", "next_action_at", "comment",
+            "created_at", "updated_at",
         ]
         read_only_fields = ["id", "created_at", "updated_at", "recruiter", "hired_employee", "hired_at"]
 
@@ -797,6 +815,105 @@ class CandidateSerializer(serializers.ModelSerializer):
     def get_resume_count(self, obj):
         annotated_count = getattr(obj, "resume_count", None)
         return annotated_count if annotated_count is not None else obj.resumes.count()
+
+    def get_assigned_leader(self, obj):
+        assignment = getattr(obj, "assignment", None)
+        return assignment.leader_id if assignment else None
+
+    def get_assigned_leader_name(self, obj):
+        assignment = getattr(obj, "assignment", None)
+        if not assignment:
+            return ""
+        return assignment.leader.get_full_name() or assignment.leader.email
+
+
+class CandidateExperienceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CandidateExperience
+        fields = [
+            "id", "candidate", "company", "position", "started_on", "ended_on",
+            "description", "position_order", "created_at", "updated_at",
+        ]
+        read_only_fields = ["id", "candidate", "created_at", "updated_at"]
+
+    def validate(self, attrs):
+        started_on = attrs.get("started_on", getattr(self.instance, "started_on", None))
+        ended_on = attrs.get("ended_on", getattr(self.instance, "ended_on", None))
+        if started_on and ended_on and ended_on < started_on:
+            raise serializers.ValidationError({"ended_on": "Дата окончания не может быть раньше даты начала"})
+        return attrs
+
+
+class CandidateCommentSerializer(serializers.ModelSerializer):
+    author_name = serializers.SerializerMethodField()
+    author_role = serializers.CharField(source="author.role", read_only=True)
+
+    class Meta:
+        model = CandidateComment
+        fields = ["id", "candidate", "author", "author_name", "author_role", "text", "created_at"]
+        read_only_fields = ["id", "candidate", "author", "author_name", "author_role", "created_at"]
+
+    def get_author_name(self, obj):
+        if not obj.author:
+            return "Удалённый пользователь"
+        return obj.author.get_full_name() or obj.author.email
+
+    def validate_text(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("Введите комментарий")
+        if len(value) > 4000:
+            raise serializers.ValidationError("Комментарий не должен превышать 4000 символов")
+        return value
+
+
+class CandidateStageEventSerializer(serializers.ModelSerializer):
+    from_stage_name = serializers.CharField(source="from_stage.name", read_only=True)
+    to_stage_name = serializers.CharField(source="to_stage.name", read_only=True)
+    changed_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CandidateStageEvent
+        fields = [
+            "id", "candidate", "from_stage", "from_stage_name", "to_stage", "to_stage_name",
+            "changed_by", "changed_by_name", "note", "created_at",
+        ]
+        read_only_fields = fields
+
+    def get_changed_by_name(self, obj):
+        if not obj.changed_by:
+            return "Система"
+        return obj.changed_by.get_full_name() or obj.changed_by.email
+
+
+class CandidateAssignmentSerializer(serializers.ModelSerializer):
+    leader_name = serializers.SerializerMethodField()
+    assigned_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CandidateAssignment
+        fields = [
+            "id", "candidate", "leader", "leader_name", "assigned_by", "assigned_by_name",
+            "created_at", "updated_at",
+        ]
+        read_only_fields = [
+            "id", "candidate", "leader_name", "assigned_by", "assigned_by_name", "created_at", "updated_at",
+        ]
+
+    def validate_leader(self, value):
+        if value.role != User.Role.LEADER:
+            raise serializers.ValidationError("Назначить кандидата можно только руководителю")
+        if not value.is_active:
+            raise serializers.ValidationError("Нельзя назначить кандидата заблокированному руководителю")
+        return value
+
+    def get_leader_name(self, obj):
+        return obj.leader.get_full_name() or obj.leader.email
+
+    def get_assigned_by_name(self, obj):
+        if not obj.assigned_by:
+            return ""
+        return obj.assigned_by.get_full_name() or obj.assigned_by.email
 
 
 class CandidateResumeSerializer(serializers.ModelSerializer):

@@ -24,9 +24,13 @@ from .models import (
     AbsenceRequest,
     AuditEvent,
     Candidate,
+    CandidateAssignment,
+    CandidateComment,
+    CandidateExperience,
     CandidateOffer,
     CandidateResume,
     CandidateStage,
+    CandidateStageEvent,
     Competency,
     DailyTranscript,
     EmployeeDocument,
@@ -49,14 +53,18 @@ from .models import (
     PerformanceScore,
     ProductUpdate,
 )
-from .permissions import IsHcmRegistryUser, IsHcmUser, IsRecruiter
+from .permissions import IsCandidateCollaborator, IsHcmRegistryUser, IsHcmUser, IsRecruiter
 from .serializers import (
     AbsenceRequestSerializer,
+    CandidateAssignmentSerializer,
+    CandidateCommentSerializer,
+    CandidateExperienceSerializer,
     CandidateSerializer,
     CandidateHireSerializer,
     CandidateOfferSerializer,
     CandidateResumeSerializer,
     CandidateStageSerializer,
+    CandidateStageEventSerializer,
     CompetencySerializer,
     DailyTranscriptSerializer,
     EmployeeDocumentSerializer,
@@ -101,6 +109,11 @@ AUDIT_ENTITY_LABELS = {
     "document": "Документы",
     "absence": "Отсутствия",
     "candidate": "Подбор",
+    "candidate_assignment": "Назначения кандидатов",
+    "candidate_comment": "Комментарии к кандидатам",
+    "candidate_experience": "Опыт кандидатов",
+    "candidate_stage": "Этапы подбора",
+    "position": "Должности",
     "candidate_resume": "Резюме кандидатов",
     "vacancy": "Вакансии",
     "interview": "Собеседования",
@@ -110,6 +123,28 @@ AUDIT_ENTITY_LABELS = {
     "onboarding_plan": "Онбординг",
     "product_update": "Обновления продукта",
 }
+
+
+def candidate_queryset_for(user):
+    queryset = Candidate.objects.select_related(
+        "stage", "department", "recruiter", "vacancy", "hired_employee__user",
+        "assignment__leader",
+    ).annotate(resume_count=Count("resumes"))
+    if user.role == User.Role.LEADER and not user.is_superuser:
+        queryset = queryset.filter(assignment__leader=user)
+    return queryset
+
+
+def record_candidate_stage_event(candidate, actor, previous_stage_id=None, note=""):
+    if previous_stage_id == candidate.stage_id:
+        return None
+    return CandidateStageEvent.objects.create(
+        candidate=candidate,
+        from_stage_id=previous_stage_id,
+        to_stage=candidate.stage,
+        changed_by=actor,
+        note=str(note or "").strip()[:500],
+    )
 
 AUDIT_ACTION_LABELS = {
     "created": "Создание",
@@ -1422,22 +1457,46 @@ class EmployeeLearningDetailView(generics.RetrieveUpdateAPIView):
 
 class CandidateListCreateView(generics.ListCreateAPIView):
     serializer_class = CandidateSerializer
-    permission_classes = [IsRecruiter]
+    permission_classes = [IsHcmRegistryUser]
 
     def get_queryset(self):
-        queryset = Candidate.objects.select_related(
-            "stage", "department", "recruiter", "vacancy", "hired_employee__user"
-        ).annotate(resume_count=Count("resumes"))
+        queryset = candidate_queryset_for(self.request.user)
+        query = self.request.query_params.get("q", "").strip()
         stage = self.request.query_params.get("stage")
         vacancy = self.request.query_params.get("vacancy")
+        department = self.request.query_params.get("department")
+        source = self.request.query_params.get("source", "").strip()
+        salary_min = self.request.query_params.get("salary_min")
+        salary_max = self.request.query_params.get("salary_max")
+        assigned_leader = self.request.query_params.get("assigned_leader")
+        if query:
+            queryset = queryset.filter(
+                Q(full_name__icontains=query)
+                | Q(email__icontains=query)
+                | Q(phone__icontains=query)
+                | Q(telegram__icontains=query)
+                | Q(desired_position__icontains=query)
+                | Q(skills__icontains=query)
+            )
         if stage:
             queryset = queryset.filter(stage_id=stage)
         if vacancy:
             queryset = queryset.filter(vacancy_id=vacancy)
+        if department:
+            queryset = queryset.filter(department_id=department)
+        if source:
+            queryset = queryset.filter(source__icontains=source)
+        if salary_min:
+            queryset = queryset.filter(desired_salary__gte=salary_min)
+        if salary_max:
+            queryset = queryset.filter(desired_salary__lte=salary_max)
+        if assigned_leader:
+            queryset = queryset.filter(assignment__leader_id=assigned_leader)
         return queryset
 
     def perform_create(self, serializer):
         candidate = serializer.save(recruiter=self.request.user)
+        record_candidate_stage_event(candidate, self.request.user)
         AuditEvent.objects.create(
             actor=self.request.user, entity_type="candidate", entity_id=str(candidate.pk), action="created"
         )
@@ -1445,26 +1504,167 @@ class CandidateListCreateView(generics.ListCreateAPIView):
 
 class CandidateDetailView(generics.RetrieveUpdateAPIView):
     serializer_class = CandidateSerializer
-    permission_classes = [IsRecruiter]
-    queryset = Candidate.objects.select_related(
-        "stage", "department", "recruiter", "vacancy", "hired_employee__user"
-    ).annotate(resume_count=Count("resumes"))
+    permission_classes = [IsHcmRegistryUser]
+
+    def get_queryset(self):
+        return candidate_queryset_for(self.request.user)
 
     def perform_update(self, serializer):
+        previous_stage_id = serializer.instance.stage_id
         candidate = serializer.save()
+        record_candidate_stage_event(
+            candidate,
+            self.request.user,
+            previous_stage_id,
+            self.request.data.get("stage_note", ""),
+        )
         AuditEvent.objects.create(
             actor=self.request.user, entity_type="candidate", entity_id=str(candidate.pk), action="updated"
         )
 
 
+class CandidateExperienceListCreateView(generics.ListCreateAPIView):
+    serializer_class = CandidateExperienceSerializer
+    permission_classes = [IsHcmRegistryUser]
+
+    def get_candidate(self):
+        return get_object_or_404(candidate_queryset_for(self.request.user), pk=self.kwargs["candidate_id"])
+
+    def get_queryset(self):
+        return CandidateExperience.objects.filter(candidate=self.get_candidate())
+
+    def perform_create(self, serializer):
+        candidate = self.get_candidate()
+        experience = serializer.save(candidate=candidate)
+        AuditEvent.objects.create(
+            actor=self.request.user,
+            entity_type="candidate_experience",
+            entity_id=str(experience.pk),
+            action="created",
+            changes={"candidate_id": candidate.pk, "company": experience.company},
+        )
+
+
+class CandidateExperienceDetailView(generics.RetrieveUpdateDestroyAPIView):
+    serializer_class = CandidateExperienceSerializer
+    permission_classes = [IsRecruiter]
+    queryset = CandidateExperience.objects.select_related("candidate")
+
+    def perform_update(self, serializer):
+        experience = serializer.save()
+        AuditEvent.objects.create(
+            actor=self.request.user,
+            entity_type="candidate_experience",
+            entity_id=str(experience.pk),
+            action="updated",
+            changes={"candidate_id": experience.candidate_id},
+        )
+
+    def perform_destroy(self, instance):
+        experience_id = instance.pk
+        candidate_id = instance.candidate_id
+        instance.delete()
+        AuditEvent.objects.create(
+            actor=self.request.user,
+            entity_type="candidate_experience",
+            entity_id=str(experience_id),
+            action="deleted",
+            changes={"candidate_id": candidate_id},
+        )
+
+
+class CandidateCommentListCreateView(generics.ListCreateAPIView):
+    serializer_class = CandidateCommentSerializer
+    permission_classes = [IsCandidateCollaborator]
+
+    def get_candidate(self):
+        return get_object_or_404(candidate_queryset_for(self.request.user), pk=self.kwargs["candidate_id"])
+
+    def get_queryset(self):
+        return CandidateComment.objects.filter(candidate=self.get_candidate()).select_related("author")
+
+    def perform_create(self, serializer):
+        candidate = self.get_candidate()
+        comment = serializer.save(candidate=candidate, author=self.request.user)
+        AuditEvent.objects.create(
+            actor=self.request.user,
+            entity_type="candidate_comment",
+            entity_id=str(comment.pk),
+            action="created",
+            changes={"candidate_id": candidate.pk},
+        )
+
+
+class CandidateStageEventListView(generics.ListAPIView):
+    serializer_class = CandidateStageEventSerializer
+    permission_classes = [IsHcmRegistryUser]
+
+    def get_queryset(self):
+        candidate = get_object_or_404(candidate_queryset_for(self.request.user), pk=self.kwargs["candidate_id"])
+        return candidate.stage_events.select_related("from_stage", "to_stage", "changed_by")
+
+
+class CandidateAssignmentView(APIView):
+    permission_classes = [IsRecruiter]
+
+    def get_candidate(self, pk):
+        return get_object_or_404(candidate_queryset_for(self.request.user), pk=pk)
+
+    def put(self, request, pk):
+        candidate = self.get_candidate(pk)
+        assignment = getattr(candidate, "assignment", None)
+        action = "updated" if assignment else "created"
+        serializer = CandidateAssignmentSerializer(assignment, data=request.data)
+        serializer.is_valid(raise_exception=True)
+        assignment = serializer.save(candidate=candidate, assigned_by=request.user)
+        AuditEvent.objects.create(
+            actor=request.user,
+            entity_type="candidate_assignment",
+            entity_id=str(assignment.pk),
+            action=action,
+            changes={"candidate_id": candidate.pk, "leader_id": assignment.leader_id},
+        )
+        return Response(CandidateAssignmentSerializer(assignment).data)
+
+    def delete(self, request, pk):
+        candidate = self.get_candidate(pk)
+        assignment = getattr(candidate, "assignment", None)
+        if not assignment:
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        assignment_id = assignment.pk
+        assignment.delete()
+        AuditEvent.objects.create(
+            actor=request.user,
+            entity_type="candidate_assignment",
+            entity_id=str(assignment_id),
+            action="deleted",
+            changes={"candidate_id": candidate.pk},
+        )
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class CandidateAssignmentOptionsView(APIView):
+    permission_classes = [IsRecruiter]
+
+    def get(self, request):
+        leaders = User.objects.filter(role=User.Role.LEADER, is_active=True).order_by("last_name", "first_name", "email")
+        return Response([
+            {"id": leader.pk, "name": leader.get_full_name() or leader.email, "department": leader.department_id}
+            for leader in leaders
+        ])
+
+
 class CandidateResumeListCreateView(generics.ListCreateAPIView):
     serializer_class = CandidateResumeSerializer
-    permission_classes = [IsRecruiter]
+    permission_classes = [IsHcmRegistryUser]
     parser_classes = [MultiPartParser, FormParser]
 
     def get_candidate(self):
         if not hasattr(self, "_candidate"):
-            self._candidate = get_object_or_404(Candidate, pk=self.kwargs["candidate_id"])
+            self._candidate = get_object_or_404(
+                candidate_queryset_for(self.request.user),
+                pk=self.kwargs["candidate_id"],
+            )
         return self._candidate
 
     def get_queryset(self):
@@ -1482,10 +1682,15 @@ class CandidateResumeListCreateView(generics.ListCreateAPIView):
 
 
 class CandidateResumeDownloadView(APIView):
-    permission_classes = [IsRecruiter]
+    permission_classes = [IsHcmRegistryUser]
 
     def get(self, request, pk):
-        resume = get_object_or_404(CandidateResume.objects.select_related("candidate"), pk=pk)
+        resume = get_object_or_404(
+            CandidateResume.objects.select_related("candidate").filter(
+                candidate__in=candidate_queryset_for(request.user).values("pk")
+            ),
+            pk=pk,
+        )
         if not resume.file:
             return Response({"detail": "Файл резюме не найден"}, status=status.HTTP_404_NOT_FOUND)
         AuditEvent.objects.create(
@@ -1525,10 +1730,45 @@ class CandidateResumeDetailView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-class CandidateStageListView(generics.ListAPIView):
+class CandidateStageListView(generics.ListCreateAPIView):
     serializer_class = CandidateStageSerializer
-    permission_classes = [IsRecruiter]
     queryset = CandidateStage.objects.annotate(candidates_count=Count("candidates")).order_by("position", "id")
+
+    def get_permissions(self):
+        permission_classes = [IsAdministrator] if self.request.method == "POST" else [IsHcmRegistryUser]
+        return [permission() for permission in permission_classes]
+
+    def perform_create(self, serializer):
+        stage = serializer.save()
+        AuditEvent.objects.create(
+            actor=self.request.user, entity_type="candidate_stage", entity_id=str(stage.pk), action="created"
+        )
+
+
+class CandidateStageDetailView(generics.RetrieveUpdateDestroyAPIView):
+    serializer_class = CandidateStageSerializer
+    permission_classes = [IsAdministrator]
+    queryset = CandidateStage.objects.annotate(candidates_count=Count("candidates"))
+
+    def perform_update(self, serializer):
+        stage = serializer.save()
+        AuditEvent.objects.create(
+            actor=self.request.user, entity_type="candidate_stage", entity_id=str(stage.pk), action="updated"
+        )
+
+    def destroy(self, request, *args, **kwargs):
+        stage = self.get_object()
+        if stage.candidates.exists():
+            return Response(
+                {"detail": "Нельзя удалить этап, пока на нём есть кандидаты"},
+                status=status.HTTP_409_CONFLICT,
+            )
+        stage_id = stage.pk
+        stage.delete()
+        AuditEvent.objects.create(
+            actor=request.user, entity_type="candidate_stage", entity_id=str(stage_id), action="deleted"
+        )
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class CandidateHireView(APIView):
@@ -1677,6 +1917,7 @@ class CandidateOfferOutcomeView(APIView):
         offer.decision_comment = str(request.data.get("comment", "")).strip()
         offer.save(update_fields=["status", "responded_at", "decision_comment", "updated_at"])
         if outcome == CandidateOffer.Status.ACCEPTED and offer.start_date:
+            previous_stage_id = offer.candidate.stage_id
             offer_stage = CandidateStage.objects.filter(name__iexact="Оффер").first()
             if offer_stage:
                 offer.candidate.stage = offer_stage
@@ -1684,6 +1925,7 @@ class CandidateOfferOutcomeView(APIView):
                 datetime.combine(offer.start_date, time(hour=12))
             )
             offer.candidate.save(update_fields=["stage", "next_action_at", "updated_at"] if offer_stage else ["next_action_at", "updated_at"])
+            record_candidate_stage_event(offer.candidate, request.user, previous_stage_id, "Оффер принят")
         AuditEvent.objects.create(
             actor=request.user,
             entity_type="candidate_offer",
@@ -1927,10 +2169,23 @@ class OnboardingOptionsView(APIView):
         )
 
 
-class PositionListView(generics.ListAPIView):
+class PositionListView(generics.ListCreateAPIView):
     serializer_class = PositionSerializer
-    permission_classes = [IsHcmRegistryUser]
     queryset = Position.objects.filter(is_active=True)
+
+    def get_permissions(self):
+        permission_classes = [IsHcmUser] if self.request.method == "POST" else [IsHcmRegistryUser]
+        return [permission() for permission in permission_classes]
+
+    def perform_create(self, serializer):
+        position = serializer.save()
+        AuditEvent.objects.create(
+            actor=self.request.user,
+            entity_type="position",
+            entity_id=str(position.pk),
+            action="created",
+            changes={"name": position.name},
+        )
 
 
 class OrganizationDepartmentListCreateView(generics.ListCreateAPIView):
