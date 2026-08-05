@@ -364,8 +364,8 @@ class PeopleApiTests(TestCase):
         self.assertEqual(restore.status_code, 400)
         self.assertTrue(EmployeeProfile.objects.filter(pk=self.profile.pk).exists())
 
-    def test_hr_previews_and_commits_csv_employee_import(self):
-        self.client.force_authenticate(self.hr)
+    def test_admin_previews_and_commits_csv_employee_import(self):
+        self.client.force_authenticate(self.admin)
         content = (
             "ФИО;Корпоративная почта;Табельный номер;Отдел;Должность;Грейд;Дата выхода;Статус\n"
             "Иванова Анна;employee@test.local;SM-101;Аналитика;Аналитик;Middle;01.02.2024;Работает\n"
@@ -399,7 +399,7 @@ class PeopleApiTests(TestCase):
         self.assertTrue(EmploymentEvent.objects.filter(employee=imported, event_type=EmploymentEvent.Type.HIRED).exists())
 
     def test_employee_import_reports_unknown_directory_values_without_changes(self):
-        self.client.force_authenticate(self.hr)
+        self.client.force_authenticate(self.admin)
         content = (
             "ФИО,Email,Табельный номер,Отдел,Должность\n"
             "Тестов Тест,test.import@smartis.bi,SM-301,Неизвестный отдел,Неизвестная должность\n"
@@ -424,7 +424,101 @@ class PeopleApiTests(TestCase):
         self.assertEqual(committed.status_code, 400)
         self.assertFalse(EmployeeProfile.objects.filter(employee_number="SM-301").exists())
 
-    def test_hr_can_preview_xlsx_employee_import(self):
+    def test_employee_import_is_available_only_to_administrators(self):
+        self.client.force_authenticate(self.hr)
+        content = "ФИО\nТестов Тест\n"
+        response = self.client.post(
+            "/api/v1/employees/import/",
+            {"file": SimpleUploadedFile("employees.csv", content.encode("utf-8"), content_type="text/csv")},
+            format="multipart",
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(self.client.get("/api/v1/employees/import/").status_code, 403)
+
+    def test_admin_confirms_and_creates_missing_departments_from_import(self):
+        self.client.force_authenticate(self.admin)
+        content = (
+            "ФИО;Email;Табельный номер;Отдел;Должность\n"
+            "Новая Сотрудница;new.employee@smartis.bi;SM-303;Новый отдел;Аналитик\n"
+        )
+        preview = self.client.post(
+            "/api/v1/employees/import/",
+            {"file": SimpleUploadedFile("employees.csv", content.encode("utf-8"), content_type="text/csv")},
+            format="multipart",
+        )
+        self.assertEqual(preview.status_code, 200)
+        payload = preview.json()
+        self.assertEqual(payload["review"]["missing_departments"], ["Новый отдел"])
+        self.assertFalse(Department.objects.filter(name="Новый отдел").exists())
+
+        confirmed = self.client.post(
+            "/api/v1/employees/import/",
+            {
+                "rows": payload["rows"],
+                "mapping": payload["mapping"],
+                "batch_id": payload["batch_id"],
+                "create_departments": True,
+            },
+            format="json",
+        )
+        self.assertEqual(confirmed.status_code, 200)
+        self.assertEqual(confirmed.json()["created_departments"], ["Новый отдел"])
+        self.assertEqual(confirmed.json()["review"]["missing_departments"], [])
+        self.assertEqual(confirmed.json()["review"]["error_count"], 0)
+        department = Department.objects.get(name="Новый отдел")
+        self.assertIsNone(department.parent)
+        self.assertIsNone(department.manager)
+        self.assertTrue(department.code.startswith("import-"))
+
+        committed = self.client.post(
+            "/api/v1/employees/import/",
+            {
+                "rows": payload["rows"],
+                "mapping": payload["mapping"],
+                "batch_id": payload["batch_id"],
+                "commit": True,
+            },
+            format="json",
+        )
+        self.assertEqual(committed.status_code, 201)
+        self.assertEqual(EmployeeProfile.objects.get(employee_number="SM-303").department, department)
+        self.assertTrue(AuditEvent.objects.filter(entity_type="department", action="import_created").exists())
+
+    def test_admin_confirms_and_creates_missing_positions_without_staff_units(self):
+        self.client.force_authenticate(self.admin)
+        content = (
+            "ФИО;Email;Табельный номер;Отдел;Должность\n"
+            "Новая Сотрудница;position.employee@smartis.bi;SM-304;Аналитика;Новая должность\n"
+        )
+        preview = self.client.post(
+            "/api/v1/employees/import/",
+            {"file": SimpleUploadedFile("employees.csv", content.encode("utf-8"), content_type="text/csv")},
+            format="multipart",
+        )
+        self.assertEqual(preview.status_code, 200)
+        payload = preview.json()
+        self.assertEqual(payload["review"]["missing_positions"], ["Новая должность"])
+        self.assertFalse(Position.objects.filter(name="Новая должность").exists())
+
+        confirmed = self.client.post(
+            "/api/v1/employees/import/",
+            {
+                "rows": payload["rows"],
+                "mapping": payload["mapping"],
+                "batch_id": payload["batch_id"],
+                "create_positions": True,
+            },
+            format="json",
+        )
+        self.assertEqual(confirmed.status_code, 200)
+        self.assertEqual(confirmed.json()["created_positions"], ["Новая должность"])
+        self.assertEqual(confirmed.json()["review"]["missing_positions"], [])
+        self.assertEqual(confirmed.json()["review"]["error_count"], 0)
+        position = Position.objects.get(name="Новая должность")
+        self.assertFalse(StaffPosition.objects.filter(position=position).exists())
+        self.assertTrue(AuditEvent.objects.filter(entity_type="position", action="import_created").exists())
+
+    def test_admin_can_preview_xlsx_employee_import(self):
         worksheet = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
         <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
           <sheetData>
@@ -443,7 +537,7 @@ class PeopleApiTests(TestCase):
         output = BytesIO()
         with ZipFile(output, "w", ZIP_DEFLATED) as archive:
             archive.writestr("xl/worksheets/sheet1.xml", worksheet)
-        self.client.force_authenticate(self.hr)
+        self.client.force_authenticate(self.admin)
         response = self.client.post(
             "/api/v1/employees/import/",
             {
@@ -459,8 +553,67 @@ class PeopleApiTests(TestCase):
         self.assertEqual(response.json()["review"]["create_count"], 1)
         self.assertEqual(response.json()["review"]["error_count"], 0)
 
+    def test_admin_imports_employee_without_account_and_preserves_blank_fields(self):
+        self.client.force_authenticate(self.admin)
+        content = (
+            "ФИО;Корпоративная почта;Табельный номер;Отдел;Должность;Локация;Пол;Telegram;Электронная трудовая книжка;Согласие на ПДн в КЭДО\n"
+            "Безпочты Анна;;;Аналитика;Аналитик;;;;;\n"
+        )
+        preview = self.client.post(
+            "/api/v1/employees/import/",
+            {"file": SimpleUploadedFile("employees.csv", content.encode("utf-8"), content_type="text/csv")},
+            format="multipart",
+        )
+        self.assertEqual(preview.status_code, 200)
+        payload = preview.json()
+        self.assertEqual(payload["review"]["create_count"], 1)
+        self.assertEqual(payload["review"]["error_count"], 0)
+        committed = self.client.post(
+            "/api/v1/employees/import/",
+            {"batch_id": payload["batch_id"], "rows": payload["rows"], "mapping": payload["mapping"], "commit": True},
+            format="json",
+        )
+        self.assertEqual(committed.status_code, 201)
+        imported = EmployeeProfile.objects.get(last_name="Безпочты", first_name="Анна")
+        self.assertIsNone(imported.user)
+        self.assertIsNone(imported.employee_number)
+        self.assertEqual(imported.email, "")
+        self.assertEqual(imported.location, "")
+        self.assertEqual(imported.gender, "")
+        self.assertEqual(imported.telegram, "")
+        self.assertIsNone(imported.electronic_employment_record)
+        self.assertIsNone(imported.personal_data_consent_kedo)
+
+    def test_employee_import_preserves_long_education_text(self):
+        self.client.force_authenticate(self.admin)
+        education = "Высшее образование и дополнительная профессиональная подготовка. " * 6
+        content = (
+            "ФИО;Email;Табельный номер;Образование\n"
+            f"Текстовая Проверка;long.education@smartis.bi;SM-305;{education}\n"
+        )
+        preview = self.client.post(
+            "/api/v1/employees/import/",
+            {"file": SimpleUploadedFile("employees.csv", content.encode("utf-8"), content_type="text/csv")},
+            format="multipart",
+        )
+        self.assertEqual(preview.status_code, 200)
+        payload = preview.json()
+        self.assertEqual(payload["review"]["error_count"], 0)
+        committed = self.client.post(
+            "/api/v1/employees/import/",
+            {
+                "batch_id": payload["batch_id"],
+                "rows": payload["rows"],
+                "mapping": payload["mapping"],
+                "commit": True,
+            },
+            format="json",
+        )
+        self.assertEqual(committed.status_code, 201)
+        self.assertEqual(EmployeeProfile.objects.get(employee_number="SM-305").education, education.strip())
+
     def test_employee_import_detects_duplicates_inside_file(self):
-        self.client.force_authenticate(self.hr)
+        self.client.force_authenticate(self.admin)
         content = (
             "ФИО;Email;Табельный номер\n"
             "Первая Запись;duplicate@smartis.bi;SM-400\n"
@@ -477,7 +630,7 @@ class PeopleApiTests(TestCase):
         self.assertIn("Дубликат строки", response.json()["review"]["rows"][1]["errors"]["duplicate"][0])
 
     def test_one_c_import_uses_cutoff_date_and_rejects_same_file_twice(self):
-        self.client.force_authenticate(self.hr)
+        self.client.force_authenticate(self.admin)
         content = (
             "ФИО;Email;Табельный номер;Отдел;Должность\n"
             "Соколова Анна;employee@test.local;SM-101;Продукт;Аналитик\n"

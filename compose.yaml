@@ -18,7 +18,10 @@ services:
       api: { condition: service_healthy }
       web: { condition: service_healthy }
   web:
-    build: ./frontend
+    build:
+      context: ./frontend
+      args:
+        VITE_APP_VERSION: "${APP_VERSION:-dev}"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1/health"]

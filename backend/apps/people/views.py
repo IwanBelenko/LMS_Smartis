@@ -87,7 +87,13 @@ from .serializers import (
     ProductUpdateSerializer,
 )
 from .services import analyze_daily_transcript, analyze_product_update, assign_onboarding
-from .employee_import import commit_employee_import, parse_employee_import_file, preview_employee_import
+from .employee_import import (
+    commit_employee_import,
+    create_import_departments,
+    create_import_positions,
+    parse_employee_import_file,
+    preview_employee_import,
+)
 from .learning_import import commit_learning_import, parse_learning_import_file, preview_learning_import
 
 
@@ -469,12 +475,12 @@ class PerformanceCycleLaunchView(APIView):
             raise ValidationError("Добавьте хотя бы одну активную компетенцию")
         employees = EmployeeProfile.objects.filter(
             status__in=[EmployeeProfile.Status.EMPLOYED, EmployeeProfile.Status.PROBATION]
-        ).select_related("user__department__manager")
+        ).select_related("department__manager")
         for employee in employees:
             review, created = PerformanceReview.objects.get_or_create(
                 cycle=cycle,
                 employee=employee,
-                defaults={"reviewer": getattr(employee.user.department, "manager", None)},
+                defaults={"reviewer": getattr(employee.department, "manager", None)},
             )
             if created:
                 PerformanceScore.objects.bulk_create([
@@ -1028,19 +1034,19 @@ class EmployeeListCreateView(generics.ListCreateAPIView):
         return EmployeeProfileWriteSerializer if self.request.method == "POST" else EmployeeProfileSerializer
 
     def get_queryset(self):
-        queryset = EmployeeProfile.objects.select_related("user__department", "position")
+        queryset = EmployeeProfile.objects.select_related("user", "department", "position")
         if self.request.user.role == User.Role.LEADER:
             queryset = (
-                queryset.filter(user__department_id=self.request.user.department_id)
+                queryset.filter(department_id=self.request.user.department_id)
                 if self.request.user.department_id else queryset.none()
             )
         query = self.request.query_params.get("q", "").strip()
         if query:
             queryset = queryset.filter(
-                Q(user__first_name__icontains=query)
-                | Q(user__last_name__icontains=query)
-                | Q(user__email__icontains=query)
-                | Q(user__department__name__icontains=query)
+                Q(first_name__icontains=query)
+                | Q(last_name__icontains=query)
+                | Q(email__icontains=query)
+                | Q(department__name__icontains=query)
                 | Q(position__name__icontains=query)
             )
         return queryset
@@ -1082,8 +1088,8 @@ class EmployeeExportView(APIView):
             or request.user.can_view_compensation
         )
         queryset = EmployeeProfile.objects.select_related(
-            "user__department", "position"
-        ).order_by("user__last_name", "user__first_name", "user__email")
+            "user", "department", "position"
+        ).order_by("last_name", "first_name", "email")
 
         output = StringIO(newline="")
         writer = csv.writer(output, delimiter=";", lineterminator="\r\n")
@@ -1091,7 +1097,11 @@ class EmployeeExportView(APIView):
             "Табельный номер", "Фамилия", "Имя", "Корпоративная почта",
             "Подразделение", "Должность", "Грейд", "Дата рождения",
             "Дата приёма", "Дата увольнения", "Статус", "Образование",
-            "Компетенции", "Чек-лист, %", "План развития, %",
+            "Компетенции", "Локация", "Юридическое лицо", "Пол", "Telegram", "ДМС",
+            "Сведения по ДМС", "Электронная трудовая книжка", "Отгулы", "Тайный Санта",
+            "Чат дней рождения", "Отзыв о компании", "Опрос", "Согласие на ПДн в КЭДО",
+            "Оценка эффективности", "Комментарий к оценке", "Заметки HR",
+            "Чек-лист, %", "План развития, %",
         ]
         if can_export_compensation:
             headers.extend(["Оклад", "Месячная премия", "Квартальная премия"])
@@ -1100,10 +1110,10 @@ class EmployeeExportView(APIView):
         for employee in queryset:
             row = [
                 employee.employee_number,
-                employee.user.last_name,
-                employee.user.first_name,
-                employee.user.email,
-                employee.user.department.name if employee.user.department else "",
+                employee.user.last_name if employee.user_id else employee.last_name,
+                employee.user.first_name if employee.user_id else employee.first_name,
+                employee.user.email if employee.user_id else employee.email,
+                (employee.user.department.name if employee.user.department else "") if employee.user_id else (employee.department.name if employee.department else ""),
                 employee.position.name if employee.position else "",
                 employee.grade,
                 employee.birth_date.isoformat() if employee.birth_date else "",
@@ -1112,6 +1122,22 @@ class EmployeeExportView(APIView):
                 employee.get_status_display(),
                 employee.education,
                 employee.competencies,
+                employee.location,
+                employee.legal_entity,
+                employee.get_gender_display() if employee.gender else "",
+                employee.telegram,
+                employee.dms_status,
+                employee.dms_details,
+                employee.electronic_employment_record,
+                employee.time_off_balance,
+                employee.participates_secret_santa,
+                employee.birthday_chat_member,
+                employee.company_review_left,
+                employee.survey_completed,
+                employee.personal_data_consent_kedo,
+                employee.performance_rating,
+                employee.performance_notes,
+                employee.hr_notes,
                 employee.checklist_score,
                 employee.development_progress,
             ]
@@ -1147,7 +1173,7 @@ class EmployeeExportView(APIView):
 
 
 class EmployeeImportView(APIView):
-    permission_classes = [IsHcmUser]
+    permission_classes = [IsAdministrator]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def get(self, request):
@@ -1213,6 +1239,14 @@ class EmployeeImportView(APIView):
         mapping = request.data.get("mapping", {})
         batch_id = request.data.get("batch_id")
         batch = get_object_or_404(HrImportBatch, pk=batch_id) if batch_id else None
+        if request.data.get("create_departments"):
+            if not batch:
+                raise ValidationError({"batch_id": "Загрузите файл ещё раз"})
+            return Response(create_import_departments(rows, mapping, request, batch.pk))
+        if request.data.get("create_positions"):
+            if not batch:
+                raise ValidationError({"batch_id": "Загрузите файл ещё раз"})
+            return Response(create_import_positions(rows, mapping, request, batch.pk))
         if request.data.get("commit"):
             if not batch:
                 raise ValidationError({"batch_id": "Загрузите файл ещё раз"})
@@ -1304,10 +1338,10 @@ class EmployeeDetailView(generics.RetrieveUpdateAPIView):
     permission_classes = [IsHcmRegistryUser]
 
     def get_queryset(self):
-        queryset = EmployeeProfile.objects.select_related("user__department", "position")
+        queryset = EmployeeProfile.objects.select_related("user", "department", "position")
         if self.request.user.role == User.Role.LEADER:
             queryset = (
-                queryset.filter(user__department_id=self.request.user.department_id)
+                queryset.filter(department_id=self.request.user.department_id)
                 if self.request.user.department_id else queryset.none()
             )
         return queryset
@@ -1319,7 +1353,7 @@ class EmployeeDetailView(generics.RetrieveUpdateAPIView):
         profile = self.get_object()
         before = {
             "status": profile.status,
-            "department_id": profile.user.department_id,
+            "department_id": profile.department_id,
             "position_id": profile.position_id,
         }
         serializer = self.get_serializer(profile, data=request.data, partial=request.method == "PATCH")
@@ -1332,12 +1366,12 @@ class EmployeeDetailView(generics.RetrieveUpdateAPIView):
             entity_id=profile.pk,
             action="updated",
             changes={
-                "employee_name": profile.user.get_full_name(),
+                "employee_name": str(profile),
                 "fields": changed_fields,
                 "status": {"before": before["status"], "after": profile.status}
                 if before["status"] != profile.status else None,
-                "department_id": {"before": before["department_id"], "after": profile.user.department_id}
-                if before["department_id"] != profile.user.department_id else None,
+                "department_id": {"before": before["department_id"], "after": profile.department_id}
+                if before["department_id"] != profile.department_id else None,
                 "position_id": {"before": before["position_id"], "after": profile.position_id}
                 if before["position_id"] != profile.position_id else None,
                 "compensation_changed": bool(
@@ -1353,10 +1387,10 @@ class EmployeeScopedMixin:
     permission_classes = [IsHcmRegistryUser]
 
     def get_employee(self):
-        queryset = EmployeeProfile.objects.select_related("user__department")
+        queryset = EmployeeProfile.objects.select_related("user", "department")
         if self.request.user.role == User.Role.LEADER:
             queryset = (
-                queryset.filter(user__department_id=self.request.user.department_id)
+                queryset.filter(department_id=self.request.user.department_id)
                 if self.request.user.department_id else queryset.none()
             )
         return get_object_or_404(queryset, pk=self.kwargs["employee_id"])
@@ -1410,10 +1444,10 @@ class EmployeeOnboardingView(APIView):
     permission_classes = [IsHcmRegistryUser]
 
     def get_employee(self, employee_id):
-        queryset = EmployeeProfile.objects.select_related("user__department", "position")
+        queryset = EmployeeProfile.objects.select_related("user", "department", "position")
         if self.request.user.role == User.Role.LEADER:
             queryset = (
-                queryset.filter(user__department_id=self.request.user.department_id)
+                queryset.filter(department_id=self.request.user.department_id)
                 if self.request.user.department_id else queryset.none()
             )
         return get_object_or_404(queryset, pk=employee_id)
@@ -2296,7 +2330,7 @@ class StaffPositionDetailView(generics.RetrieveUpdateDestroyAPIView):
     def destroy(self, request, *args, **kwargs):
         staff_position = self.get_object()
         filled_count = EmployeeProfile.objects.filter(
-            user__department=staff_position.department,
+            department=staff_position.department,
             position=staff_position.position,
             status__in=[EmployeeProfile.Status.EMPLOYED, EmployeeProfile.Status.PROBATION],
         ).count()
@@ -2340,7 +2374,7 @@ class HcmSummaryView(APIView):
         employees = EmployeeProfile.objects.all()
         if request.user.role == User.Role.LEADER:
             employees = (
-                employees.filter(user__department_id=request.user.department_id)
+                employees.filter(department_id=request.user.department_id)
                 if request.user.department_id else employees.none()
             )
         candidates = Candidate.objects.filter(hired_employee__isnull=True)
@@ -2363,11 +2397,11 @@ class HcmDashboardView(APIView):
     def get(self, request):
         today = date.today()
         onboarding = OnboardingPlan.objects.filter(status=OnboardingPlan.Status.ACTIVE).select_related(
-            "employee__user__department", "responsible"
+            "employee__department", "responsible"
         )
         probation = EmployeeProfile.objects.filter(
             status=EmployeeProfile.Status.PROBATION
-        ).select_related("user__department", "position")
+        ).select_related("department", "position")
         vacancies = Vacancy.objects.filter(status=Vacancy.Status.OPEN).select_related(
             "department", "position", "recruiter"
         ).prefetch_related("candidates")
@@ -2386,8 +2420,8 @@ class HcmDashboardView(APIView):
                 {
                     "id": plan.id,
                     "employee_id": plan.employee_id,
-                    "employee_name": plan.employee.user.get_full_name() or plan.employee.user.email,
-                    "department_name": getattr(plan.employee.user.department, "name", ""),
+                    "employee_name": str(plan.employee),
+                    "department_name": getattr(plan.employee.department, "name", ""),
                     "responsible_name": plan.responsible.get_full_name() if plan.responsible else "",
                     "due_date": plan.due_date,
                     "days_left": days_left,
@@ -2402,8 +2436,8 @@ class HcmDashboardView(APIView):
             probation_items.append(
                 {
                     "id": profile.id,
-                    "employee_name": profile.user.get_full_name() or profile.user.email,
-                    "department_name": getattr(profile.user.department, "name", ""),
+                    "employee_name": str(profile),
+                    "department_name": getattr(profile.department, "name", ""),
                     "position_name": getattr(profile.position, "name", ""),
                     "end_date": end_date,
                     "days_left": (end_date - today).days,

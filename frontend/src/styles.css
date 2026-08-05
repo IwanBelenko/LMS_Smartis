@@ -1507,7 +1507,9 @@ th { font-size: 0.72rem; text-transform: none; letter-spacing: 0.02em; }
   width: 34px; height: 1px; margin: 7px 0; display: block; flex: 0 0 1px;
   background: color-mix(in srgb, var(--foreground) 24%, var(--border));
 }
-.icon-rail__user { margin-top: auto; color: var(--muted); }
+.icon-rail__account { width: 100%; margin-top: auto; display: grid; justify-items: center; gap: 1px; }
+.icon-rail__account small { max-width: 52px; overflow: hidden; color: var(--muted); font-size: .52rem; line-height: 1; text-overflow: ellipsis; white-space: nowrap; }
+.icon-rail__user { color: var(--muted); }
 .icon-rail__user svg { width: 29px; height: 29px; stroke-width: 1.7; }
 
 .sidebar { left: calc(var(--icon-rail-width) + 8px); }
@@ -2241,6 +2243,14 @@ button.vacancy-card { padding: 13px; display: grid; align-content: center; gap: 
 .employee-import-mapping label > span { display: flex; align-items: center; justify-content: space-between; gap: 6px; color: var(--foreground); font-size: .68rem; }
 .employee-import-mapping label i { color: var(--brand-hover); font-size: .55rem; font-style: normal; font-weight: 650; }
 .employee-import-mapping select { min-height: 36px; padding: 7px 9px; border-radius: 6px; font-size: .7rem; }
+.employee-import-departments {
+  padding: 14px 16px; border: 1px solid #d9e7bf; border-radius: 9px;
+  display: flex; align-items: center; justify-content: space-between; gap: 18px; background: #f7faef;
+}
+.employee-import-departments > div { min-width: 0; display: grid; gap: 4px; }
+.employee-import-departments span { color: var(--foreground); font-size: .7rem; line-height: 1.45; }
+.employee-import-departments small { color: var(--muted); }
+.employee-import-departments .secondary-button { flex: 0 0 auto; }
 .employee-import-summary {
   border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
   display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -2504,9 +2514,16 @@ button.vacancy-card { padding: 13px; display: grid; align-content: center; gap: 
 .employee-development span { color: var(--muted); font-size: 0.78rem; }
 .employee-development .mini-progress { grid-column: 1 / -1; }
 .employee-competencies { grid-column: 1 / -1; }
+.employee-hr-details { grid-column: 1 / -1; }
 .employee-competencies > div:last-child { padding-top: 14px; display: flex; flex-wrap: wrap; gap: 7px; }
 .employee-competencies > div:last-child > span { padding: 5px 9px; border-radius: 5px; background: color-mix(in srgb, var(--brand) 14%, var(--surface)); font-size: 0.78rem; }
 .employee-compensation { grid-column: 1 / -1; }
+.hcm-form__section-title {
+  margin-top: 4px; padding: 12px 0 4px; border-top: 1px solid var(--border);
+  display: grid; gap: 3px;
+}
+.hcm-form__section-title strong { font-size: .9rem; }
+.hcm-form__section-title span { color: var(--muted); font-size: .68rem; }
 .employee-compensation dl { padding-top: 12px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .employee-compensation dl > div { padding: 10px 12px; border-left: 1px solid var(--border); display: grid; gap: 4px; }
 .employee-compensation dl > div:first-child { border-left: 0; }
@@ -2633,7 +2650,7 @@ button.vacancy-card { padding: 13px; display: grid; align-content: center; gap: 
 .organization-staff-list__main > svg { width: 16px; min-width: 16px; color: var(--muted); }
 .organization-staff-list small { color: var(--muted); font-size: .7rem; }
 .organization-staff-editor {
-  display: grid; grid-template-columns: minmax(180px, 1.25fr) minmax(110px, .7fr) minmax(110px, .7fr) auto;
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
   align-items: end; gap: 8px;
 }
 .organization-staff-editor > label { gap: 4px; font-size: .62rem; }
@@ -2646,6 +2663,9 @@ button.vacancy-card { padding: 13px; display: grid; align-content: center; gap: 
 .organization-staff-editor > label button:disabled { opacity: .45; cursor: default; }
 .organization-staff-editor > label button svg { width: 14px; }
 .organization-staff-editor > label input { min-height: 36px; padding: 6px; border-right: 0; border-left: 0; border-radius: 0; text-align: center; }
+.organization-staff-editor > label input[type="number"] { appearance: textfield; -moz-appearance: textfield; }
+.organization-staff-editor > label input[type="number"]::-webkit-inner-spin-button,
+.organization-staff-editor > label input[type="number"]::-webkit-outer-spin-button { margin: 0; -webkit-appearance: none; }
 .organization-staff-editor__fact {
   min-height: 56px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px;
   display: grid; align-content: center; gap: 3px; background: var(--surface);
@@ -2654,7 +2674,9 @@ button.vacancy-card { padding: 13px; display: grid; align-content: center; gap: 
 .organization-staff-editor__fact strong { font-size: .88rem; }
 .organization-staff-editor__fact--free { background: color-mix(in srgb, var(--warning) 8%, var(--surface)); }
 .organization-staff-editor__fact--free strong { color: var(--warning); }
-.organization-staff-editor__save { min-height: 36px; white-space: nowrap; }
+.organization-staff-editor__save { min-height: 56px; white-space: nowrap; }
+.organization-staff-editor__save:disabled { cursor: default; }
+.organization-staff-editor__save--busy:disabled { cursor: wait; }
 .organization-staff-actions {
   padding-top: 8px; border-top: 1px dashed var(--border); display: flex; align-items: center; justify-content: space-between; gap: 10px;
 }
@@ -3289,6 +3311,7 @@ button.vacancy-card { padding: 13px; display: grid; align-content: center; gap: 
   .employee-import-file { grid-template-columns: 34px minmax(0, 1fr); }
   .employee-import-file .text-button { grid-column: 2; justify-self: start; }
   .employee-import-mapping > div:last-child { grid-template-columns: 1fr; }
+  .employee-import-departments { align-items: stretch; flex-direction: column; }
   .employee-import-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .employee-import-summary > div:nth-child(3) { border-top: 1px solid var(--border); border-left: 0; }
   .employee-import-summary > div:nth-child(4) { border-top: 1px solid var(--border); }

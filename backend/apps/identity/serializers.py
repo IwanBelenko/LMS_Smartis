@@ -84,6 +84,10 @@ def _automatic_employee_number(user):
 
 def _save_employee_profile(user, position_marker, employee_number):
     if position_marker is serializers.empty and not employee_number:
+        try:
+            user.employee_profile.save()
+        except EmployeeProfile.DoesNotExist:
+            pass
         return
     try:
         profile = user.employee_profile

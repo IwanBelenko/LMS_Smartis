@@ -116,7 +116,7 @@ class OrganizationDepartmentSerializer(serializers.ModelSerializer):
         return super().create(validated_data)
 
     def get_employee_count(self, obj):
-        return obj.members.filter(employee_profile__status__in=[
+        return obj.employee_profiles.filter(status__in=[
             EmployeeProfile.Status.EMPLOYED,
             EmployeeProfile.Status.PROBATION,
         ]).count()
@@ -131,7 +131,7 @@ class OrganizationDepartmentSerializer(serializers.ModelSerializer):
         rows = list(obj.staff_positions.filter(is_active=True).select_related("position"))
         for row in rows:
             row.filled_count = EmployeeProfile.objects.filter(
-                user__department=obj,
+                department=obj,
                 position=row.position,
                 status__in=[EmployeeProfile.Status.EMPLOYED, EmployeeProfile.Status.PROBATION],
             ).count()
@@ -166,7 +166,7 @@ class StaffPositionSerializer(serializers.ModelSerializer):
             })
         if department and position:
             filled_count = EmployeeProfile.objects.filter(
-                user__department=department,
+                department=department,
                 position=position,
                 status__in=[EmployeeProfile.Status.EMPLOYED, EmployeeProfile.Status.PROBATION],
             ).count()
@@ -181,7 +181,7 @@ class StaffPositionSerializer(serializers.ModelSerializer):
 
     def get_filled_count(self, obj):
         return EmployeeProfile.objects.filter(
-            user__department=obj.department,
+            department=obj.department,
             position=obj.position,
             status__in=[EmployeeProfile.Status.EMPLOYED, EmployeeProfile.Status.PROBATION],
         ).count()
@@ -194,14 +194,15 @@ class StaffPositionSerializer(serializers.ModelSerializer):
 
 
 class EmployeeProfileSerializer(serializers.ModelSerializer):
-    full_name = serializers.CharField(source="user.get_full_name", read_only=True)
-    first_name = serializers.CharField(source="user.first_name", read_only=True)
-    last_name = serializers.CharField(source="user.last_name", read_only=True)
-    email = serializers.EmailField(source="user.email", read_only=True)
-    department = serializers.IntegerField(source="user.department_id", read_only=True)
-    department_name = serializers.CharField(source="user.department.name", read_only=True)
+    full_name = serializers.SerializerMethodField()
+    first_name = serializers.SerializerMethodField()
+    last_name = serializers.SerializerMethodField()
+    email = serializers.SerializerMethodField()
+    department = serializers.SerializerMethodField()
+    department_name = serializers.SerializerMethodField()
     position_name = serializers.CharField(source="position.name", read_only=True)
     status_label = serializers.CharField(source="get_status_display", read_only=True)
+    gender_label = serializers.CharField(source="get_gender_display", read_only=True)
     age = serializers.SerializerMethodField()
     tenure_years = serializers.SerializerMethodField()
     staff_position_note = serializers.SerializerMethodField()
@@ -213,21 +214,43 @@ class EmployeeProfileSerializer(serializers.ModelSerializer):
             "position", "position_name", "grade", "birth_date", "age", "hire_date", "tenure_years",
             "dismissal_date", "education", "competencies", "status", "status_label", "checklist_score",
             "development_progress", "salary_base", "monthly_bonus", "quarterly_bonus", "updated_at",
-            "staff_position_note",
+            "staff_position_note", "location", "legal_entity", "gender", "gender_label", "telegram",
+            "dms_status", "dms_details", "electronic_employment_record", "time_off_balance",
+            "participates_secret_santa", "birthday_chat_member", "company_review_left", "survey_completed",
+            "personal_data_consent_kedo", "performance_rating", "performance_notes", "hr_notes",
         ]
         read_only_fields = ["id", "updated_at"]
 
     def get_age(self, obj):
         return years_between(obj.birth_date, date.today())
 
+    def get_full_name(self, obj):
+        return str(obj)
+
+    def get_first_name(self, obj):
+        return obj.user.first_name if obj.user_id else obj.first_name
+
+    def get_last_name(self, obj):
+        return obj.user.last_name if obj.user_id else obj.last_name
+
+    def get_email(self, obj):
+        return obj.user.email if obj.user_id else obj.email
+
+    def get_department(self, obj):
+        return obj.user.department_id if obj.user_id else obj.department_id
+
+    def get_department_name(self, obj):
+        department = obj.user.department if obj.user_id else obj.department
+        return department.name if department else None
+
     def get_tenure_years(self, obj):
         return years_between(obj.hire_date, obj.dismissal_date or date.today())
 
     def get_staff_position_note(self, obj):
-        if not obj.user.department_id or not obj.position_id:
+        if not obj.department_id or not obj.position_id:
             return ""
         return StaffPosition.objects.filter(
-            department_id=obj.user.department_id,
+            department_id=obj.department_id,
             position_id=obj.position_id,
             is_active=True,
         ).values_list("note", flat=True).first() or ""
@@ -251,11 +274,10 @@ class EmployeeProfileSerializer(serializers.ModelSerializer):
 
 class EmployeeProfileWriteSerializer(serializers.ModelSerializer):
     generate_password = serializers.BooleanField(write_only=True, required=False, default=False)
-    email = serializers.EmailField(source="user.email")
-    first_name = serializers.CharField(source="user.first_name", max_length=150)
-    last_name = serializers.CharField(source="user.last_name", max_length=150)
+    email = serializers.EmailField(allow_blank=True, required=False)
+    first_name = serializers.CharField(max_length=150)
+    last_name = serializers.CharField(max_length=150)
     department = serializers.PrimaryKeyRelatedField(
-        source="user.department",
         queryset=Department.objects.filter(is_active=True),
         allow_null=True,
         required=False,
@@ -267,16 +289,27 @@ class EmployeeProfileWriteSerializer(serializers.ModelSerializer):
             "email", "first_name", "last_name", "employee_number", "department", "position",
             "grade", "birth_date", "hire_date", "dismissal_date", "education", "competencies", "status",
             "checklist_score", "development_progress", "salary_base", "monthly_bonus", "quarterly_bonus",
-            "generate_password",
+            "location", "legal_entity", "gender", "telegram", "dms_status", "dms_details",
+            "electronic_employment_record", "time_off_balance", "participates_secret_santa",
+            "birthday_chat_member", "company_review_left", "survey_completed", "personal_data_consent_kedo",
+            "performance_rating", "performance_notes", "hr_notes", "generate_password",
         ]
+        extra_kwargs = {"employee_number": {"allow_blank": True, "allow_null": True, "required": False}}
 
     def validate_email(self, value):
+        if not value:
+            return ""
         value = validate_corporate_email(value)
         queryset = User.objects.filter(email__iexact=value)
         if self.instance:
             queryset = queryset.exclude(pk=self.instance.user_id)
         if queryset.exists():
             raise serializers.ValidationError("Пользователь с таким email уже существует")
+        profile_queryset = EmployeeProfile.objects.filter(email__iexact=value)
+        if self.instance:
+            profile_queryset = profile_queryset.exclude(pk=self.instance.pk)
+        if profile_queryset.exists():
+            raise serializers.ValidationError("Сотрудник с таким email уже существует")
         return value
 
     def validate(self, attrs):
@@ -298,19 +331,25 @@ class EmployeeProfileWriteSerializer(serializers.ModelSerializer):
 
     @transaction.atomic
     def create(self, validated_data):
-        user_data = validated_data.pop("user")
         should_generate = validated_data.pop("generate_password", False)
-        temporary_password = generate_temporary_password() if should_generate else None
-        user = User.objects.create_user(
-            password=temporary_password,
-            role=User.Role.EMPLOYEE,
-            status=User.Status.ACTIVE if temporary_password else User.Status.INVITED,
-            **user_data,
-        )
-        if not temporary_password:
-            user.set_unusable_password()
-            user.save(update_fields=["password"])
-            Invitation.objects.create(user=user, created_by=self.context["request"].user)
+        email = validated_data.get("email", "")
+        user = None
+        temporary_password = None
+        if email:
+            temporary_password = generate_temporary_password() if should_generate else None
+            user = User.objects.create_user(
+                email=email,
+                first_name=validated_data.get("first_name", ""),
+                last_name=validated_data.get("last_name", ""),
+                department=validated_data.get("department"),
+                password=temporary_password,
+                role=User.Role.EMPLOYEE,
+                status=User.Status.ACTIVE if temporary_password else User.Status.INVITED,
+            )
+            if not temporary_password:
+                user.set_unusable_password()
+                user.save(update_fields=["password"])
+                Invitation.objects.create(user=user, created_by=self.context["request"].user)
         profile = EmployeeProfile.objects.create(user=user, **validated_data)
         if temporary_password:
             profile.temporary_password = temporary_password
@@ -318,19 +357,46 @@ class EmployeeProfileWriteSerializer(serializers.ModelSerializer):
 
     @transaction.atomic
     def update(self, instance, validated_data):
-        old_department = instance.user.department
+        should_generate = validated_data.pop("generate_password", False)
+        old_department = instance.department
         old_position = instance.position
         old_status = instance.status
-        user_data = validated_data.pop("user", {})
-        for field, value in user_data.items():
-            setattr(instance.user, field, value)
-        if user_data:
-            instance.user.save(update_fields=list(user_data))
+        email = validated_data.get("email", instance.email)
+        if instance.user_id:
+            user_updates = {}
+            for field in ("first_name", "last_name", "department"):
+                if field in validated_data:
+                    user_updates[field] = validated_data[field]
+            if email:
+                user_updates["email"] = email
+            else:
+                validated_data.pop("email", None)
+            for field, value in user_updates.items():
+                setattr(instance.user, field, value)
+            if user_updates:
+                instance.user.save(update_fields=list(user_updates))
+        elif email:
+            temporary_password = generate_temporary_password() if should_generate else None
+            instance.user = User.objects.create_user(
+                email=email,
+                first_name=validated_data.get("first_name", instance.first_name),
+                last_name=validated_data.get("last_name", instance.last_name),
+                department=validated_data.get("department", instance.department),
+                password=temporary_password,
+                role=User.Role.EMPLOYEE,
+                status=User.Status.ACTIVE if temporary_password else User.Status.INVITED,
+            )
+            if not temporary_password:
+                instance.user.set_unusable_password()
+                instance.user.save(update_fields=["password"])
+                Invitation.objects.create(user=instance.user, created_by=self.context["request"].user)
+            elif temporary_password:
+                instance.temporary_password = temporary_password
         instance = super().update(instance, validated_data)
         actor = self.context.get("request").user if self.context.get("request") else None
         change_source = self.context.get("change_source", "")
         today = self.context.get("change_effective_date") or date.today()
-        new_department = instance.user.department
+        new_department = instance.department
         if old_department != new_department:
             EmploymentEvent.objects.create(
                 employee=instance,
@@ -353,9 +419,10 @@ class EmployeeProfileWriteSerializer(serializers.ModelSerializer):
             if not instance.dismissal_date:
                 instance.dismissal_date = today
                 instance.save(update_fields=["dismissal_date", "updated_at"])
-            instance.user.status = User.Status.BLOCKED
-            instance.user.save(update_fields=["status"])
-            Token.objects.filter(user=instance.user).delete()
+            if instance.user_id:
+                instance.user.status = User.Status.BLOCKED
+                instance.user.save(update_fields=["status"])
+                Token.objects.filter(user=instance.user).delete()
             EmploymentEvent.objects.create(
                 employee=instance,
                 event_type=EmploymentEvent.Type.DISMISSED,
@@ -409,9 +476,9 @@ class EmployeeLearningSerializer(serializers.ModelSerializer):
 
 class EmployeeDocumentSerializer(serializers.ModelSerializer):
     employee = serializers.PrimaryKeyRelatedField(read_only=True)
-    employee_name = serializers.CharField(source="employee.user.get_full_name", read_only=True)
-    employee_email = serializers.CharField(source="employee.user.email", read_only=True)
-    department_name = serializers.CharField(source="employee.user.department.name", read_only=True)
+    employee_name = serializers.CharField(source="employee.__str__", read_only=True)
+    employee_email = serializers.CharField(source="employee.email", read_only=True)
+    department_name = serializers.CharField(source="employee.department.name", read_only=True)
     status_label = serializers.CharField(source="get_status_display", read_only=True)
     uploaded_by_name = serializers.CharField(source="uploaded_by.get_full_name", read_only=True)
     file = serializers.FileField(write_only=True, required=False)
@@ -481,9 +548,9 @@ class AbsenceRequestSerializer(serializers.ModelSerializer):
         queryset=EmployeeProfile.objects.select_related("user"),
         required=False,
     )
-    employee_name = serializers.CharField(source="employee.user.get_full_name", read_only=True)
-    employee_email = serializers.CharField(source="employee.user.email", read_only=True)
-    department_name = serializers.CharField(source="employee.user.department.name", read_only=True)
+    employee_name = serializers.CharField(source="employee.__str__", read_only=True)
+    employee_email = serializers.CharField(source="employee.email", read_only=True)
+    department_name = serializers.CharField(source="employee.department.name", read_only=True)
     absence_type_label = serializers.CharField(source="get_absence_type_display", read_only=True)
     status_label = serializers.CharField(source="get_status_display", read_only=True)
     reviewer_name = serializers.CharField(source="reviewer.get_full_name", read_only=True)
@@ -520,7 +587,7 @@ class AbsenceRequestSerializer(serializers.ModelSerializer):
         return (
             user.role == User.Role.LEADER
             and user.department_id
-            and user.department_id == obj.employee.user.department_id
+            and user.department_id == obj.employee.department_id
         )
 
     def get_can_cancel(self, obj):
@@ -609,9 +676,9 @@ class PerformanceScoreSerializer(serializers.ModelSerializer):
 
 
 class PerformanceReviewSerializer(serializers.ModelSerializer):
-    employee_name = serializers.CharField(source="employee.user.get_full_name", read_only=True)
-    employee_email = serializers.CharField(source="employee.user.email", read_only=True)
-    department_name = serializers.CharField(source="employee.user.department.name", read_only=True)
+    employee_name = serializers.CharField(source="employee.__str__", read_only=True)
+    employee_email = serializers.CharField(source="employee.email", read_only=True)
+    department_name = serializers.CharField(source="employee.department.name", read_only=True)
     position_name = serializers.CharField(source="employee.position.name", read_only=True)
     reviewer_name = serializers.CharField(source="reviewer.get_full_name", read_only=True)
     cycle_title = serializers.CharField(source="cycle.title", read_only=True)
