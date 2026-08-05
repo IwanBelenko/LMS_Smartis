@@ -851,6 +851,115 @@ class PeopleApiTests(TestCase):
         self.assertEqual(staff.json()["vacancies"], 2)
         self.assertTrue(StaffPosition.objects.filter(department=self.department).exists())
 
+    def test_hr_can_select_active_user_without_employee_profile_as_department_manager(self):
+        manager = User.objects.create_user(
+            email="manager.option@smartis.local",
+            password="StrongPassword123!",
+            first_name="Альбина",
+            last_name="Исаева",
+            status=User.Status.ACTIVE,
+            role=User.Role.ADMIN,
+            department=self.department,
+        )
+        self.client.force_authenticate(self.hr)
+
+        options = self.client.get("/api/v1/org/manager-options/")
+        updated = self.client.patch(
+            f"/api/v1/org/departments/{self.department.pk}/",
+            {"manager": manager.pk},
+            format="json",
+        )
+
+        self.assertEqual(options.status_code, 200)
+        self.assertIn(manager.pk, [item["id"] for item in options.json()])
+        self.assertEqual(updated.status_code, 200)
+        self.assertEqual(updated.json()["manager"], manager.pk)
+
+    def test_staff_position_accepts_long_comment_and_shows_it_in_employee_card(self):
+        note = "Отвечает за HR-систему, подбор, онбординг и развитие. " * 8
+        staff = StaffPosition.objects.create(
+            department=self.department,
+            position=self.position,
+            headcount=1,
+            note=note,
+        )
+        self.client.force_authenticate(self.hr)
+
+        response = self.client.get(f"/api/v1/employees/{self.profile.pk}/")
+
+        self.assertGreater(len(staff.note), 240)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["staff_position_note"], note)
+
+    def test_hr_deletes_empty_department_with_its_empty_staff_positions(self):
+        empty_department = Department.objects.create(name="Временный отдел", code="temporary")
+        staff = StaffPosition.objects.create(
+            department=empty_department,
+            position=self.position,
+            headcount=1,
+        )
+        self.client.force_authenticate(self.hr)
+
+        response = self.client.delete(f"/api/v1/org/departments/{empty_department.pk}/")
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(Department.objects.filter(pk=empty_department.pk).exists())
+        self.assertFalse(StaffPosition.objects.filter(pk=staff.pk).exists())
+        self.assertTrue(AuditEvent.objects.filter(
+            actor=self.hr,
+            entity_type="department",
+            entity_id=str(empty_department.pk),
+            action="deleted",
+        ).exists())
+
+    def test_department_with_members_cannot_be_deleted(self):
+        self.client.force_authenticate(self.hr)
+
+        response = self.client.delete(f"/api/v1/org/departments/{self.department.pk}/")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertTrue(Department.objects.filter(pk=self.department.pk).exists())
+
+    def test_hr_deletes_only_unfilled_staff_position_without_open_vacancy(self):
+        removable = StaffPosition.objects.create(
+            department=self.other_department,
+            position=self.position,
+            headcount=1,
+        )
+        filled = StaffPosition.objects.create(
+            department=self.department,
+            position=self.position,
+            headcount=2,
+        )
+        self.client.force_authenticate(self.hr)
+
+        removed = self.client.delete(f"/api/v1/org/staff-positions/{removable.pk}/")
+        blocked = self.client.delete(f"/api/v1/org/staff-positions/{filled.pk}/")
+
+        self.assertEqual(removed.status_code, 204)
+        self.assertEqual(blocked.status_code, 400)
+        self.assertFalse(StaffPosition.objects.filter(pk=removable.pk).exists())
+        self.assertTrue(StaffPosition.objects.filter(pk=filled.pk).exists())
+
+    def test_position_can_be_created_and_added_to_department_staff_atomically(self):
+        self.client.force_authenticate(self.hr)
+
+        response = self.client.post(
+            "/api/v1/positions/",
+            {
+                "name": "HR business partner",
+                "department": self.department.pk,
+                "headcount": 2,
+                "note": "Отвечает за полный цикл работы с персоналом",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        staff = StaffPosition.objects.get(position_id=response.json()["id"], department=self.department)
+        self.assertEqual(staff.headcount, 2)
+        self.assertEqual(staff.note, "Отвечает за полный цикл работы с персоналом")
+
     def test_non_hcm_roles_cannot_open_organization(self):
         for user in (self.employee, self.author, self.leader):
             self.client.force_authenticate(user)

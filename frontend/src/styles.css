@@ -434,6 +434,13 @@ svg { width: 20px; height: 20px; flex: 0 0 auto; }
 .user-compensation-access input { width: 17px; min-height: 17px; accent-color: var(--brand); }
 .user-compensation-access span { display: grid; gap: 2px; color: var(--foreground); }
 .user-compensation-access small { color: var(--muted); font-size: .68rem; font-weight: 400; line-height: 1.35; }
+.user-employee-link {
+  padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px;
+  display: flex; align-items: center; gap: 10px; background: var(--surface-soft);
+}
+.user-employee-link > svg { color: var(--brand-hover); }
+.user-employee-link span { display: grid; gap: 2px; }
+.user-employee-link small { color: var(--muted); font-size: .68rem; font-weight: 400; }
 label { display: grid; gap: 6px; color: var(--muted); font-size: 0.85rem; font-weight: 650; }
 input, select, textarea {
   width: 100%; min-height: 42px; padding: 9px 11px; border: 1px solid var(--border);
@@ -460,8 +467,8 @@ table { width: 100%; border-collapse: collapse; }
 th, td { padding: 14px 16px; border-bottom: 1px solid var(--border); text-align: left; }
 th { color: var(--muted); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; }
 tbody tr:last-child td { border-bottom: 0; }
-td:first-child { display: grid; gap: 3px; }
-td:first-child span { color: var(--muted); font-size: 0.8rem; }
+td:first-child > strong, td:first-child > span { display: block; }
+td:first-child > span { margin-top: 3px; color: var(--muted); font-size: 0.8rem; }
 .status {
   display: inline-flex; padding: 5px 9px; border-radius: 999px;
   background: var(--surface-soft); font-size: 0.8rem; font-weight: 700;
@@ -1044,6 +1051,17 @@ td:first-child span { color: var(--muted); font-size: 0.8rem; }
 .user-access-state p { color: var(--muted); font-size: .7rem; }
 .hcm-form > footer.user-access-actions { justify-content: space-between; }
 .user-access-actions > div { display: flex; align-items: center; gap: 8px; }
+.delete-text-button { min-height: 32px; display: inline-flex; align-items: center; gap: 5px; }
+.delete-text-button svg { width: 15px; height: 15px; }
+.delete-confirmation-dialog { width: min(500px, 100%); }
+.delete-confirmation-warning {
+  padding: 13px; border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--border)); border-radius: 8px;
+  display: flex; align-items: flex-start; gap: 10px; background: color-mix(in srgb, var(--danger) 7%, var(--surface));
+}
+.delete-confirmation-warning svg { width: 20px; min-width: 20px; color: var(--danger); }
+.delete-confirmation-warning p { color: var(--muted); font-size: .74rem; line-height: 1.5; }
+.destructive-form-footer { justify-content: space-between !important; }
+.destructive-form-footer > div { display: flex; align-items: center; gap: 8px; }
 .temporary-password-dialog, .password-change-dialog { width: min(560px, 100%); }
 .temporary-password-account {
   padding: 11px 12px; border: 1px solid var(--border); border-radius: 8px;
@@ -2275,7 +2293,7 @@ button.vacancy-card { padding: 13px; display: grid; align-content: center; gap: 
 .learning-import-note strong { font-size: .75rem; }
 .learning-import-note p { color: var(--muted); font-size: .67rem; line-height: 1.45; }
 .hcm-form { display: grid; gap: 16px; }
-.hcm-form__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.hcm-form__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 12px; }
 .hcm-form__wide { grid-column: 1 / -1; }
 .hcm-form textarea { min-height: 78px; }
 .reference-field { min-width: 0; display: grid; align-content: start; gap: 5px; }
@@ -2368,7 +2386,7 @@ button.vacancy-card { padding: 13px; display: grid; align-content: center; gap: 
   .candidate-stage-settings__list { max-height: 260px; }
 }
 .hcm-form > footer {
-  margin: 0 -20px -20px; padding: 14px 20px 20px; position: sticky; bottom: -20px;
+  margin: 0 -20px -20px; padding: 18px 20px 26px; position: sticky; bottom: -20px;
   border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 8px;
   background: var(--surface);
 }
@@ -2479,6 +2497,8 @@ button.vacancy-card { padding: 13px; display: grid; align-content: center; gap: 
 .employee-details > div { min-width: 0; padding: 11px 8px; border-bottom: 1px solid var(--border); display: grid; gap: 4px; }
 .employee-details dt { color: var(--muted); font-size: 0.72rem; }
 .employee-details dd { margin: 0; overflow: hidden; font-size: 0.88rem; text-overflow: ellipsis; }
+.employee-details > .employee-details__wide { grid-column: 1 / -1; }
+.employee-details > .employee-details__wide dd { overflow: visible; line-height: 1.5; white-space: pre-wrap; }
 .employee-development { display: grid; gap: 18px; }
 .employee-development > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 7px; }
 .employee-development span { color: var(--muted); font-size: 0.78rem; }
@@ -2616,9 +2636,10 @@ button.vacancy-card { padding: 13px; display: grid; align-content: center; gap: 
 }
 .organization-staff-list__vacancy:hover { border-color: var(--brand); color: var(--brand-hover); }
 .organization-staff-list__opened {
-  padding: 5px 7px; border-radius: 5px; background: color-mix(in srgb, var(--brand) 14%, var(--surface));
-  color: var(--brand-hover); font-size: .67rem; font-weight: 700;
+  padding: 5px 7px; border: 0; border-radius: 5px; background: color-mix(in srgb, var(--brand) 14%, var(--surface));
+  color: var(--brand-hover); font-size: .67rem; font-weight: 700; cursor: pointer;
 }
+.organization-staff-list__opened:hover { background: color-mix(in srgb, var(--danger) 10%, var(--surface)); color: var(--danger); }
 .organization-staff-list__onboarding {
   min-height: 29px; padding: 5px 7px; border: 0; border-radius: 5px;
   display: flex; align-items: center; gap: 5px; background: transparent;

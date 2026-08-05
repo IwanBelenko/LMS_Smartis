@@ -10,7 +10,7 @@ from django.utils import timezone
 from rest_framework.authtoken.models import Token
 from rest_framework.test import APIClient
 
-from apps.people.models import AuditEvent
+from apps.people.models import AuditEvent, EmployeeProfile, Position
 from .models import Department, Invitation, User
 
 
@@ -120,6 +120,33 @@ class IdentityApiTests(TestCase):
         self.assertEqual(user.status, User.Status.ACTIVE)
         self.assertFalse(Invitation.objects.filter(user=user).exists())
         self.assertEqual(len(mail.outbox), 0)
+
+    def test_administrator_links_existing_user_to_employee_from_user_card(self):
+        position = Position.objects.create(name="Руководитель HR")
+        user = User.objects.create_user(
+            email="hr.manager@test.local",
+            password="StrongPassword123!",
+            first_name="Альбина",
+            status=User.Status.ACTIVE,
+        )
+        self.authenticate()
+
+        response = self.client.patch(
+            f"/api/v1/users/{user.pk}/",
+            {
+                "department": self.department.pk,
+                "position": position.pk,
+                "employee_number": "",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        profile = EmployeeProfile.objects.get(user=user)
+        self.assertEqual(profile.position, position)
+        self.assertTrue(profile.employee_number.startswith("AUTO-"))
+        self.assertEqual(response.json()["employee_profile_id"], profile.pk)
+        self.assertEqual(response.json()["position_name"], "Руководитель HR")
 
     def test_administrator_generates_new_password_for_existing_user(self):
         employee = User.objects.create_user(
@@ -385,6 +412,45 @@ class IdentityApiTests(TestCase):
             format="json",
         )
         self.assertEqual(demoted.status_code, 400)
+
+    def test_administrator_deletes_user_and_linked_employee_profile(self):
+        position = Position.objects.create(name="Удаляемая должность")
+        employee = User.objects.create_user(
+            email="delete.me@test.local",
+            password="StrongPassword123!",
+            status=User.Status.ACTIVE,
+        )
+        profile = EmployeeProfile.objects.create(
+            user=employee,
+            employee_number="DELETE-001",
+            position=position,
+        )
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.delete(f"/api/v1/users/{employee.pk}/")
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(User.objects.filter(pk=employee.pk).exists())
+        self.assertFalse(EmployeeProfile.objects.filter(pk=profile.pk).exists())
+        self.assertTrue(AuditEvent.objects.filter(
+            actor=self.admin,
+            entity_type="user",
+            entity_id=str(employee.pk),
+            action="deleted",
+        ).exists())
+
+    def test_administrator_cannot_delete_self_or_last_active_admin(self):
+        self.client.force_authenticate(self.admin)
+        self.assertEqual(self.client.delete(f"/api/v1/users/{self.admin.pk}/").status_code, 400)
+
+        second_admin = User.objects.create_user(
+            email="second.admin@test.local",
+            password="StrongPassword123!",
+            role=User.Role.ADMIN,
+            status=User.Status.ACTIVE,
+        )
+        self.assertEqual(self.client.delete(f"/api/v1/users/{second_admin.pk}/").status_code, 204)
+        self.assertTrue(User.objects.filter(pk=self.admin.pk).exists())
 
     @override_settings(CORPORATE_EMAIL_DOMAINS=["smartis.bi"])
     def test_user_creation_rejects_non_corporate_email_when_domain_is_configured(self):

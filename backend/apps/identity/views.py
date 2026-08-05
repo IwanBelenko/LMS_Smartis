@@ -74,7 +74,9 @@ class DepartmentListCreateView(generics.ListCreateAPIView):
 
 
 class UserListCreateView(generics.ListCreateAPIView):
-    queryset = User.objects.select_related("department").order_by("last_name", "first_name", "email")
+    queryset = User.objects.select_related(
+        "department", "employee_profile__position",
+    ).order_by("last_name", "first_name", "email")
     permission_classes = [IsAdministrator]
 
     def get_serializer_class(self):
@@ -136,8 +138,8 @@ class UserGeneratePasswordView(APIView):
         })
 
 
-class UserDetailView(generics.RetrieveUpdateAPIView):
-    queryset = User.objects.select_related("department")
+class UserDetailView(generics.RetrieveUpdateDestroyAPIView):
+    queryset = User.objects.select_related("department", "employee_profile__position")
     permission_classes = [IsAdministrator]
 
     def get_serializer_class(self):
@@ -178,6 +180,40 @@ class UserDetailView(generics.RetrieveUpdateAPIView):
             request=request,
         )
         return Response(UserSerializer(user).data)
+
+    @transaction.atomic
+    def destroy(self, request, *args, **kwargs):
+        user = self.get_object()
+        if user.pk == request.user.pk:
+            return Response(
+                {"detail": "Нельзя удалить собственную учётную запись"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if (
+            user.role == User.Role.ADMIN
+            and user.status == User.Status.ACTIVE
+            and not User.objects.filter(
+                role=User.Role.ADMIN,
+                status=User.Status.ACTIVE,
+            ).exclude(pk=user.pk).exists()
+        ):
+            return Response(
+                {"detail": "В системе должен остаться хотя бы один активный администратор"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        user_id = user.pk
+        email = user.email
+        employee_profile_id = user.employee_profile.pk if hasattr(user, "employee_profile") else None
+        record_audit(
+            actor=request.user,
+            entity_type="user",
+            entity_id=user_id,
+            action="deleted",
+            changes={"email": email, "employee_profile_id": employee_profile_id},
+            request=request,
+        )
+        user.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class UserBlockView(APIView):

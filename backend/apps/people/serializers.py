@@ -54,6 +54,7 @@ class PositionSerializer(serializers.ModelSerializer):
     class Meta:
         model = Position
         fields = ["id", "name", "is_active"]
+        extra_kwargs = {"name": {"validators": []}}
 
     def validate_name(self, value):
         value = value.strip()
@@ -152,6 +153,18 @@ class StaffPositionSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["id"]
 
+    def validate(self, attrs):
+        department = attrs.get("department", getattr(self.instance, "department", None))
+        position = attrs.get("position", getattr(self.instance, "position", None))
+        queryset = StaffPosition.objects.filter(department=department, position=position)
+        if self.instance:
+            queryset = queryset.exclude(pk=self.instance.pk)
+        if department and position and queryset.exists():
+            raise serializers.ValidationError({
+                "position": "Эта должность уже есть в штате отдела — откройте её строку для редактирования",
+            })
+        return attrs
+
     def get_filled_count(self, obj):
         return EmployeeProfile.objects.filter(
             user__department=obj.department,
@@ -177,6 +190,7 @@ class EmployeeProfileSerializer(serializers.ModelSerializer):
     status_label = serializers.CharField(source="get_status_display", read_only=True)
     age = serializers.SerializerMethodField()
     tenure_years = serializers.SerializerMethodField()
+    staff_position_note = serializers.SerializerMethodField()
 
     class Meta:
         model = EmployeeProfile
@@ -185,6 +199,7 @@ class EmployeeProfileSerializer(serializers.ModelSerializer):
             "position", "position_name", "grade", "birth_date", "age", "hire_date", "tenure_years",
             "dismissal_date", "education", "competencies", "status", "status_label", "checklist_score",
             "development_progress", "salary_base", "monthly_bonus", "quarterly_bonus", "updated_at",
+            "staff_position_note",
         ]
         read_only_fields = ["id", "updated_at"]
 
@@ -193,6 +208,15 @@ class EmployeeProfileSerializer(serializers.ModelSerializer):
 
     def get_tenure_years(self, obj):
         return years_between(obj.hire_date, obj.dismissal_date or date.today())
+
+    def get_staff_position_note(self, obj):
+        if not obj.user.department_id or not obj.position_id:
+            return ""
+        return StaffPosition.objects.filter(
+            department_id=obj.user.department_id,
+            position_id=obj.position_id,
+            is_active=True,
+        ).values_list("note", flat=True).first() or ""
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
