@@ -156,6 +156,7 @@ class StaffPositionSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         department = attrs.get("department", getattr(self.instance, "department", None))
         position = attrs.get("position", getattr(self.instance, "position", None))
+        headcount = attrs.get("headcount", getattr(self.instance, "headcount", 1))
         queryset = StaffPosition.objects.filter(department=department, position=position)
         if self.instance:
             queryset = queryset.exclude(pk=self.instance.pk)
@@ -163,6 +164,19 @@ class StaffPositionSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({
                 "position": "Эта должность уже есть в штате отдела — откройте её строку для редактирования",
             })
+        if department and position:
+            filled_count = EmployeeProfile.objects.filter(
+                user__department=department,
+                position=position,
+                status__in=[EmployeeProfile.Status.EMPLOYED, EmployeeProfile.Status.PROBATION],
+            ).count()
+            if headcount < filled_count:
+                raise serializers.ValidationError({
+                    "headcount": (
+                        f"Нельзя указать меньше {filled_count}: столько сотрудников уже работает "
+                        "на этой позиции"
+                    ),
+                })
         return attrs
 
     def get_filled_count(self, obj):

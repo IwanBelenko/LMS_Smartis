@@ -851,6 +851,36 @@ class PeopleApiTests(TestCase):
         self.assertEqual(staff.json()["vacancies"], 2)
         self.assertTrue(StaffPosition.objects.filter(department=self.department).exists())
 
+    def test_staffing_plan_cannot_be_reduced_below_current_employees(self):
+        staff = StaffPosition.objects.create(
+            department=self.department,
+            position=self.position,
+            headcount=2,
+        )
+        second_employee = User.objects.create_user(
+            email="second.analyst@test.local",
+            password="Password123!",
+            status=User.Status.ACTIVE,
+            department=self.department,
+        )
+        EmployeeProfile.objects.create(
+            user=second_employee,
+            employee_number="SM-PLAN-2",
+            position=self.position,
+        )
+        self.client.force_authenticate(self.hr)
+
+        response = self.client.patch(
+            f"/api/v1/org/staff-positions/{staff.pk}/",
+            {"headcount": 1},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("headcount", response.json())
+        staff.refresh_from_db()
+        self.assertEqual(staff.headcount, 2)
+
     def test_hr_can_select_active_user_without_employee_profile_as_department_manager(self):
         manager = User.objects.create_user(
             email="manager.option@smartis.local",
