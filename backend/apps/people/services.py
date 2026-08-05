@@ -143,7 +143,7 @@ def assign_onboarding(employee):
     existing = employee.onboarding_plans.filter(status=OnboardingPlan.Status.ACTIVE).first()
     if existing:
         return existing
-    department = employee.user.department
+    department = employee.department
     templates = OnboardingTemplate.objects.filter(is_active=True).filter(
         Q(department=department) | Q(department__isnull=True),
         Q(position=employee.position) | Q(position__isnull=True),

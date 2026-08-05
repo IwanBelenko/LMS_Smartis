@@ -57,6 +57,7 @@ import smartisWordmarkDark from "./assets/smartis-wordmark-dark.png";
 import smartisWordmarkLight from "./assets/smartis-wordmark-light.png";
 
 const RichTextEditor = lazy(() => import("./RichTextEditor"));
+const APP_VERSION = import.meta.env.VITE_APP_VERSION || "dev";
 
 function Brand({ login = false }: { login?: boolean }) {
   return (
@@ -125,7 +126,7 @@ type ManagerOption = {
 };
 type EmployeeProfile = {
   id: number;
-  user: number;
+  user: number | null;
   full_name: string;
   first_name: string;
   last_name: string;
@@ -151,6 +152,23 @@ type EmployeeProfile = {
   monthly_bonus?: string | null;
   quarterly_bonus?: string | null;
   staff_position_note: string;
+  location: string;
+  legal_entity: string;
+  gender: string;
+  gender_label: string;
+  telegram: string;
+  dms_status: string;
+  dms_details: string;
+  electronic_employment_record: boolean | null;
+  time_off_balance: string;
+  participates_secret_santa: boolean | null;
+  birthday_chat_member: boolean | null;
+  company_review_left: boolean | null;
+  survey_completed: boolean | null;
+  personal_data_consent_kedo: boolean | null;
+  performance_rating: string | null;
+  performance_notes: string;
+  hr_notes: string;
 };
 type EmployeeImportField = { key: string; label: string; required: boolean };
 type EmployeeImportRow = {
@@ -170,6 +188,8 @@ type EmployeeImportReview = {
   create_count: number;
   update_count: number;
   error_count: number;
+  missing_departments: string[];
+  missing_positions: string[];
   rows: EmployeeImportRow[];
 };
 type EmployeeImportPreview = {
@@ -1225,15 +1245,18 @@ function IconRail({
           </nav>
         </>
       )}
-      <button
-        className="icon-rail__user"
-        type="button"
-        onClick={onPassword}
-        aria-label={`${user.first_name || user.email}, изменить пароль`}
-        data-tooltip={`${user.first_name || user.email} · изменить пароль`}
-      >
-        <CircleUserRound aria-hidden="true" />
-      </button>
+      <div className="icon-rail__account">
+        <button
+          className="icon-rail__user"
+          type="button"
+          onClick={onPassword}
+          aria-label={`${user.first_name || user.email}, изменить пароль`}
+          data-tooltip={`${user.first_name || user.email} · изменить пароль`}
+        >
+          <CircleUserRound aria-hidden="true" />
+        </button>
+        <small title={`Версия приложения ${APP_VERSION}`}>{APP_VERSION}</small>
+      </div>
     </aside>
   );
 }
@@ -2368,6 +2391,10 @@ function displayDate(value: string | null) {
   return value ? new Intl.DateTimeFormat("ru-RU").format(new Date(`${value}T00:00:00`)) : "—";
 }
 
+function displayOptionalBoolean(value: boolean | null) {
+  return value === null ? "—" : value ? "Да" : "Нет";
+}
+
 function EmployeeProfileView({
   employee,
   token,
@@ -2540,8 +2567,8 @@ function EmployeeProfileView({
           <section className="panel employee-overview__main">
             <div className="section-heading"><div><h2>Основная информация</h2><p>Актуальные данные сотрудника</p></div></div>
             <dl className="employee-details">
-              <div><dt>Корпоративная почта</dt><dd>{employee.email}</dd></div>
-              <div><dt>Табельный номер</dt><dd>{employee.employee_number}</dd></div>
+              <div><dt>Корпоративная почта</dt><dd>{employee.email || "—"}</dd></div>
+              <div><dt>Табельный номер</dt><dd>{employee.employee_number || "—"}</dd></div>
               <div><dt>Отдел</dt><dd>{employee.department_name || "—"}</dd></div>
               <div><dt>Должность</dt><dd>{employee.position_name || "—"}</dd></div>
               {employee.staff_position_note && <div className="employee-details__wide"><dt>Комментарий к штатной позиции</dt><dd>{employee.staff_position_note}</dd></div>}
@@ -2557,6 +2584,29 @@ function EmployeeProfileView({
             <div><span>Чек-лист</span><strong>{employee.checklist_score}%</strong><div className="mini-progress"><i style={{ width: `${employee.checklist_score}%` }} /></div></div>
             <div><span>Активные цели</span><strong>{goals.filter((goal) => goal.status !== "completed").length}</strong></div>
           </aside>
+          <section className="panel employee-hr-details">
+            <div className="section-heading"><div><h2>Кадровые сведения</h2><p>Данные из кадрового реестра</p></div></div>
+            <dl className="employee-details">
+              <div><dt>Дата рождения</dt><dd>{displayDate(employee.birth_date)}</dd></div>
+              <div><dt>Пол</dt><dd>{employee.gender_label || "—"}</dd></div>
+              <div><dt>Локация</dt><dd>{employee.location || "—"}</dd></div>
+              <div><dt>Юридическое лицо</dt><dd>{employee.legal_entity || "—"}</dd></div>
+              <div><dt>Telegram</dt><dd>{employee.telegram || "—"}</dd></div>
+              <div><dt>ДМС</dt><dd>{employee.dms_status || "—"}</dd></div>
+              <div><dt>Электронная трудовая книжка</dt><dd>{displayOptionalBoolean(employee.electronic_employment_record)}</dd></div>
+              <div><dt>Отгулы</dt><dd>{employee.time_off_balance || "—"}</dd></div>
+              <div><dt>Тайный Санта</dt><dd>{displayOptionalBoolean(employee.participates_secret_santa)}</dd></div>
+              <div><dt>Чат дней рождения</dt><dd>{displayOptionalBoolean(employee.birthday_chat_member)}</dd></div>
+              <div><dt>Отзыв о компании</dt><dd>{displayOptionalBoolean(employee.company_review_left)}</dd></div>
+              <div><dt>Опрос пройден</dt><dd>{displayOptionalBoolean(employee.survey_completed)}</dd></div>
+              <div><dt>Согласие на ПДн в КЭДО</dt><dd>{displayOptionalBoolean(employee.personal_data_consent_kedo)}</dd></div>
+              <div><dt>Оценка эффективности</dt><dd>{employee.performance_rating || "—"}</dd></div>
+              {employee.education && <div className="employee-details__wide"><dt>Образование</dt><dd>{employee.education}</dd></div>}
+              {employee.dms_details && <div className="employee-details__wide"><dt>Сведения по ДМС</dt><dd>{employee.dms_details}</dd></div>}
+              {employee.performance_notes && <div className="employee-details__wide"><dt>Комментарий к оценке</dt><dd>{employee.performance_notes}</dd></div>}
+              {employee.hr_notes && <div className="employee-details__wide"><dt>Заметки HR</dt><dd>{employee.hr_notes}</dd></div>}
+            </dl>
+          </section>
           <section className="panel employee-competencies">
             <div className="section-heading"><div><h2>Компетенции</h2><p>Ключевые навыки и зоны экспертизы</p></div></div>
             <div>{employee.competencies ? employee.competencies.split(/[,;\n]/).filter(Boolean).map((item) => <span key={item.trim()}>{item.trim()}</span>) : <p>Компетенции пока не заполнены</p>}</div>
@@ -3062,7 +3112,7 @@ function OrganizationView({ token }: { token: string }) {
                       <label><span>Штатных единиц</span><div><button type="button" disabled={staffHeadcountBusy === item.id || Number(staffHeadcountDrafts[item.id]) <= Math.max(item.filled_count, 1)} onClick={() => changeStaffHeadcountDraft(item, -1)} aria-label={`Уменьшить штат для ${item.position_name}`}><Minus /></button><input type="number" min={Math.max(item.filled_count, 1)} value={staffHeadcountDrafts[item.id] ?? String(item.headcount)} onChange={(event) => setStaffHeadcountDrafts((drafts) => ({ ...drafts, [item.id]: event.target.value }))} aria-label={`Штатных единиц для ${item.position_name}`} /><button type="button" disabled={staffHeadcountBusy === item.id} onClick={() => changeStaffHeadcountDraft(item, 1)} aria-label={`Увеличить штат для ${item.position_name}`}><Plus /></button></div></label>
                       <div className="organization-staff-editor__fact"><span>Занято сотрудниками</span><strong>{item.filled_count}</strong></div>
                       <div className={item.vacancies > 0 ? "organization-staff-editor__fact organization-staff-editor__fact--free" : "organization-staff-editor__fact"}><span>Свободно сейчас</span><strong>{item.vacancies}</strong></div>
-                      <button className="secondary-button organization-staff-editor__save" type="button" disabled={staffHeadcountBusy === item.id || Number(staffHeadcountDrafts[item.id]) === item.headcount} onClick={() => void saveStaffHeadcount(item)}>{staffHeadcountBusy === item.id ? "Сохраняем…" : "Сохранить штат"}</button>
+                      <button className={staffHeadcountBusy === item.id ? "secondary-button organization-staff-editor__save organization-staff-editor__save--busy" : "secondary-button organization-staff-editor__save"} type="button" disabled={staffHeadcountBusy === item.id || Number(staffHeadcountDrafts[item.id]) === item.headcount} onClick={() => void saveStaffHeadcount(item)}>{staffHeadcountBusy === item.id ? "Сохраняем…" : "Сохранить штат"}</button>
                     </div>
                     <div className="organization-staff-actions">
                       <span>Свободные места рассчитываются автоматически: штат минус занятые.</span>
@@ -3129,7 +3179,7 @@ function OrganizationView({ token }: { token: string }) {
               <div className="hcm-form__grid">
                 <label className="hcm-form__wide">Название<input value={onboardingForm.name} onChange={(event) => setOnboardingForm({ ...onboardingForm, name: event.target.value })} required /></label>
                 <label>Траектория<select value={onboardingForm.learning_path} onChange={(event) => setOnboardingForm({ ...onboardingForm, learning_path: event.target.value })}><option value="">{learningPathOptions.length ? "Без траектории" : "Нет траекторий — создайте в обучении"}</option>{learningPathOptions.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label>
-                <label>Ответственный<select value={onboardingForm.responsible} onChange={(event) => setOnboardingForm({ ...onboardingForm, responsible: event.target.value })}><option value="">{employees.length ? "Руководитель отдела" : "Нет сотрудников — сначала добавьте сотрудника"}</option>{employees.map((item) => <option key={item.user} value={item.user}>{item.full_name}</option>)}</select></label>
+                <label>Ответственный<select value={onboardingForm.responsible} onChange={(event) => setOnboardingForm({ ...onboardingForm, responsible: event.target.value })}><option value="">{employees.length ? "Руководитель отдела" : "Нет сотрудников — сначала добавьте сотрудника"}</option>{employees.filter((item) => item.user !== null).map((item) => <option key={item.id} value={item.user ?? ""}>{item.full_name}</option>)}</select></label>
                 <label>Срок, дней<input type="number" min="1" value={onboardingForm.duration_days} onChange={(event) => setOnboardingForm({ ...onboardingForm, duration_days: event.target.value })} required /></label>
                 <label className="hcm-form__wide">Чек-лист<textarea className="onboarding-template-checklist" value={onboardingForm.checklist} onChange={(event) => setOnboardingForm({ ...onboardingForm, checklist: event.target.value })} placeholder="Одна задача на строку" required /></label>
               </div>
@@ -3146,6 +3196,10 @@ const emptyEmployeeForm = {
   first_name: "", last_name: "", email: "", employee_number: "", department: "", position: "",
   grade: "", birth_date: "", hire_date: "", dismissal_date: "", education: "", competencies: "", status: "employed",
   checklist_score: "0", development_progress: "0", salary_base: "", monthly_bonus: "", quarterly_bonus: "",
+  location: "", legal_entity: "", gender: "", telegram: "", dms_status: "", dms_details: "",
+  electronic_employment_record: "", time_off_balance: "", participates_secret_santa: "",
+  birthday_chat_member: "", company_review_left: "", survey_completed: "", personal_data_consent_kedo: "",
+  performance_rating: "", performance_notes: "", hr_notes: "",
 };
 
 function EmployeesView({ token, user }: { token: string; user: User }) {
@@ -3223,6 +3277,22 @@ function EmployeesView({ token, user }: { token: string; user: User }) {
       salary_base: employee.salary_base || "",
       monthly_bonus: employee.monthly_bonus || "",
       quarterly_bonus: employee.quarterly_bonus || "",
+      location: employee.location || "",
+      legal_entity: employee.legal_entity || "",
+      gender: employee.gender || "",
+      telegram: employee.telegram || "",
+      dms_status: employee.dms_status || "",
+      dms_details: employee.dms_details || "",
+      electronic_employment_record: employee.electronic_employment_record === null ? "" : String(employee.electronic_employment_record),
+      time_off_balance: employee.time_off_balance || "",
+      participates_secret_santa: employee.participates_secret_santa === null ? "" : String(employee.participates_secret_santa),
+      birthday_chat_member: employee.birthday_chat_member === null ? "" : String(employee.birthday_chat_member),
+      company_review_left: employee.company_review_left === null ? "" : String(employee.company_review_left),
+      survey_completed: employee.survey_completed === null ? "" : String(employee.survey_completed),
+      personal_data_consent_kedo: employee.personal_data_consent_kedo === null ? "" : String(employee.personal_data_consent_kedo),
+      performance_rating: employee.performance_rating || "",
+      performance_notes: employee.performance_notes || "",
+      hr_notes: employee.hr_notes || "",
     } : emptyEmployeeForm);
     setShowForm(true);
   }
@@ -3239,6 +3309,14 @@ function EmployeesView({ token, user }: { token: string; user: User }) {
         birth_date: form.birth_date || null,
         hire_date: form.hire_date || null,
         dismissal_date: form.dismissal_date || null,
+        employee_number: form.employee_number || null,
+        electronic_employment_record: form.electronic_employment_record === "" ? null : form.electronic_employment_record === "true",
+        participates_secret_santa: form.participates_secret_santa === "" ? null : form.participates_secret_santa === "true",
+        birthday_chat_member: form.birthday_chat_member === "" ? null : form.birthday_chat_member === "true",
+        company_review_left: form.company_review_left === "" ? null : form.company_review_left === "true",
+        survey_completed: form.survey_completed === "" ? null : form.survey_completed === "true",
+        personal_data_consent_kedo: form.personal_data_consent_kedo === "" ? null : form.personal_data_consent_kedo === "true",
+        performance_rating: form.performance_rating || null,
         checklist_score: Number(form.checklist_score),
         development_progress: Number(form.development_progress),
         ...(canViewCompensation ? {
@@ -3310,6 +3388,52 @@ function EmployeesView({ token, user }: { token: string; user: User }) {
       setImportReview(review);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Не удалось проверить строки");
+    } finally {
+      setImportBusy(false);
+    }
+  }
+
+  async function createEmployeeImportDepartments() {
+    if (!importData || !importReview?.missing_departments.length) return;
+    setImportBusy(true);
+    setError("");
+    try {
+      const result = await apiRequest<{ created_departments: string[]; review: EmployeeImportReview }>("/employees/import/", token, {
+        method: "POST",
+        body: JSON.stringify({
+          batch_id: importData.batch_id,
+          rows: importData.rows,
+          mapping: importMapping,
+          create_departments: true,
+        }),
+      });
+      setImportReview(result.review);
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось создать отделы");
+    } finally {
+      setImportBusy(false);
+    }
+  }
+
+  async function createEmployeeImportPositions() {
+    if (!importData || !importReview?.missing_positions.length) return;
+    setImportBusy(true);
+    setError("");
+    try {
+      const result = await apiRequest<{ created_positions: string[]; review: EmployeeImportReview }>("/employees/import/", token, {
+        method: "POST",
+        body: JSON.stringify({
+          batch_id: importData.batch_id,
+          rows: importData.rows,
+          mapping: importMapping,
+          create_positions: true,
+        }),
+      });
+      setImportReview(result.review);
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось создать должности");
     } finally {
       setImportBusy(false);
     }
@@ -3394,9 +3518,11 @@ function EmployeesView({ token, user }: { token: string; user: User }) {
             <button className="secondary-button" type="button" onClick={() => void exportEmployees()}>
               <Download /> Экспорт CSV
             </button>
-            <button className="secondary-button" type="button" onClick={openEmployeeImport}>
-              <Upload /> Импорт CSV/XLSX
-            </button>
+            {user.role === "admin" && (
+              <button className="secondary-button" type="button" onClick={openEmployeeImport}>
+                <Upload /> Импорт CSV/XLSX
+              </button>
+            )}
             <button className="primary-button" type="button" onClick={() => openEmployee()}>
               <Plus /> Добавить сотрудника
             </button>
@@ -3548,6 +3674,30 @@ function EmployeesView({ token, user }: { token: string; user: User }) {
                 </section>
                 {importReview && (
                   <>
+                    {!!importReview.missing_departments?.length && (
+                      <section className="employee-import-departments">
+                        <div>
+                          <strong>Нужно создать отделы: {importReview.missing_departments.length}</strong>
+                          <span>{importReview.missing_departments.join(" · ")}</span>
+                          <small>Они будут созданы на верхнем уровне без руководителей.</small>
+                        </div>
+                        <button className="secondary-button" type="button" disabled={importBusy} onClick={() => void createEmployeeImportDepartments()}>
+                          <CheckCircle2 /> Подтвердить и создать {importReview.missing_departments.length}
+                        </button>
+                      </section>
+                    )}
+                    {!!importReview.missing_positions?.length && (
+                      <section className="employee-import-departments">
+                        <div>
+                          <strong>Нужно создать должности: {importReview.missing_positions.length}</strong>
+                          <span>{importReview.missing_positions.join(" · ")}</span>
+                          <small>Будут добавлены только должности справочника — без вакансий и штатных единиц.</small>
+                        </div>
+                        <button className="secondary-button" type="button" disabled={importBusy} onClick={() => void createEmployeeImportPositions()}>
+                          <CheckCircle2 /> Подтвердить и создать {importReview.missing_positions.length}
+                        </button>
+                      </section>
+                    )}
                     <div className="employee-import-summary">
                       <div><span>Всего строк</span><strong>{importReview.total}</strong></div>
                       <div><span>Будет создано</span><strong>{importReview.create_count}</strong></div>
@@ -3604,15 +3754,16 @@ function EmployeesView({ token, user }: { token: string; user: User }) {
         }}>
           <section className="hcm-dialog" role="dialog" aria-modal="true" aria-labelledby="employee-dialog-title">
             <header>
-              <div><h2 id="employee-dialog-title">{editing ? "Карточка сотрудника" : "Новый сотрудник"}</h2><p>{editing ? "Основные данные и развитие" : "После сохранения покажем временный пароль"}</p></div>
+              <div><h2 id="employee-dialog-title">{editing ? "Карточка сотрудника" : "Новый сотрудник"}</h2><p>{editing ? "Основные данные и развитие" : "С почтой создадим доступ, без почты — только карточку сотрудника"}</p></div>
               <button className="icon-button" type="button" onClick={() => setShowForm(false)} aria-label="Закрыть"><X /></button>
             </header>
             <form className="hcm-form" onSubmit={saveEmployee}>
               <div className="hcm-form__grid">
                 <label>Имя<input value={form.first_name} onChange={(e) => setForm({ ...form, first_name: e.target.value })} required /></label>
                 <label>Фамилия<input value={form.last_name} onChange={(e) => setForm({ ...form, last_name: e.target.value })} required /></label>
-                <label className="hcm-form__wide">Корпоративная почта<input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required /></label>
-                <label>Табельный номер<input value={form.employee_number} onChange={(e) => setForm({ ...form, employee_number: e.target.value })} required /></label>
+                <label className="hcm-form__wide">Корпоративная почта<input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /><span>Можно оставить пустой — сотрудник сохранится без доступа в систему.</span></label>
+                <label>Табельный номер<input value={form.employee_number} onChange={(e) => setForm({ ...form, employee_number: e.target.value })} /></label>
+                <label>Дата рождения<input type="date" value={form.birth_date} onChange={(e) => setForm({ ...form, birth_date: e.target.value })} /></label>
                 <label>Дата выхода<input type="date" value={form.hire_date} onChange={(e) => setForm({ ...form, hire_date: e.target.value })} /></label>
                 <label>Отдел<select value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })}><option value="">{departments.length ? "Без отдела" : "Нет подразделений — создайте в оргструктуре"}</option>{departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
                 <div className="reference-field"><label>Должность<select value={form.position} onChange={(e) => setForm({ ...form, position: e.target.value })}><option value="">{positions.length ? "Не указана" : "Должностей пока нет"}</option>{positions.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><button className="text-button" type="button" onClick={() => setShowPositionCreate(true)}><Plus />Новая должность</button></div>
@@ -3623,6 +3774,24 @@ function EmployeesView({ token, user }: { token: string; user: User }) {
                 <label>План развития, %<input type="number" min="0" max="100" value={form.development_progress} onChange={(e) => setForm({ ...form, development_progress: e.target.value })} /></label>
                 <label>Чек-лист, %<input type="number" min="0" max="100" value={form.checklist_score} onChange={(e) => setForm({ ...form, checklist_score: e.target.value })} /></label>
                 {canViewCompensation && <><label>Оклад<input type="number" min="0" value={form.salary_base} onChange={(e) => setForm({ ...form, salary_base: e.target.value })} /></label><label>Месячная премия<input type="number" min="0" value={form.monthly_bonus} onChange={(e) => setForm({ ...form, monthly_bonus: e.target.value })} /></label><label>Квартальная премия<input type="number" min="0" value={form.quarterly_bonus} onChange={(e) => setForm({ ...form, quarterly_bonus: e.target.value })} /></label></>}
+                <div className="hcm-form__wide hcm-form__section-title"><strong>Кадровые сведения</strong><span>Пустые поля сохраняются без подстановки значений.</span></div>
+                <label>Локация<input value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} /></label>
+                <label>Юридическое лицо<input value={form.legal_entity} onChange={(e) => setForm({ ...form, legal_entity: e.target.value })} /></label>
+                <label>Пол<select value={form.gender} onChange={(e) => setForm({ ...form, gender: e.target.value })}><option value="">Не указан</option><option value="female">Женский</option><option value="male">Мужской</option></select></label>
+                <label>Telegram<input value={form.telegram} onChange={(e) => setForm({ ...form, telegram: e.target.value })} /></label>
+                <label>ДМС<input value={form.dms_status} onChange={(e) => setForm({ ...form, dms_status: e.target.value })} /></label>
+                <label>Сведения по ДМС<input value={form.dms_details} onChange={(e) => setForm({ ...form, dms_details: e.target.value })} /></label>
+                <label>Электронная трудовая книжка<select value={form.electronic_employment_record} onChange={(e) => setForm({ ...form, electronic_employment_record: e.target.value })}><option value="">Не указано</option><option value="true">Да</option><option value="false">Нет</option></select></label>
+                <label>Отгулы<input value={form.time_off_balance} onChange={(e) => setForm({ ...form, time_off_balance: e.target.value })} /></label>
+                <label>Тайный Санта<select value={form.participates_secret_santa} onChange={(e) => setForm({ ...form, participates_secret_santa: e.target.value })}><option value="">Не указано</option><option value="true">Да</option><option value="false">Нет</option></select></label>
+                <label>Чат дней рождения<select value={form.birthday_chat_member} onChange={(e) => setForm({ ...form, birthday_chat_member: e.target.value })}><option value="">Не указано</option><option value="true">Да</option><option value="false">Нет</option></select></label>
+                <label>Отзыв о компании<select value={form.company_review_left} onChange={(e) => setForm({ ...form, company_review_left: e.target.value })}><option value="">Не указано</option><option value="true">Да</option><option value="false">Нет</option></select></label>
+                <label>Опрос пройден<select value={form.survey_completed} onChange={(e) => setForm({ ...form, survey_completed: e.target.value })}><option value="">Не указано</option><option value="true">Да</option><option value="false">Нет</option></select></label>
+                <label>Согласие на ПДн в КЭДО<select value={form.personal_data_consent_kedo} onChange={(e) => setForm({ ...form, personal_data_consent_kedo: e.target.value })}><option value="">Не указано</option><option value="true">Да</option><option value="false">Нет</option></select></label>
+                <label>Оценка эффективности<input type="number" step="0.01" value={form.performance_rating} onChange={(e) => setForm({ ...form, performance_rating: e.target.value })} /></label>
+                <label className="hcm-form__wide">Образование<textarea value={form.education} onChange={(e) => setForm({ ...form, education: e.target.value })} /></label>
+                <label className="hcm-form__wide">Комментарий к оценке<textarea value={form.performance_notes} onChange={(e) => setForm({ ...form, performance_notes: e.target.value })} /></label>
+                <label className="hcm-form__wide">Заметки HR<textarea value={form.hr_notes} onChange={(e) => setForm({ ...form, hr_notes: e.target.value })} /></label>
                 <label className="hcm-form__wide">Компетенции<textarea value={form.competencies} onChange={(e) => setForm({ ...form, competencies: e.target.value })} placeholder="Ключевые навыки сотрудника" /></label>
               </div>
               {error && <p className="form-error">{error}</p>}

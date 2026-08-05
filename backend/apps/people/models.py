@@ -46,15 +46,52 @@ class EmployeeProfile(models.Model):
         PROBATION = "probation", "Испытательный срок"
         DISMISSED = "dismissed", "Уволен"
 
-    user = models.OneToOneField(settings.AUTH_USER_MODEL, related_name="employee_profile", on_delete=models.CASCADE)
-    employee_number = models.CharField("Табельный номер", max_length=40, unique=True)
+    class Gender(models.TextChoices):
+        FEMALE = "female", "Женский"
+        MALE = "male", "Мужской"
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        related_name="employee_profile",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+    )
+    first_name = models.CharField("Имя", max_length=150, blank=True)
+    last_name = models.CharField("Фамилия", max_length=150, blank=True)
+    email = models.EmailField("Корпоративная почта", blank=True)
+    department = models.ForeignKey(
+        "identity.Department",
+        verbose_name="Отдел",
+        related_name="employee_profiles",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    employee_number = models.CharField("Табельный номер", max_length=40, unique=True, null=True, blank=True)
     position = models.ForeignKey(Position, related_name="employees", null=True, blank=True, on_delete=models.SET_NULL)
     grade = models.CharField("Грейд", max_length=80, blank=True)
     birth_date = models.DateField("Дата рождения", null=True, blank=True)
     hire_date = models.DateField("Дата выхода", null=True, blank=True)
     dismissal_date = models.DateField("Дата увольнения", null=True, blank=True)
-    education = models.CharField("Образование", max_length=240, blank=True)
+    education = models.TextField("Образование", blank=True)
     competencies = models.TextField("Компетенции", blank=True)
+    location = models.CharField("Локация", max_length=120, blank=True)
+    legal_entity = models.CharField("Юридическое лицо", max_length=150, blank=True)
+    gender = models.CharField("Пол", max_length=10, choices=Gender.choices, blank=True)
+    telegram = models.CharField("Telegram", max_length=100, blank=True)
+    dms_status = models.CharField("ДМС", max_length=80, blank=True)
+    dms_details = models.CharField("Дополнительные сведения по ДМС", max_length=160, blank=True)
+    electronic_employment_record = models.BooleanField("Электронная трудовая книжка", null=True, blank=True)
+    time_off_balance = models.CharField("Отгулы", max_length=120, blank=True)
+    participates_secret_santa = models.BooleanField("Участвует в Тайном Санте", null=True, blank=True)
+    birthday_chat_member = models.BooleanField("Добавлен в чат дней рождения", null=True, blank=True)
+    company_review_left = models.BooleanField("Оставил отзыв о компании", null=True, blank=True)
+    survey_completed = models.BooleanField("Прошёл опрос", null=True, blank=True)
+    personal_data_consent_kedo = models.BooleanField("Согласие на ПДн в КЭДО", null=True, blank=True)
+    performance_rating = models.DecimalField("Оценка эффективности", max_digits=4, decimal_places=2, null=True, blank=True)
+    performance_notes = models.TextField("Комментарий к оценке эффективности", blank=True)
+    hr_notes = models.TextField("Заметки HR", blank=True)
     status = models.CharField("Статус", max_length=20, choices=Status.choices, default=Status.EMPLOYED)
     checklist_score = models.PositiveSmallIntegerField("Чек-лист, %", default=0)
     development_progress = models.PositiveSmallIntegerField("План развития, %", default=0)
@@ -65,12 +102,22 @@ class EmployeeProfile(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        ordering = ["user__last_name", "user__first_name"]
+        ordering = ["last_name", "first_name"]
         verbose_name = "Карточка сотрудника"
         verbose_name_plural = "Карточки сотрудников"
 
     def __str__(self):
-        return str(self.user)
+        if self.user_id:
+            return self.user.get_full_name() or self.user.email
+        return f"{self.first_name} {self.last_name}".strip() or self.email or f"Сотрудник #{self.pk}"
+
+    def save(self, *args, **kwargs):
+        if self.user_id:
+            self.first_name = self.user.first_name
+            self.last_name = self.user.last_name
+            self.email = self.user.email
+            self.department = self.user.department
+        super().save(*args, **kwargs)
 
 
 class EmployeeGoal(models.Model):

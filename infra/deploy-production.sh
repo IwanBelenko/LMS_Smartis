@@ -29,12 +29,13 @@ else
   install -d -m 0750 "$release_tmp"
   tar -xzf "$archive" -C "$release_tmp"
   printf '%s\n' "$REVISION" > "$release_tmp/.release-revision"
+  printf '%s\n' "$RELEASE_TAG" > "$release_tmp/.release-version"
   mv "$release_tmp" "$release_dir"
 fi
 rm -f "$archive"
 
 compose() {
-  docker compose --project-name smartis-lms --env-file "$app_root/.env" \
+  APP_VERSION="$RELEASE_TAG" docker compose --project-name smartis-lms --env-file "$app_root/.env" \
     --file "$release_dir/compose.yaml" "$@"
 }
 
@@ -61,9 +62,10 @@ rollback_code() {
   if [ "$status" -ne 0 ] && [ -n "$previous_target" ]; then
     echo "Deployment failed; rebuilding the previous application release." >&2
     ln -sfn "$previous_target" "$current_link"
-    docker compose --project-name smartis-lms --env-file "$app_root/.env" \
+    previous_version="$(cat "$previous_target/.release-version" 2>/dev/null || printf 'dev')"
+    APP_VERSION="$previous_version" docker compose --project-name smartis-lms --env-file "$app_root/.env" \
       --file "$previous_target/compose.yaml" build api web || true
-    docker compose --project-name smartis-lms --env-file "$app_root/.env" \
+    APP_VERSION="$previous_version" docker compose --project-name smartis-lms --env-file "$app_root/.env" \
       --file "$previous_target/compose.yaml" up --detach --no-build api web proxy || true
   fi
   exit "$status"

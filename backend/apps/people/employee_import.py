@@ -23,8 +23,8 @@ MAX_IMPORT_BYTES = 5 * 1024 * 1024
 MAX_IMPORT_ROWS = 1000
 
 IMPORT_FIELDS = [
-    {"key": "employee_number", "label": "Табельный номер", "required": True},
-    {"key": "email", "label": "Корпоративная почта", "required": True},
+    {"key": "employee_number", "label": "Табельный номер", "required": False},
+    {"key": "email", "label": "Корпоративная почта", "required": False},
     {"key": "full_name", "label": "ФИО одной колонкой", "required": False},
     {"key": "first_name", "label": "Имя", "required": False},
     {"key": "last_name", "label": "Фамилия", "required": False},
@@ -33,9 +33,26 @@ IMPORT_FIELDS = [
     {"key": "grade", "label": "Грейд", "required": False},
     {"key": "birth_date", "label": "Дата рождения", "required": False},
     {"key": "hire_date", "label": "Дата выхода", "required": False},
+    {"key": "dismissal_date", "label": "Дата увольнения", "required": False},
     {"key": "status", "label": "Статус", "required": False},
     {"key": "education", "label": "Образование", "required": False},
     {"key": "competencies", "label": "Компетенции", "required": False},
+    {"key": "location", "label": "Локация", "required": False},
+    {"key": "legal_entity", "label": "Юридическое лицо", "required": False},
+    {"key": "gender", "label": "Пол", "required": False},
+    {"key": "telegram", "label": "Telegram", "required": False},
+    {"key": "dms_status", "label": "ДМС", "required": False},
+    {"key": "dms_details", "label": "Сведения по ДМС", "required": False},
+    {"key": "electronic_employment_record", "label": "Электронная трудовая книжка", "required": False},
+    {"key": "time_off_balance", "label": "Отгулы", "required": False},
+    {"key": "participates_secret_santa", "label": "Участвует в Тайном Санте", "required": False},
+    {"key": "birthday_chat_member", "label": "Добавлен в чат дней рождения", "required": False},
+    {"key": "company_review_left", "label": "Оставил отзыв о компании", "required": False},
+    {"key": "survey_completed", "label": "Прошёл опрос", "required": False},
+    {"key": "personal_data_consent_kedo", "label": "Согласие на ПДн в КЭДО", "required": False},
+    {"key": "performance_rating", "label": "Оценка эффективности", "required": False},
+    {"key": "performance_notes", "label": "Комментарий к оценке эффективности", "required": False},
+    {"key": "hr_notes", "label": "Заметки HR", "required": False},
     {"key": "salary_base", "label": "Оклад", "required": False},
     {"key": "monthly_bonus", "label": "Месячная премия", "required": False},
     {"key": "quarterly_bonus", "label": "Квартальная премия", "required": False},
@@ -52,9 +69,26 @@ HEADER_ALIASES = {
     "grade": {"грейд", "grade", "уровень"},
     "birth_date": {"дата рождения", "день рождения", "birth date", "birthday"},
     "hire_date": {"дата выхода", "дата приема", "дата приёма", "hire date", "start date"},
+    "dismissal_date": {"дата увольнения", "exit day", "dismissal date", "termination date"},
     "status": {"статус", "status"},
     "education": {"образование", "education"},
     "competencies": {"компетенции", "навыки", "skills", "competencies"},
+    "location": {"локация", "город", "location"},
+    "legal_entity": {"юридическое лицо", "юр лицо", "юр.лицо (или компания)", "компания", "legal entity"},
+    "gender": {"пол", "gender"},
+    "telegram": {"telegram", "телеграм", "телеграмм"},
+    "dms_status": {"дмс", "статус дмс"},
+    "dms_details": {"сведения по дмс", "детали дмс"},
+    "electronic_employment_record": {"электронная трудовая книжка", "эл тк", "эл.тк"},
+    "time_off_balance": {"отгулы", "остаток отгулов"},
+    "participates_secret_santa": {"участвует в тайном санте", "играют в тайного санту", "тайный санта"},
+    "birthday_chat_member": {"добавлен в чат дней рождения", "есть в чате др", "чат др"},
+    "company_review_left": {"оставил отзыв о компании", "оставили отзыв о нас", "отзыв о компании"},
+    "survey_completed": {"прошёл опрос", "прошел опрос", "опрос", "опрс"},
+    "personal_data_consent_kedo": {"согласие на пдн в кэдо", "подписали согласие на пдн в кэдо"},
+    "performance_rating": {"оценка эффективности", "performance rating"},
+    "performance_notes": {"комментарий к оценке эффективности", "критерии эффективности"},
+    "hr_notes": {"заметки hr", "комментарий hr", "hr notes"},
     "salary_base": {"оклад", "salary", "salary base"},
     "monthly_bonus": {"месячная премия", "ежемесячная премия", "monthly bonus"},
     "quarterly_bonus": {"квартальная премия", "quarterly bonus"},
@@ -70,6 +104,21 @@ STATUS_ALIASES = {
     "уволен": EmployeeProfile.Status.DISMISSED,
     "уволена": EmployeeProfile.Status.DISMISSED,
     "dismissed": EmployeeProfile.Status.DISMISSED,
+}
+
+GENDER_ALIASES = {
+    "ж": EmployeeProfile.Gender.FEMALE,
+    "женский": EmployeeProfile.Gender.FEMALE,
+    "female": EmployeeProfile.Gender.FEMALE,
+    "м": EmployeeProfile.Gender.MALE,
+    "m": EmployeeProfile.Gender.MALE,
+    "мужской": EmployeeProfile.Gender.MALE,
+    "male": EmployeeProfile.Gender.MALE,
+}
+
+BOOLEAN_ALIASES = {
+    "1": True, "да": True, "yes": True, "true": True, "+": True,
+    "0": False, "нет": False, "no": False, "false": False, "-": False,
 }
 
 
@@ -260,6 +309,16 @@ def _parse_money(value, field_name, errors):
         return None
 
 
+def _parse_boolean(value, field_name, errors):
+    if not value or value.strip() == "?":
+        return None
+    normalized = value.strip().lower()
+    if normalized in BOOLEAN_ALIASES:
+        return BOOLEAN_ALIASES[normalized]
+    errors[field_name] = ["Допустимо: Да, Нет или пустое значение"]
+    return None
+
+
 def _resolve_department(value, errors):
     if not value:
         return None
@@ -307,29 +366,37 @@ def _prepare_row(row, mapping, request, row_number, source=HrImportBatch.Source.
             first_name = first_name or " ".join(parts[1:])
         else:
             errors["full_name"] = ["Укажите минимум фамилию и имя"]
-    required = {
-        "employee_number": employee_number,
-        "email": email,
-        "first_name": first_name,
-        "last_name": last_name,
-    }
+    required = {"first_name": first_name, "last_name": last_name}
     for field, value in required.items():
         if not value:
             errors[field] = ["Обязательное поле не сопоставлено или пусто"]
 
     number_match = EmployeeProfile.objects.select_related("user").filter(employee_number=employee_number).first() if employee_number else None
-    email_match = EmployeeProfile.objects.select_related("user").filter(user__email__iexact=email).first() if email else None
+    email_match = EmployeeProfile.objects.select_related("user").filter(email__iexact=email).first() if email else None
     if number_match and email_match and number_match.pk != email_match.pk:
         errors["identity"] = ["Табельный номер и email принадлежат разным сотрудникам"]
     instance = number_match or email_match
+    if not instance and first_name and last_name and mapping.get("birth_date"):
+        birth_date = _parse_date(_mapped_value(row, mapping, "birth_date"), "birth_date", errors)
+        if birth_date:
+            possible_matches = EmployeeProfile.objects.filter(
+                first_name__iexact=first_name,
+                last_name__iexact=last_name,
+                birth_date=birth_date,
+            )
+            if possible_matches.count() == 1:
+                instance = possible_matches.first()
 
     payload = {
-        "employee_number": employee_number,
+        "employee_number": employee_number or None,
         "email": email,
         "first_name": first_name,
         "last_name": last_name,
     }
-    optional_text_fields = ["grade", "education", "competencies"]
+    optional_text_fields = [
+        "grade", "education", "competencies", "location", "legal_entity", "telegram",
+        "dms_status", "dms_details", "time_off_balance", "performance_notes", "hr_notes",
+    ]
     for field in optional_text_fields:
         if mapping.get(field):
             payload[field] = _mapped_value(row, mapping, field)
@@ -337,9 +404,16 @@ def _prepare_row(row, mapping, request, row_number, source=HrImportBatch.Source.
         payload["department"] = _resolve_department(_mapped_value(row, mapping, "department"), errors)
     if mapping.get("position"):
         payload["position"] = _resolve_position(_mapped_value(row, mapping, "position"), errors)
-    for field in ("birth_date", "hire_date"):
+    for field in ("birth_date", "hire_date", "dismissal_date"):
         if mapping.get(field):
             payload[field] = _parse_date(_mapped_value(row, mapping, field), field, errors)
+    if mapping.get("gender"):
+        gender_value = _mapped_value(row, mapping, "gender").lower()
+        if gender_value:
+            if gender_value not in GENDER_ALIASES:
+                errors["gender"] = ["Допустимо: Женский или Мужской"]
+            else:
+                payload["gender"] = GENDER_ALIASES[gender_value]
     if mapping.get("status"):
         status_value = _mapped_value(row, mapping, "status").lower()
         if status_value:
@@ -350,6 +424,16 @@ def _prepare_row(row, mapping, request, row_number, source=HrImportBatch.Source.
     for field in ("salary_base", "monthly_bonus", "quarterly_bonus"):
         if mapping.get(field):
             payload[field] = _parse_money(_mapped_value(row, mapping, field), field, errors)
+    if mapping.get("performance_rating"):
+        payload["performance_rating"] = _parse_money(
+            _mapped_value(row, mapping, "performance_rating"), "performance_rating", errors
+        )
+    for field in (
+        "electronic_employment_record", "participates_secret_santa", "birthday_chat_member",
+        "company_review_left", "survey_completed", "personal_data_consent_kedo",
+    ):
+        if mapping.get(field):
+            payload[field] = _parse_boolean(_mapped_value(row, mapping, field), field, errors)
 
     serializer = EmployeeProfileWriteSerializer(
         instance,
@@ -409,13 +493,135 @@ def preview_employee_import(rows, mapping, request, source=HrImportBatch.Source.
             if email:
                 seen_emails[email] = item["row_number"]
     public_rows = [{key: value for key, value in item.items() if not key.startswith("_")} for item in prepared]
+    missing_departments = sorted({
+        item["preview"]["department"]
+        for item in prepared
+        if item["preview"]["department"] and "department" in item["errors"]
+    }, key=str.casefold)
+    missing_positions = sorted({
+        item["preview"]["position"]
+        for item in prepared
+        if item["preview"]["position"] and "position" in item["errors"]
+    }, key=str.casefold)
     return {
         "total": len(prepared),
         "create_count": sum(item["action"] == "create" for item in prepared),
         "update_count": sum(item["action"] == "update" for item in prepared),
         "error_count": sum(item["action"] == "error" for item in prepared),
+        "missing_departments": missing_departments,
+        "missing_positions": missing_positions,
         "rows": public_rows,
         "_prepared": prepared,
+    }
+
+
+def _department_code(name):
+    digest = hashlib.sha256(name.casefold().encode("utf-8")).hexdigest()[:12]
+    return f"import-{digest}"
+
+
+@transaction.atomic
+def create_import_departments(rows, mapping, request, batch_id):
+    try:
+        batch = HrImportBatch.objects.select_for_update().get(pk=batch_id)
+    except HrImportBatch.DoesNotExist as exc:
+        raise ValidationError({"batch_id": "Сессия импорта не найдена. Загрузите файл ещё раз"}) from exc
+    if batch.status == HrImportBatch.Status.COMPLETED:
+        raise ValidationError({"detail": "Эта выгрузка уже была импортирована"})
+    if employee_import_payload_hash(rows) != batch.payload_sha256:
+        raise ValidationError("Данные изменились после предварительной проверки. Загрузите файл ещё раз")
+    if not isinstance(mapping, dict):
+        raise ValidationError({"mapping": "Настройте сопоставление колонок"})
+
+    department_header = mapping.get("department")
+    names = sorted({
+        str(row.get(department_header, "")).strip()
+        for row in rows
+        if department_header and str(row.get(department_header, "")).strip()
+    }, key=str.casefold)
+    created = []
+    for name in names:
+        department = Department.objects.filter(name__iexact=name).first()
+        action = None
+        if department and not department.is_active:
+            department.is_active = True
+            department.save(update_fields=["is_active"])
+            action = "import_reactivated"
+        elif not department:
+            code = _department_code(name)
+            suffix = 2
+            while Department.objects.filter(code=code).exists():
+                code = f"{_department_code(name)}-{suffix}"
+                suffix += 1
+            department = Department.objects.create(name=name, code=code)
+            action = "import_created"
+        if action:
+            created.append(name)
+            AuditEvent.objects.create(
+                actor=request.user,
+                entity_type="department",
+                entity_id=str(department.pk),
+                action=action,
+                changes={"name": name, "source": batch.source, "batch_id": batch.pk},
+            )
+
+    review = preview_employee_import(rows, mapping, request, batch.source, batch.effective_date)
+    batch.mapping = mapping
+    batch.error_count = review["error_count"]
+    batch.save(update_fields=["mapping", "error_count"])
+    return {
+        "created_departments": created,
+        "review": {key: value for key, value in review.items() if not key.startswith("_")},
+    }
+
+
+@transaction.atomic
+def create_import_positions(rows, mapping, request, batch_id):
+    try:
+        batch = HrImportBatch.objects.select_for_update().get(pk=batch_id)
+    except HrImportBatch.DoesNotExist as exc:
+        raise ValidationError({"batch_id": "Сессия импорта не найдена. Загрузите файл ещё раз"}) from exc
+    if batch.status == HrImportBatch.Status.COMPLETED:
+        raise ValidationError({"detail": "Эта выгрузка уже была импортирована"})
+    if employee_import_payload_hash(rows) != batch.payload_sha256:
+        raise ValidationError("Данные изменились после предварительной проверки. Загрузите файл ещё раз")
+    if not isinstance(mapping, dict):
+        raise ValidationError({"mapping": "Настройте сопоставление колонок"})
+
+    position_header = mapping.get("position")
+    names = sorted({
+        str(row.get(position_header, "")).strip()
+        for row in rows
+        if position_header and str(row.get(position_header, "")).strip()
+    }, key=str.casefold)
+    created = []
+    for name in names:
+        position = Position.objects.filter(name__iexact=name).first()
+        action = None
+        if position and not position.is_active:
+            position.is_active = True
+            position.save(update_fields=["is_active"])
+            action = "import_reactivated"
+        elif not position:
+            position = Position.objects.create(name=name)
+            action = "import_created"
+        if action:
+            created.append(name)
+            AuditEvent.objects.create(
+                actor=request.user,
+                entity_type="position",
+                entity_id=str(position.pk),
+                action=action,
+                changes={"name": name, "source": batch.source, "batch_id": batch.pk},
+            )
+
+    review = preview_employee_import(rows, mapping, request, batch.source, batch.effective_date)
+    batch.mapping = mapping
+    batch.error_count = review["error_count"]
+    batch.save(update_fields=["mapping", "error_count"])
+    return {
+        "created_positions": created,
+        "review": {key: value for key, value in review.items() if not key.startswith("_")},
     }
 
 
