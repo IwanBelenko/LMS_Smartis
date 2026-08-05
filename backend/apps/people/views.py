@@ -2190,6 +2190,26 @@ class PositionListView(generics.ListCreateAPIView):
             changes={"name": position.name},
         )
 
+    @transaction.atomic
+    def create(self, request, *args, **kwargs):
+        payload = request.data.copy()
+        department = payload.pop("department", None)
+        headcount = payload.pop("headcount", 1)
+        note = payload.pop("note", "")
+        serializer = self.get_serializer(data=payload)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        if department:
+            staff_serializer = StaffPositionSerializer(data={
+                "department": department,
+                "position": serializer.instance.pk,
+                "headcount": headcount,
+                "note": note,
+            })
+            staff_serializer.is_valid(raise_exception=True)
+            staff_serializer.save()
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
 
 class OrganizationDepartmentListCreateView(generics.ListCreateAPIView):
     serializer_class = OrganizationDepartmentSerializer
@@ -2197,10 +2217,64 @@ class OrganizationDepartmentListCreateView(generics.ListCreateAPIView):
     queryset = Department.objects.filter(is_active=True).select_related("parent", "manager").prefetch_related("staff_positions")
 
 
-class OrganizationDepartmentDetailView(generics.RetrieveUpdateAPIView):
+class OrganizationDepartmentDetailView(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = OrganizationDepartmentSerializer
     permission_classes = [IsHcmUser]
     queryset = Department.objects.select_related("parent", "manager").prefetch_related("staff_positions")
+
+    @transaction.atomic
+    def destroy(self, request, *args, **kwargs):
+        department = self.get_object()
+        blockers = []
+        if department.members.exists():
+            blockers.append("сотрудники или пользователи")
+        if department.children.exists():
+            blockers.append("дочерние подразделения")
+        if department.vacancies.exists():
+            blockers.append("вакансии")
+        if blockers:
+            raise ValidationError({
+                "detail": (
+                    f"Нельзя удалить подразделение: с ним связаны {', '.join(blockers)}. "
+                    "Сначала перенесите или удалите связанные данные."
+                ),
+            })
+        department_id = department.pk
+        name = department.name
+        staff_positions = department.staff_positions.count()
+        record_audit(
+            actor=request.user,
+            entity_type="department",
+            entity_id=department_id,
+            action="deleted",
+            changes={"name": name, "staff_positions_deleted": staff_positions},
+            request=request,
+        )
+        department.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class OrganizationManagerOptionsView(APIView):
+    permission_classes = [IsHcmUser]
+
+    def get(self, request):
+        users = User.objects.filter(status=User.Status.ACTIVE).select_related(
+            "department", "employee_profile__position",
+        ).order_by("last_name", "first_name", "email")
+        return Response([
+            {
+                "id": user.pk,
+                "full_name": user.get_full_name() or user.email,
+                "email": user.email,
+                "department": user.department_id,
+                "department_name": user.department.name if user.department else "",
+                "position_name": (
+                    user.employee_profile.position.name
+                    if hasattr(user, "employee_profile") and user.employee_profile.position else ""
+                ),
+            }
+            for user in users
+        ])
 
 
 class StaffPositionListCreateView(generics.ListCreateAPIView):
@@ -2213,10 +2287,50 @@ class StaffPositionListCreateView(generics.ListCreateAPIView):
         return queryset.filter(department_id=department) if department else queryset
 
 
-class StaffPositionDetailView(generics.RetrieveUpdateAPIView):
+class StaffPositionDetailView(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = StaffPositionSerializer
     permission_classes = [IsHcmUser]
     queryset = StaffPosition.objects.select_related("department", "position")
+
+    @transaction.atomic
+    def destroy(self, request, *args, **kwargs):
+        staff_position = self.get_object()
+        filled_count = EmployeeProfile.objects.filter(
+            user__department=staff_position.department,
+            position=staff_position.position,
+            status__in=[EmployeeProfile.Status.EMPLOYED, EmployeeProfile.Status.PROBATION],
+        ).count()
+        open_vacancies = staff_position.vacancies.filter(status=Vacancy.Status.OPEN).count()
+        if filled_count or open_vacancies:
+            reasons = []
+            if filled_count:
+                reasons.append(f"назначено сотрудников: {filled_count}")
+            if open_vacancies:
+                reasons.append(f"открыто вакансий: {open_vacancies}")
+            raise ValidationError({
+                "detail": (
+                    f"Нельзя удалить штатную позицию ({'; '.join(reasons)}). "
+                    "Сначала переведите сотрудников и закройте вакансии."
+                ),
+            })
+        staff_position_id = staff_position.pk
+        changes = {
+            "department_id": staff_position.department_id,
+            "department_name": staff_position.department.name,
+            "position_id": staff_position.position_id,
+            "position_name": staff_position.position.name,
+            "headcount": staff_position.headcount,
+        }
+        record_audit(
+            actor=request.user,
+            entity_type="staff_position",
+            entity_id=staff_position_id,
+            action="deleted",
+            changes=changes,
+            request=request,
+        )
+        staff_position.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class HcmSummaryView(APIView):

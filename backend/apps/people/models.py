@@ -25,7 +25,7 @@ class StaffPosition(models.Model):
     department = models.ForeignKey(Department, related_name="staff_positions", on_delete=models.CASCADE)
     position = models.ForeignKey(Position, related_name="staff_positions", on_delete=models.PROTECT)
     headcount = models.PositiveIntegerField("Штатных единиц", default=1)
-    note = models.CharField("Комментарий", max_length=240, blank=True)
+    note = models.TextField("Комментарий", blank=True)
     is_active = models.BooleanField("Активна", default=True)
 
     class Meta:

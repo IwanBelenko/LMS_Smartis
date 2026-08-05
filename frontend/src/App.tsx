@@ -84,6 +84,10 @@ type User = {
   can_view_compensation: boolean;
   department: number | null;
   department_name: string | null;
+  employee_profile_id: number | null;
+  employee_number: string;
+  position: number | null;
+  position_name: string;
 };
 type TemporaryPassword = { email: string; password: string };
 type Department = { id: number; name: string; code: string; is_active: boolean };
@@ -110,6 +114,14 @@ type StaffPosition = {
   open_vacancy_count: number;
   note: string;
   is_active: boolean;
+};
+type ManagerOption = {
+  id: number;
+  full_name: string;
+  email: string;
+  department: number | null;
+  department_name: string;
+  position_name: string;
 };
 type EmployeeProfile = {
   id: number;
@@ -138,6 +150,7 @@ type EmployeeProfile = {
   salary_base?: string | null;
   monthly_bonus?: string | null;
   quarterly_bonus?: string | null;
+  staff_position_note: string;
 };
 type EmployeeImportField = { key: string; label: string; required: boolean };
 type EmployeeImportRow = {
@@ -1741,6 +1754,39 @@ function TemporaryPasswordDialog({ value, onClose }: { value: TemporaryPassword;
   );
 }
 
+function DeleteConfirmationDialog({
+  title,
+  name,
+  description,
+  busy,
+  onCancel,
+  onConfirm,
+  confirmLabel = "Удалить",
+}: {
+  title: string;
+  name: string;
+  description: string;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+  confirmLabel?: string;
+}) {
+  return (
+    <div className="hcm-dialog-backdrop" onMouseDown={(event) => {
+      if (event.target === event.currentTarget && !busy) onCancel();
+    }}>
+      <section className="hcm-dialog delete-confirmation-dialog" role="alertdialog" aria-modal="true" aria-labelledby="delete-confirmation-title">
+        <header>
+          <div><span className="eyebrow">Необратимое действие</span><h2 id="delete-confirmation-title">{title}</h2><p>{name}</p></div>
+          <button className="icon-button" type="button" disabled={busy} onClick={onCancel} aria-label="Закрыть"><X /></button>
+        </header>
+        <div className="delete-confirmation-warning"><Trash2 /><p>{description}</p></div>
+        <footer><button className="secondary-button" type="button" disabled={busy} onClick={onCancel}>Отмена</button><button className="danger-button" type="button" disabled={busy} onClick={onConfirm}>{busy ? "Выполняем…" : confirmLabel}</button></footer>
+      </section>
+    </div>
+  );
+}
+
 function PasswordChangeDialog({ token, onClose, onChanged }: { token: string; onClose: () => void; onChanged: () => void }) {
   const [form, setForm] = useState({ current_password: "", password: "", password_confirm: "" });
   const [visible, setVisible] = useState(false);
@@ -1789,28 +1835,33 @@ function PasswordChangeDialog({ token, onClose, onChanged }: { token: string; on
 function UsersView({ token }: { token: string }) {
   const [users, setUsers] = useState<User[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
+  const [positions, setPositions] = useState<Position[]>([]);
+  const [showPositionCreate, setShowPositionCreate] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [temporaryPassword, setTemporaryPassword] = useState<TemporaryPassword | null>(null);
   const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [deleteUser, setDeleteUser] = useState<User | null>(null);
   const [userBusy, setUserBusy] = useState(false);
   const [form, setForm] = useState({
-    email: "", first_name: "", last_name: "", role: "employee", department: "", can_view_compensation: false,
+    email: "", first_name: "", last_name: "", role: "employee", department: "", position: "", employee_number: "", can_view_compensation: false,
   });
   const [departmentName, setDepartmentName] = useState("");
   const [userForm, setUserForm] = useState({
-    email: "", first_name: "", last_name: "", role: "employee", department: "", can_view_compensation: false,
+    email: "", first_name: "", last_name: "", role: "employee", department: "", position: "", employee_number: "", can_view_compensation: false,
   });
 
   async function load() {
     try {
-      const [userData, departmentData] = await Promise.all([
+      const [userData, departmentData, positionData] = await Promise.all([
         apiRequest<User[]>("/users/", token),
         apiRequest<Department[]>("/departments/", token),
+        apiRequest<Position[]>("/positions/", token),
       ]);
       setUsers(userData);
       setDepartments(departmentData);
+      setPositions(positionData);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Не удалось загрузить данные");
     }
@@ -1828,10 +1879,11 @@ function UsersView({ token }: { token: string }) {
         body: JSON.stringify({
           ...form,
           department: form.department ? Number(form.department) : null,
+          position: form.position ? Number(form.position) : null,
           generate_password: true,
         }),
       });
-      setForm({ email: "", first_name: "", last_name: "", role: "employee", department: "", can_view_compensation: false });
+      setForm({ email: "", first_name: "", last_name: "", role: "employee", department: "", position: "", employee_number: "", can_view_compensation: false });
       setShowForm(false);
       setNotice("Пользователь создан. Передайте ему временный пароль");
       setTemporaryPassword({ email: created.email, password: created.temporary_password });
@@ -1868,6 +1920,8 @@ function UsersView({ token }: { token: string }) {
       last_name: user.last_name,
       role: user.role,
       department: user.department ? String(user.department) : "",
+      position: user.position ? String(user.position) : "",
+      employee_number: user.employee_number || "",
       can_view_compensation: user.can_view_compensation,
     });
   }
@@ -1883,6 +1937,7 @@ function UsersView({ token }: { token: string }) {
         body: JSON.stringify({
           ...userForm,
           department: userForm.department ? Number(userForm.department) : null,
+          position: userForm.position ? Number(userForm.position) : null,
         }),
       });
       setEditingUser(null);
@@ -1906,6 +1961,24 @@ function UsersView({ token }: { token: string }) {
       await load();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Не удалось изменить доступ");
+    } finally {
+      setUserBusy(false);
+    }
+  }
+
+  async function confirmDeleteUser() {
+    if (!deleteUser) return;
+    setUserBusy(true);
+    setError("");
+    try {
+      await apiRequest<void>(`/users/${deleteUser.id}/`, token, { method: "DELETE" });
+      setDeleteUser(null);
+      setEditingUser(null);
+      setNotice(`Пользователь ${deleteUser.email} удалён`);
+      await load();
+    } catch (reason) {
+      setDeleteUser(null);
+      setError(reason instanceof Error ? reason.message : "Не удалось удалить пользователя");
     } finally {
       setUserBusy(false);
     }
@@ -1966,6 +2039,8 @@ function UsersView({ token }: { token: string }) {
             <label>Отдел<select value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })}>
               <option value="">Без отдела</option>{departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
             </select></label>
+            <label>Должность<select value={form.position} onChange={(e) => setForm({ ...form, position: e.target.value })}><option value="">Не оформлять как сотрудника</option>{positions.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+            {form.position && <label>Табельный номер<input value={form.employee_number} onChange={(e) => setForm({ ...form, employee_number: e.target.value })} placeholder="Создастся автоматически" /></label>}
             {["hr", "leader"].includes(form.role) && <label className="user-compensation-access"><input type="checkbox" checked={form.can_view_compensation} onChange={(event) => setForm({ ...form, can_view_compensation: event.target.checked })} /><span><strong>Доступ к оплате труда</strong><small>Показывать оклад и премии в карточках сотрудников</small></span></label>}
             <button className="primary-button" type="submit">Создать и сгенерировать пароль</button>
           </form>
@@ -1983,12 +2058,12 @@ function UsersView({ token }: { token: string }) {
       <section className="panel table-panel">
         <div className="table-wrap">
           <table>
-            <thead><tr><th>Сотрудник</th><th>Отдел</th><th>Роль</th><th>Статус</th><th aria-label="Действия" /></tr></thead>
+            <thead><tr><th>Пользователь</th><th>Должность</th><th>Отдел</th><th>Роль</th><th>Статус</th><th aria-label="Действия" /></tr></thead>
             <tbody>
               {users.map((item) => (
                 <tr key={item.id}>
                   <td><strong>{item.first_name} {item.last_name}</strong><span>{item.email}</span></td>
-                  <td>{item.department_name || "—"}</td><td>{item.role_label}{item.can_view_compensation && item.role !== "admin" && <span>Оплата труда</span>}</td>
+                  <td>{item.position_name || "Не оформлен как сотрудник"}</td><td>{item.department_name || "—"}</td><td>{item.role_label}{item.can_view_compensation && item.role !== "admin" && <span>Оплата труда</span>}</td>
                   <td><span className={"status status--" + item.status}>{item.status_label}</span></td>
                   <td><button className="secondary-button user-invite-button" type="button" onClick={() => openUser(item)}><Settings2 />Управлять</button></td>
                 </tr>
@@ -2013,6 +2088,9 @@ function UsersView({ token }: { token: string }) {
                 <label className="hcm-form__wide">Корпоративная почта<input type="email" value={userForm.email} onChange={(event) => setUserForm({ ...userForm, email: event.target.value })} required /></label>
                 <label>Роль<select value={userForm.role} onChange={(event) => setUserForm({ ...userForm, role: event.target.value, can_view_compensation: ["hr", "leader"].includes(event.target.value) ? userForm.can_view_compensation : false })}><option value="employee">Сотрудник</option><option value="hr">HR-менеджер</option><option value="admin">Администратор</option><option value="author">Автор курсов</option><option value="leader">Руководитель</option></select></label>
                 <label>Отдел<select value={userForm.department} onChange={(event) => setUserForm({ ...userForm, department: event.target.value })}><option value="">Без отдела</option>{departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+                <div className="reference-field"><label>Должность<select value={userForm.position} onChange={(event) => setUserForm({ ...userForm, position: event.target.value })}><option value="">Не оформлен как сотрудник</option>{positions.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><button className="text-button" type="button" onClick={() => setShowPositionCreate(true)}><Plus />Новая должность</button></div>
+                {userForm.position && <label>Табельный номер<input value={userForm.employee_number} onChange={(event) => setUserForm({ ...userForm, employee_number: event.target.value })} placeholder="Создастся автоматически" /></label>}
+                <div className="hcm-form__wide user-employee-link"><ContactRound /><span><strong>{editingUser.employee_profile_id ? "Карточка сотрудника связана" : userForm.position ? "Карточка сотрудника будет создана" : "Только учётная запись"}</strong><small>Отдел и должность синхронизируются с реестром сотрудников и оргструктурой.</small></span></div>
                 {["hr", "leader"].includes(userForm.role) && <label className="hcm-form__wide user-compensation-access"><input type="checkbox" checked={userForm.can_view_compensation} onChange={(event) => setUserForm({ ...userForm, can_view_compensation: event.target.checked })} /><span><strong>Разрешить просмотр оплаты труда</strong><small>Пользователь увидит оклады, месячные и квартальные премии.</small></span></label>}
               </div>
               <div className="user-access-state">
@@ -2026,6 +2104,7 @@ function UsersView({ token }: { token: string }) {
                   {editingUser.status === "blocked"
                     ? <button className="secondary-button" type="button" disabled={userBusy} onClick={() => void changeUserAccess("restore")}>Восстановить доступ</button>
                     : <button className="danger-button" type="button" disabled={userBusy} onClick={() => void changeUserAccess("block")}>Заблокировать</button>}
+                  <button className="text-button text-button--danger delete-text-button" type="button" disabled={userBusy} onClick={() => setDeleteUser(editingUser)}><Trash2 />Удалить</button>
                 </div>
                 <div><button className="secondary-button" type="button" onClick={() => setEditingUser(null)}>Отмена</button><button className="primary-button" type="submit" disabled={userBusy}>{userBusy ? "Сохраняем…" : "Сохранить"}</button></div>
               </footer>
@@ -2033,7 +2112,9 @@ function UsersView({ token }: { token: string }) {
           </section>
         </div>
       )}
+      {deleteUser && <DeleteConfirmationDialog title="Удалить пользователя?" name={`${deleteUser.first_name} ${deleteUser.last_name} · ${deleteUser.email}`} description={deleteUser.employee_profile_id ? "Учётная запись и связанная карточка сотрудника со всеми кадровыми данными будут удалены. Отменить это действие нельзя." : "Учётная запись будет удалена без возможности восстановления."} busy={userBusy} onCancel={() => setDeleteUser(null)} onConfirm={() => void confirmDeleteUser()} />}
       {temporaryPassword && <TemporaryPasswordDialog value={temporaryPassword} onClose={() => setTemporaryPassword(null)} />}
+      {showPositionCreate && <PositionCreateDialog token={token} departments={departments} defaultDepartment={userForm.department} onClose={() => setShowPositionCreate(false)} onCreated={(position) => { setPositions((items) => [...items, position].sort((left, right) => left.name.localeCompare(right.name, "ru"))); setUserForm((current) => ({ ...current, position: String(position.id) })); }} />}
     </>
   );
 }
@@ -2463,6 +2544,7 @@ function EmployeeProfileView({
               <div><dt>Табельный номер</dt><dd>{employee.employee_number}</dd></div>
               <div><dt>Отдел</dt><dd>{employee.department_name || "—"}</dd></div>
               <div><dt>Должность</dt><dd>{employee.position_name || "—"}</dd></div>
+              {employee.staff_position_note && <div className="employee-details__wide"><dt>Комментарий к штатной позиции</dt><dd>{employee.staff_position_note}</dd></div>}
               <div><dt>Грейд</dt><dd>{employee.grade || "—"}</dd></div>
               <div><dt>Дата выхода</dt><dd>{displayDate(employee.hire_date)}</dd></div>
               <div><dt>Стаж</dt><dd>{employee.tenure_years === null ? "—" : `${employee.tenure_years} г.`}</dd></div>
@@ -2550,8 +2632,23 @@ function EmployeeProfileView({
   );
 }
 
-function PositionCreateDialog({ token, onClose, onCreated }: { token: string; onClose: () => void; onCreated: (position: Position) => void }) {
+function PositionCreateDialog({
+  token,
+  onClose,
+  onCreated,
+  departments = [],
+  defaultDepartment = "",
+}: {
+  token: string;
+  onClose: () => void;
+  onCreated: (position: Position) => void;
+  departments?: Department[];
+  defaultDepartment?: string;
+}) {
   const [name, setName] = useState("");
+  const [department, setDepartment] = useState(defaultDepartment);
+  const [headcount, setHeadcount] = useState("1");
+  const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -2562,7 +2659,12 @@ function PositionCreateDialog({ token, onClose, onCreated }: { token: string; on
     try {
       const position = await apiRequest<Position>("/positions/", token, {
         method: "POST",
-        body: JSON.stringify({ name }),
+        body: JSON.stringify({
+          name,
+          department: department ? Number(department) : null,
+          headcount: Number(headcount),
+          note,
+        }),
       });
       onCreated(position);
       onClose();
@@ -2576,9 +2678,11 @@ function PositionCreateDialog({ token, onClose, onCreated }: { token: string; on
   return (
     <div className="hcm-dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !saving) onClose(); }}>
       <section className="hcm-dialog reference-create-dialog" role="dialog" aria-modal="true" aria-labelledby="position-create-title">
-        <header><div><h2 id="position-create-title">Новая должность</h2><p>Она появится в карточках сотрудников, штатном расписании и вакансиях</p></div><button className="icon-button" type="button" disabled={saving} onClick={onClose} aria-label="Закрыть"><X /></button></header>
+        <header><div><h2 id="position-create-title">Новая должность</h2><p>Добавьте её в справочник или сразу включите в штат выбранного отдела</p></div><button className="icon-button" type="button" disabled={saving} onClick={onClose} aria-label="Закрыть"><X /></button></header>
         <form className="hcm-form" onSubmit={save}>
           <label>Название должности<input autoFocus value={name} maxLength={160} onChange={(event) => setName(event.target.value)} placeholder="Например, Продуктовый аналитик" required /></label>
+          {departments.length > 0 && <label>Отдел<select value={department} onChange={(event) => setDepartment(event.target.value)}><option value="">Только добавить в справочник</option>{departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><span>Если выбрать отдел, должность сразу появится в его штатном расписании. Вакансия при этом не создаётся.</span></label>}
+          {department && <div className="hcm-form__grid"><label>Штатных единиц<input type="number" min="1" value={headcount} onChange={(event) => setHeadcount(event.target.value)} required /></label><label>Комментарий<textarea value={note} onChange={(event) => setNote(event.target.value)} placeholder="Зона ответственности или пояснение к позиции" /></label></div>}
           {error && <p className="form-error">{error}</p>}
           <footer><button className="secondary-button" type="button" disabled={saving} onClick={onClose}>Отмена</button><button className="primary-button" type="submit" disabled={saving || !name.trim()}>{saving ? "Добавляем…" : "Добавить"}</button></footer>
         </form>
@@ -2592,8 +2696,10 @@ function OrganizationView({ token }: { token: string }) {
   const [staff, setStaff] = useState<StaffPosition[]>([]);
   const [employees, setEmployees] = useState<EmployeeProfile[]>([]);
   const [positions, setPositions] = useState<Position[]>([]);
+  const [managerOptions, setManagerOptions] = useState<ManagerOption[]>([]);
   const [onboardingTemplates, setOnboardingTemplates] = useState<OnboardingTemplateConfig[]>([]);
   const [learningPathOptions, setLearningPathOptions] = useState<LearningPathOption[]>([]);
+  const [openVacancies, setOpenVacancies] = useState<Vacancy[]>([]);
   const [selected, setSelected] = useState<number | null>(null);
   const [departmentDialog, setDepartmentDialog] = useState<OrgDepartment | "new" | null>(null);
   const [staffDialog, setStaffDialog] = useState<StaffPosition | "new" | null>(null);
@@ -2606,23 +2712,30 @@ function OrganizationView({ token }: { token: string }) {
   });
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<{ kind: "department"; item: OrgDepartment } | { kind: "staff"; item: StaffPosition } | null>(null);
+  const [closeRecruitmentTarget, setCloseRecruitmentTarget] = useState<StaffPosition | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
 
   async function load() {
     try {
-      const [nextDepartments, nextStaff, nextEmployees, nextPositions, nextTemplates, nextOptions] = await Promise.all([
+      const [nextDepartments, nextStaff, nextEmployees, nextPositions, nextManagers, nextTemplates, nextOptions, nextOpenVacancies] = await Promise.all([
         apiRequest<OrgDepartment[]>("/org/departments/", token),
         apiRequest<StaffPosition[]>("/org/staff-positions/", token),
         apiRequest<EmployeeProfile[]>("/employees/", token),
         apiRequest<Position[]>("/positions/", token),
+        apiRequest<ManagerOption[]>("/org/manager-options/", token),
         apiRequest<OnboardingTemplateConfig[]>("/onboarding-templates/", token),
         apiRequest<{ learning_paths: LearningPathOption[] }>("/onboarding-options/", token),
+        apiRequest<Vacancy[]>("/vacancies/?status=open", token),
       ]);
       setDepartments(nextDepartments);
       setStaff(nextStaff);
       setEmployees(nextEmployees);
       setPositions(nextPositions);
+      setManagerOptions(nextManagers);
       setOnboardingTemplates(nextTemplates);
       setLearningPathOptions(nextOptions.learning_paths);
+      setOpenVacancies(nextOpenVacancies);
       setSelected((current) => current && nextDepartments.some((item) => item.id === current)
         ? current
         : nextDepartments.find((item) => item.parent === null)?.id || nextDepartments[0]?.id || null);
@@ -2695,9 +2808,13 @@ function OrganizationView({ token }: { token: string }) {
     event.preventDefault();
     if (!selected) return;
     const editing = staffDialog !== "new" && staffDialog;
+    const existing = !editing ? staff.find((item) => (
+      item.department === selected && item.position === Number(staffForm.position)
+    )) : null;
+    const target = editing || existing;
     try {
-      await apiRequest(editing ? `/org/staff-positions/${editing.id}/` : "/org/staff-positions/", token, {
-        method: editing ? "PATCH" : "POST",
+      await apiRequest(target ? `/org/staff-positions/${target.id}/` : "/org/staff-positions/", token, {
+        method: target ? "PATCH" : "POST",
         body: JSON.stringify({
           department: selected,
           position: Number(staffForm.position),
@@ -2706,9 +2823,61 @@ function OrganizationView({ token }: { token: string }) {
         }),
       });
       setStaffDialog(null);
+      if (existing) setNotice(`Штатная позиция «${existing.position_name}» обновлена`);
       await load();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Не удалось сохранить штатную позицию");
+    }
+  }
+
+  async function confirmOrganizationDelete() {
+    if (!deleteTarget) return;
+    setDeleteBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      if (deleteTarget.kind === "department") {
+        await apiRequest<void>(`/org/departments/${deleteTarget.item.id}/`, token, { method: "DELETE" });
+        setDepartmentDialog(null);
+        setNotice(`Подразделение «${deleteTarget.item.name}» удалено`);
+      } else {
+        await apiRequest<void>(`/org/staff-positions/${deleteTarget.item.id}/`, token, { method: "DELETE" });
+        setStaffDialog(null);
+        setNotice(`Штатная позиция «${deleteTarget.item.position_name}» удалена`);
+      }
+      setDeleteTarget(null);
+      await load();
+    } catch (reason) {
+      setDeleteTarget(null);
+      setError(reason instanceof Error ? reason.message : "Не удалось удалить запись");
+    } finally {
+      setDeleteBusy(false);
+    }
+  }
+
+  async function closeRecruitment() {
+    if (!closeRecruitmentTarget) return;
+    const vacancy = openVacancies.find((item) => item.staff_position === closeRecruitmentTarget.id);
+    if (!vacancy) {
+      setCloseRecruitmentTarget(null);
+      setError("Открытая вакансия не найдена — обновите страницу");
+      return;
+    }
+    setDeleteBusy(true);
+    setError("");
+    try {
+      await apiRequest<Vacancy>(`/vacancies/${vacancy.id}/`, token, {
+        method: "PATCH",
+        body: JSON.stringify({ status: "closed" }),
+      });
+      setCloseRecruitmentTarget(null);
+      setNotice(`Подбор на позицию «${closeRecruitmentTarget.position_name}» закрыт`);
+      await load();
+    } catch (reason) {
+      setCloseRecruitmentTarget(null);
+      setError(reason instanceof Error ? reason.message : "Не удалось закрыть подбор");
+    } finally {
+      setDeleteBusy(false);
     }
   }
 
@@ -2843,7 +3012,7 @@ function OrganizationView({ token }: { token: string }) {
                       <span><b>{item.filled_count} / {item.headcount}</b><small>{item.vacancies ? `${item.vacancies} вак.` : "Укомплектовано"}</small></span>
                     </button>
                     {item.vacancies > 0 && item.open_vacancy_count === 0 && <button className="organization-staff-list__vacancy" type="button" onClick={() => void createVacancyFromStaff(item)}>Открыть вакансию</button>}
-                    {item.open_vacancy_count > 0 && <span className="organization-staff-list__opened">В подборе</span>}
+                    {item.open_vacancy_count > 0 && <button className="organization-staff-list__opened" type="button" onClick={() => setCloseRecruitmentTarget(item)} title="Закрыть подбор и вернуть возможность открыть вакансию">В подборе · отменить</button>}
                     <button className="organization-staff-list__onboarding" type="button" onClick={() => openOnboardingTemplate(item)}><Settings2 /> Адаптация</button>
                   </article>
                 ))}
@@ -2863,9 +3032,9 @@ function OrganizationView({ token }: { token: string }) {
                 <label>Название<input value={departmentForm.name} onChange={(event) => setDepartmentForm({ ...departmentForm, name: event.target.value })} required /></label>
                 <label>Код<input value={departmentForm.code} onChange={(event) => setDepartmentForm({ ...departmentForm, code: event.target.value })} placeholder="Создастся автоматически" /></label>
                 <label>Вышестоящее подразделение<select value={departmentForm.parent} onChange={(event) => setDepartmentForm({ ...departmentForm, parent: event.target.value })}><option value="">Нет — верхний уровень</option>{departments.filter((item) => departmentDialog === "new" || item.id !== departmentDialog.id).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-                <label>Руководитель<select value={departmentForm.manager} onChange={(event) => setDepartmentForm({ ...departmentForm, manager: event.target.value })}><option value="">{employees.length ? "Не назначен" : "Нет сотрудников — сначала добавьте сотрудника"}</option>{employees.map((item) => <option key={item.user} value={item.user}>{item.full_name}</option>)}</select></label>
+                <label>Руководитель<select value={departmentForm.manager} onChange={(event) => setDepartmentForm({ ...departmentForm, manager: event.target.value })}><option value="">Не назначен</option>{managerOptions.map((item) => <option key={item.id} value={item.id}>{item.full_name}{item.position_name ? ` · ${item.position_name}` : item.department_name ? ` · ${item.department_name}` : ""}</option>)}</select><span>Можно выбрать любого активного пользователя. Должность назначается в его карточке пользователя.</span></label>
               </div>
-              <footer><button className="secondary-button" type="button" onClick={() => setDepartmentDialog(null)}>Отмена</button><button className="primary-button" type="submit">Сохранить</button></footer>
+              <footer className="destructive-form-footer">{departmentDialog !== "new" && <button className="text-button text-button--danger delete-text-button" type="button" onClick={() => setDeleteTarget({ kind: "department", item: departmentDialog })}><Trash2 />Удалить подразделение</button>}<div><button className="secondary-button" type="button" onClick={() => setDepartmentDialog(null)}>Отмена</button><button className="primary-button" type="submit">Сохранить</button></div></footer>
             </form>
           </section>
         </div>
@@ -2876,16 +3045,19 @@ function OrganizationView({ token }: { token: string }) {
             <header><div><h2>{staffDialog === "new" ? "Новая штатная позиция" : "Штатная позиция"}</h2><p>{activeDepartment?.name}</p></div><button className="icon-button" type="button" onClick={() => setStaffDialog(null)}><X /></button></header>
             <form className="hcm-form" onSubmit={saveStaff}>
               <div className="hcm-form__grid">
-                <div className="reference-field"><label>Должность<select value={staffForm.position} onChange={(event) => setStaffForm({ ...staffForm, position: event.target.value })} required><option value="">{positions.length ? "Выберите должность" : "Должностей пока нет"}</option>{positions.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><button className="text-button" type="button" onClick={() => setShowPositionCreate(true)}><Plus />Новая должность</button></div>
+                <div className="reference-field"><label>Должность<select value={staffForm.position} onChange={(event) => { const position = event.target.value; const existing = visibleStaff.find((item) => item.position === Number(position)); setStaffForm(existing ? { position, headcount: String(existing.headcount), note: existing.note } : { ...staffForm, position }); }} required><option value="">{positions.length ? "Выберите должность" : "Должностей пока нет"}</option>{positions.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><button className="text-button" type="button" onClick={() => setShowPositionCreate(true)}><Plus />Новая должность</button></div>
                 <label>Штатных единиц<input type="number" min="1" value={staffForm.headcount} onChange={(event) => setStaffForm({ ...staffForm, headcount: event.target.value })} required /></label>
-                <label className="hcm-form__wide">Комментарий<input value={staffForm.note} onChange={(event) => setStaffForm({ ...staffForm, note: event.target.value })} /></label>
+                <label className="hcm-form__wide">Комментарий<textarea value={staffForm.note} onChange={(event) => setStaffForm({ ...staffForm, note: event.target.value })} placeholder="Зона ответственности или пояснение к позиции" /></label>
+                {staffDialog === "new" && visibleStaff.some((item) => item.position === Number(staffForm.position)) && <p className="hcm-form__wide form-notice">Эта должность уже есть в отделе. Сохранение обновит штатные единицы и комментарий существующей позиции.</p>}
               </div>
-              <footer><button className="secondary-button" type="button" onClick={() => setStaffDialog(null)}>Отмена</button><button className="primary-button" type="submit">Сохранить</button></footer>
+              <footer className="destructive-form-footer">{staffDialog !== "new" && <button className="text-button text-button--danger delete-text-button" type="button" onClick={() => setDeleteTarget({ kind: "staff", item: staffDialog })}><Trash2 />Удалить позицию</button>}<div><button className="secondary-button" type="button" onClick={() => setStaffDialog(null)}>Отмена</button><button className="primary-button" type="submit">Сохранить</button></div></footer>
             </form>
           </section>
         </div>
       )}
-      {showPositionCreate && <PositionCreateDialog token={token} onClose={() => setShowPositionCreate(false)} onCreated={(position) => { setPositions((items) => [...items, position].sort((left, right) => left.name.localeCompare(right.name, "ru"))); setStaffForm((current) => ({ ...current, position: String(position.id) })); }} />}
+      {deleteTarget && <DeleteConfirmationDialog title={deleteTarget.kind === "department" ? "Удалить подразделение?" : "Удалить штатную позицию?"} name={deleteTarget.kind === "department" ? deleteTarget.item.name : `${deleteTarget.item.position_name} · ${deleteTarget.item.department_name}`} description={deleteTarget.kind === "department" ? "Удалить можно только подразделение без пользователей, дочерних подразделений и вакансий. Вместе с ним будут удалены его пустые штатные позиции." : "Строка штатного расписания и комментарий будут удалены. Справочник должностей не изменится."} busy={deleteBusy} onCancel={() => setDeleteTarget(null)} onConfirm={() => void confirmOrganizationDelete()} />}
+      {closeRecruitmentTarget && <DeleteConfirmationDialog title="Закрыть подбор?" name={`${closeRecruitmentTarget.position_name} · ${closeRecruitmentTarget.department_name}`} description="Вакансия перейдёт в статус «Закрыта». Кандидаты сохранятся в разделе подбора, а в оргструктуре снова появится кнопка «Открыть вакансию»." busy={deleteBusy} confirmLabel="Закрыть подбор" onCancel={() => setCloseRecruitmentTarget(null)} onConfirm={() => void closeRecruitment()} />}
+      {showPositionCreate && <PositionCreateDialog token={token} departments={staffDialog ? [] : departments} defaultDepartment={selected ? String(selected) : ""} onClose={() => setShowPositionCreate(false)} onCreated={(position) => { setPositions((items) => [...items, position].sort((left, right) => left.name.localeCompare(right.name, "ru"))); setStaffForm((current) => ({ ...current, position: String(position.id) })); void load(); }} />}
       {onboardingDialog && (
         <div className="hcm-dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setOnboardingDialog(null); }}>
           <section className="hcm-dialog organization-dialog" role="dialog" aria-modal="true" aria-labelledby="onboarding-template-title">
@@ -3396,7 +3568,7 @@ function EmployeesView({ token, user }: { token: string; user: User }) {
           </section>
         </div>
       )}
-      {showPositionCreate && <PositionCreateDialog token={token} onClose={() => setShowPositionCreate(false)} onCreated={(position) => { setPositions((items) => [...items, position].sort((left, right) => left.name.localeCompare(right.name, "ru"))); setForm((current) => ({ ...current, position: String(position.id) })); }} />}
+      {showPositionCreate && <PositionCreateDialog token={token} departments={departments} defaultDepartment={form.department} onClose={() => setShowPositionCreate(false)} onCreated={(position) => { setPositions((items) => [...items, position].sort((left, right) => left.name.localeCompare(right.name, "ru"))); setForm((current) => ({ ...current, position: String(position.id) })); }} />}
       {temporaryPassword && <TemporaryPasswordDialog value={temporaryPassword} onClose={() => setTemporaryPassword(null)} />}
     </>
   );
