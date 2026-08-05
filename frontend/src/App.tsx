@@ -2715,6 +2715,8 @@ function OrganizationView({ token }: { token: string }) {
   const [deleteTarget, setDeleteTarget] = useState<{ kind: "department"; item: OrgDepartment } | { kind: "staff"; item: StaffPosition } | null>(null);
   const [closeRecruitmentTarget, setCloseRecruitmentTarget] = useState<StaffPosition | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [staffHeadcountDrafts, setStaffHeadcountDrafts] = useState<Record<number, string>>({});
+  const [staffHeadcountBusy, setStaffHeadcountBusy] = useState<number | null>(null);
 
   async function load() {
     try {
@@ -2730,6 +2732,7 @@ function OrganizationView({ token }: { token: string }) {
       ]);
       setDepartments(nextDepartments);
       setStaff(nextStaff);
+      setStaffHeadcountDrafts(Object.fromEntries(nextStaff.map((item) => [item.id, String(item.headcount)])));
       setEmployees(nextEmployees);
       setPositions(nextPositions);
       setManagerOptions(nextManagers);
@@ -2764,6 +2767,14 @@ function OrganizationView({ token }: { token: string }) {
     planned: result.planned + item.planned_headcount,
     vacancies: result.vacancies + item.vacancies,
   }), { employees: 0, planned: 0, vacancies: 0 });
+  const activeOpenRecruitmentCount = visibleStaff.reduce((total, item) => total + item.open_vacancy_count, 0);
+  const selectedStaffPosition = staffDialog && staffDialog !== "new"
+    ? staffDialog
+    : visibleStaff.find((item) => item.position === Number(staffForm.position)) || null;
+  const selectedStaffFilled = selectedStaffPosition?.filled_count || 0;
+  const selectedStaffPlanned = Math.max(Number(staffForm.headcount) || 0, 0);
+  const selectedStaffFree = Math.max(selectedStaffPlanned - selectedStaffFilled, 0);
+  const staffPlanIsTooSmall = selectedStaffPlanned < selectedStaffFilled;
 
   function openDepartment(item?: OrgDepartment) {
     setDepartmentDialog(item || "new");
@@ -2807,6 +2818,10 @@ function OrganizationView({ token }: { token: string }) {
   async function saveStaff(event: FormEvent) {
     event.preventDefault();
     if (!selected) return;
+    if (staffPlanIsTooSmall) {
+      setError(`По штату не может быть меньше ${selectedStaffFilled}: столько сотрудников уже работает на позиции`);
+      return;
+    }
     const editing = staffDialog !== "new" && staffDialog;
     const existing = !editing ? staff.find((item) => (
       item.department === selected && item.position === Number(staffForm.position)
@@ -2828,6 +2843,38 @@ function OrganizationView({ token }: { token: string }) {
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Не удалось сохранить штатную позицию");
     }
+  }
+
+  async function saveStaffHeadcount(item: StaffPosition) {
+    const headcount = Number(staffHeadcountDrafts[item.id]);
+    if (!Number.isInteger(headcount) || headcount < Math.max(item.filled_count, 1)) {
+      setError(`Для «${item.position_name}» укажите не меньше ${Math.max(item.filled_count, 1)} штатных единиц`);
+      return;
+    }
+    setStaffHeadcountBusy(item.id);
+    setError("");
+    setNotice("");
+    try {
+      await apiRequest<StaffPosition>(`/org/staff-positions/${item.id}/`, token, {
+        method: "PATCH",
+        body: JSON.stringify({ headcount }),
+      });
+      setNotice(`Штат для «${item.position_name}» обновлён: ${headcount}`);
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось изменить штатную численность");
+    } finally {
+      setStaffHeadcountBusy(null);
+    }
+  }
+
+  function changeStaffHeadcountDraft(item: StaffPosition, delta: number) {
+    const minimum = Math.max(item.filled_count, 1);
+    const current = Number(staffHeadcountDrafts[item.id] || item.headcount);
+    setStaffHeadcountDrafts((drafts) => ({
+      ...drafts,
+      [item.id]: String(Math.max((Number.isFinite(current) ? current : item.headcount) + delta, minimum)),
+    }));
   }
 
   async function confirmOrganizationDelete() {
@@ -2960,7 +3007,7 @@ function OrganizationView({ token }: { token: string }) {
         <article><span>Подразделений</span><strong>{departments.length}</strong></article>
         <article><span>Сотрудников</span><strong>{totals.employees}</strong></article>
         <article><span>Штатных единиц</span><strong>{totals.planned}</strong></article>
-        <article><span>Открытых вакансий</span><strong>{totals.vacancies}</strong></article>
+        <article><span>Свободных мест</span><strong>{totals.vacancies}</strong></article>
       </section>
       {error && <p className="form-error">{error}</p>}
       {notice && <p className="form-notice"><CheckCircle2 />{notice}</p>}
@@ -2996,24 +3043,31 @@ function OrganizationView({ token }: { token: string }) {
                 <button className="icon-button" type="button" onClick={() => openDepartment(activeDepartment)} aria-label="Редактировать подразделение"><Pencil /></button>
               </header>
               <div className="organization-details__summary">
-                <span><strong>{activeDepartment.employee_count}</strong> сотрудников</span>
-                <span><strong>{activeDepartment.planned_headcount}</strong> штатных единиц</span>
-                <span><strong>{activeDepartment.vacancies}</strong> вакансий</span>
+                <span><small>Работают</small><strong>{activeDepartment.employee_count}</strong></span>
+                <span><small>По штатному плану</small><strong>{activeDepartment.planned_headcount}</strong></span>
+                <span><small>Свободно</small><strong>{activeDepartment.vacancies}</strong></span>
+                <span><small>В подборе</small><strong>{activeOpenRecruitmentCount}</strong></span>
               </div>
               <div className="section-heading organization-staff-heading">
-                <div><h3>Штатные позиции</h3><p>Плановая и фактическая численность</p></div>
-                <button className="secondary-button" type="button" onClick={() => openStaff()}><Plus /> Позиция</button>
+                <div><h3>Штатное расписание</h3><p>Количество штатных единиц меняется прямо в карточке должности</p></div>
+                <button className="secondary-button" type="button" onClick={() => openStaff()}><Plus /> Добавить позицию</button>
               </div>
               <div className="organization-staff-list">
                 {visibleStaff.map((item) => (
                   <article key={item.id}>
                     <button className="organization-staff-list__main" type="button" onClick={() => openStaff(item)}>
-                      <span><strong>{item.position_name}</strong><small>{item.note || "Без комментария"}</small></span>
-                      <span><b>{item.filled_count} / {item.headcount}</b><small>{item.vacancies ? `${item.vacancies} вак.` : "Укомплектовано"}</small></span>
+                      <span><strong>{item.position_name}</strong><small>{item.note || "Добавить комментарий и настройки"}</small></span><Pencil />
                     </button>
-                    {item.vacancies > 0 && item.open_vacancy_count === 0 && <button className="organization-staff-list__vacancy" type="button" onClick={() => void createVacancyFromStaff(item)}>Открыть вакансию</button>}
-                    {item.open_vacancy_count > 0 && <button className="organization-staff-list__opened" type="button" onClick={() => setCloseRecruitmentTarget(item)} title="Закрыть подбор и вернуть возможность открыть вакансию">В подборе · отменить</button>}
-                    <button className="organization-staff-list__onboarding" type="button" onClick={() => openOnboardingTemplate(item)}><Settings2 /> Адаптация</button>
+                    <div className="organization-staff-editor">
+                      <label><span>Штатных единиц</span><div><button type="button" disabled={staffHeadcountBusy === item.id || Number(staffHeadcountDrafts[item.id]) <= Math.max(item.filled_count, 1)} onClick={() => changeStaffHeadcountDraft(item, -1)} aria-label={`Уменьшить штат для ${item.position_name}`}><Minus /></button><input type="number" min={Math.max(item.filled_count, 1)} value={staffHeadcountDrafts[item.id] ?? String(item.headcount)} onChange={(event) => setStaffHeadcountDrafts((drafts) => ({ ...drafts, [item.id]: event.target.value }))} aria-label={`Штатных единиц для ${item.position_name}`} /><button type="button" disabled={staffHeadcountBusy === item.id} onClick={() => changeStaffHeadcountDraft(item, 1)} aria-label={`Увеличить штат для ${item.position_name}`}><Plus /></button></div></label>
+                      <div className="organization-staff-editor__fact"><span>Занято сотрудниками</span><strong>{item.filled_count}</strong></div>
+                      <div className={item.vacancies > 0 ? "organization-staff-editor__fact organization-staff-editor__fact--free" : "organization-staff-editor__fact"}><span>Свободно сейчас</span><strong>{item.vacancies}</strong></div>
+                      <button className="secondary-button organization-staff-editor__save" type="button" disabled={staffHeadcountBusy === item.id || Number(staffHeadcountDrafts[item.id]) === item.headcount} onClick={() => void saveStaffHeadcount(item)}>{staffHeadcountBusy === item.id ? "Сохраняем…" : "Сохранить штат"}</button>
+                    </div>
+                    <div className="organization-staff-actions">
+                      <span>Свободные места рассчитываются автоматически: штат минус занятые.</span>
+                      <div>{item.vacancies > 0 && item.open_vacancy_count === 0 && <button className="organization-staff-list__vacancy" type="button" onClick={() => void createVacancyFromStaff(item)}>Начать подбор</button>}{item.open_vacancy_count > 0 && <button className="organization-staff-list__opened" type="button" onClick={() => setCloseRecruitmentTarget(item)} title="Закрыть подбор и вернуть возможность открыть вакансию">Подбор открыт · закрыть</button>}<button className="organization-staff-list__onboarding" type="button" onClick={() => openOnboardingTemplate(item)}><Settings2 /> Адаптация</button></div>
+                    </div>
                   </article>
                 ))}
                 {!visibleStaff.length && <div className="hcm-empty"><BriefcaseBusiness /><p>Штатные позиции ещё не добавлены</p></div>}
@@ -3042,15 +3096,24 @@ function OrganizationView({ token }: { token: string }) {
       {staffDialog && (
         <div className="hcm-dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setStaffDialog(null); }}>
           <section className="hcm-dialog organization-dialog">
-            <header><div><h2>{staffDialog === "new" ? "Новая штатная позиция" : "Штатная позиция"}</h2><p>{activeDepartment?.name}</p></div><button className="icon-button" type="button" onClick={() => setStaffDialog(null)}><X /></button></header>
+            <header><div><h2>{staffDialog === "new" ? "Добавить позицию в штат" : "Изменить штатную позицию"}</h2><p>{activeDepartment?.name} · задайте плановую численность</p></div><button className="icon-button" type="button" onClick={() => setStaffDialog(null)} aria-label="Закрыть"><X /></button></header>
             <form className="hcm-form" onSubmit={saveStaff}>
               <div className="hcm-form__grid">
                 <div className="reference-field"><label>Должность<select value={staffForm.position} onChange={(event) => { const position = event.target.value; const existing = visibleStaff.find((item) => item.position === Number(position)); setStaffForm(existing ? { position, headcount: String(existing.headcount), note: existing.note } : { ...staffForm, position }); }} required><option value="">{positions.length ? "Выберите должность" : "Должностей пока нет"}</option>{positions.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><button className="text-button" type="button" onClick={() => setShowPositionCreate(true)}><Plus />Новая должность</button></div>
-                <label>Штатных единиц<input type="number" min="1" value={staffForm.headcount} onChange={(event) => setStaffForm({ ...staffForm, headcount: event.target.value })} required /></label>
+                <label>Мест по штатному плану<input type="number" min={Math.max(selectedStaffFilled, 1)} value={staffForm.headcount} onChange={(event) => setStaffForm({ ...staffForm, headcount: event.target.value })} required /><span>Общее количество мест для этой должности, включая занятые.</span></label>
+                <div className="hcm-form__wide staffing-calculation" aria-label="Расчёт штатной численности">
+                  <div><small>Сейчас работают</small><strong>{selectedStaffFilled}</strong></div>
+                  <span>из</span>
+                  <div><small>По штатному плану</small><strong>{selectedStaffPlanned}</strong></div>
+                  <span>=</span>
+                  <div className={selectedStaffFree > 0 ? "staffing-calculation__free" : ""}><small>Свободных мест</small><strong>{selectedStaffFree}</strong></div>
+                </div>
+                <p className="hcm-form__wide staffing-explanation">Свободные места рассчитываются автоматически. Чтобы передать свободное место HR в работу, сохраните изменения и нажмите «Начать подбор» в строке должности.</p>
+                {staffPlanIsTooSmall && <p className="hcm-form__wide form-error">Нельзя уменьшить план до {selectedStaffPlanned}: на этой позиции уже работает {selectedStaffFilled}.</p>}
                 <label className="hcm-form__wide">Комментарий<textarea value={staffForm.note} onChange={(event) => setStaffForm({ ...staffForm, note: event.target.value })} placeholder="Зона ответственности или пояснение к позиции" /></label>
                 {staffDialog === "new" && visibleStaff.some((item) => item.position === Number(staffForm.position)) && <p className="hcm-form__wide form-notice">Эта должность уже есть в отделе. Сохранение обновит штатные единицы и комментарий существующей позиции.</p>}
               </div>
-              <footer className="destructive-form-footer">{staffDialog !== "new" && <button className="text-button text-button--danger delete-text-button" type="button" onClick={() => setDeleteTarget({ kind: "staff", item: staffDialog })}><Trash2 />Удалить позицию</button>}<div><button className="secondary-button" type="button" onClick={() => setStaffDialog(null)}>Отмена</button><button className="primary-button" type="submit">Сохранить</button></div></footer>
+              <footer className="destructive-form-footer">{staffDialog !== "new" && <button className="text-button text-button--danger delete-text-button" type="button" onClick={() => setDeleteTarget({ kind: "staff", item: staffDialog })}><Trash2 />Удалить позицию</button>}<div><button className="secondary-button" type="button" onClick={() => setStaffDialog(null)}>Отмена</button><button className="primary-button" type="submit" disabled={staffPlanIsTooSmall}>Сохранить план</button></div></footer>
             </form>
           </section>
         </div>
