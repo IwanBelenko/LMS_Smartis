@@ -650,7 +650,7 @@ class InboxView(APIView):
                 )[:6]:
                     add(
                         f"employment-{event.pk}", "employment", "Кадровое событие",
-                        f"{event.get_event_type_display()} · {event.title}", "tasks", event.pk,
+                        f"{event.get_event_type_display()} · {event.title}", "employees", profile.pk,
                         event.effective_date, "normal", "Подробнее",
                     )
             for plan in OnboardingPlan.objects.filter(

@@ -28,6 +28,7 @@ IMPORT_FIELDS = [
     {"key": "full_name", "label": "ФИО одной колонкой", "required": False},
     {"key": "first_name", "label": "Имя", "required": False},
     {"key": "last_name", "label": "Фамилия", "required": False},
+    {"key": "middle_name", "label": "Отчество", "required": False},
     {"key": "department", "label": "Отдел", "required": False},
     {"key": "position", "label": "Должность", "required": False},
     {"key": "grade", "label": "Грейд", "required": False},
@@ -64,6 +65,7 @@ HEADER_ALIASES = {
     "full_name": {"фио", "сотрудник", "полное имя", "full name", "name"},
     "first_name": {"имя", "first name"},
     "last_name": {"фамилия", "last name", "surname"},
+    "middle_name": {"отчество", "middle name", "patronymic"},
     "department": {"отдел", "подразделение", "департамент", "department"},
     "position": {"должность", "позиция", "position", "job title"},
     "grade": {"грейд", "grade", "уровень"},
@@ -358,12 +360,23 @@ def _prepare_row(row, mapping, request, row_number, source=HrImportBatch.Source.
     email = _mapped_value(row, mapping, "email").lower()
     first_name = _mapped_value(row, mapping, "first_name")
     last_name = _mapped_value(row, mapping, "last_name")
+    middle_name = _mapped_value(row, mapping, "middle_name")
     full_name = _mapped_value(row, mapping, "full_name")
+    legacy_first_name = ""
+    legacy_last_name = ""
     if full_name and not (first_name and last_name):
         parts = full_name.split()
         if len(parts) >= 2:
-            last_name = last_name or parts[0]
-            first_name = first_name or " ".join(parts[1:])
+            legacy_first_name = " ".join(parts[1:])
+            legacy_last_name = parts[0]
+            first_name_index = 1
+            surname_parts = [parts[0]]
+            while first_name_index < len(parts) - 1 and parts[first_name_index].startswith("("):
+                surname_parts.append(parts[first_name_index])
+                first_name_index += 1
+            last_name = last_name or " ".join(surname_parts)
+            first_name = first_name or parts[first_name_index]
+            middle_name = middle_name or " ".join(parts[first_name_index + 1:])
         else:
             errors["full_name"] = ["Укажите минимум фамилию и имя"]
     required = {"first_name": first_name, "last_name": last_name}
@@ -384,6 +397,18 @@ def _prepare_row(row, mapping, request, row_number, source=HrImportBatch.Source.
                 last_name__iexact=last_name,
                 birth_date=birth_date,
             )
+            if not possible_matches.exists() and middle_name:
+                possible_matches = EmployeeProfile.objects.filter(
+                    first_name__iexact=f"{first_name} {middle_name}",
+                    last_name__iexact=last_name,
+                    birth_date=birth_date,
+                )
+            if not possible_matches.exists() and legacy_first_name:
+                possible_matches = EmployeeProfile.objects.filter(
+                    first_name__iexact=legacy_first_name,
+                    last_name__iexact=legacy_last_name or last_name,
+                    birth_date=birth_date,
+                )
             if possible_matches.count() == 1:
                 instance = possible_matches.first()
 
@@ -392,14 +417,22 @@ def _prepare_row(row, mapping, request, row_number, source=HrImportBatch.Source.
         "email": email,
         "first_name": first_name,
         "last_name": last_name,
+        "middle_name": middle_name,
     }
     optional_text_fields = [
-        "grade", "education", "competencies", "location", "legal_entity", "telegram",
+        "education", "competencies", "location", "legal_entity", "telegram",
         "dms_status", "dms_details", "time_off_balance", "performance_notes", "hr_notes",
     ]
     for field in optional_text_fields:
         if mapping.get(field):
             payload[field] = _mapped_value(row, mapping, field)
+    if mapping.get("grade"):
+        grade_value = _mapped_value(row, mapping, "grade")
+        grades = {value.casefold(): value for value, _label in EmployeeProfile.Grade.choices}
+        if grade_value and grade_value.casefold() not in grades:
+            errors["grade"] = ["Выберите грейд из утверждённого справочника"]
+        else:
+            payload["grade"] = grades.get(grade_value.casefold(), "")
     if mapping.get("department"):
         payload["department"] = _resolve_department(_mapped_value(row, mapping, "department"), errors)
     if mapping.get("position"):
@@ -454,7 +487,7 @@ def _prepare_row(row, mapping, request, row_number, source=HrImportBatch.Source.
         "action": "error" if errors else ("update" if instance else "create"),
         "errors": errors,
         "preview": {
-            "full_name": f"{last_name} {first_name}".strip(),
+            "full_name": " ".join(filter(None, [last_name, first_name, middle_name])),
             "email": email,
             "employee_number": employee_number,
             "department": _mapped_value(row, mapping, "department"),

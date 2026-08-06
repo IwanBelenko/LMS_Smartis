@@ -369,7 +369,7 @@ class PeopleApiTests(TestCase):
         content = (
             "ФИО;Корпоративная почта;Табельный номер;Отдел;Должность;Грейд;Дата выхода;Статус\n"
             "Иванова Анна;employee@test.local;SM-101;Аналитика;Аналитик;Middle;01.02.2024;Работает\n"
-            "Петров Иван;ivan.petrov@smartis.bi;SM-300;Продукт;Аналитик;Junior;15.07.2026;Испытательный срок\n"
+            "Петров Иван Сергеевич;ivan.petrov@smartis.bi;SM-300;Продукт;Аналитик;Junior;15.07.2026;Испытательный срок\n"
         )
         preview = self.client.post(
             "/api/v1/employees/import/",
@@ -391,6 +391,8 @@ class PeopleApiTests(TestCase):
         self.assertEqual(committed.json()["updated"], 1)
         imported = EmployeeProfile.objects.get(employee_number="SM-300")
         self.assertEqual(imported.user.last_name, "Петров")
+        self.assertEqual(imported.user.first_name, "Иван")
+        self.assertEqual(imported.user.middle_name, "Сергеевич")
         self.assertEqual(imported.user.department, self.other_department)
         self.assertEqual(imported.status, EmployeeProfile.Status.PROBATION)
         self.assertFalse(imported.user.has_usable_password())
@@ -423,6 +425,31 @@ class PeopleApiTests(TestCase):
         )
         self.assertEqual(committed.status_code, 400)
         self.assertFalse(EmployeeProfile.objects.filter(employee_number="SM-301").exists())
+
+    def test_import_matches_legacy_compound_surname_without_creating_duplicate(self):
+        legacy = EmployeeProfile.objects.create(
+            first_name="(Шмелёва) Мария Юрьевна",
+            last_name="Зайцева",
+            birth_date=date(1995, 4, 30),
+            department=self.department,
+            position=self.position,
+        )
+        self.client.force_authenticate(self.admin)
+        content = (
+            "ФИО;Дата рождения;Отдел;Должность;Грейд\n"
+            "Зайцева (Шмелёва) Мария Юрьевна;30.04.1995;Аналитика;Аналитик;Middle\n"
+        )
+
+        preview = self.client.post(
+            "/api/v1/employees/import/",
+            {"file": SimpleUploadedFile("employees.csv", content.encode("utf-8"), content_type="text/csv")},
+            format="multipart",
+        )
+
+        self.assertEqual(preview.status_code, 200)
+        self.assertEqual(preview.json()["review"]["create_count"], 0)
+        self.assertEqual(preview.json()["review"]["update_count"], 1)
+        self.assertEqual(EmployeeProfile.objects.filter(birth_date=legacy.birth_date).count(), 1)
 
     def test_employee_import_is_available_only_to_administrators(self):
         self.client.force_authenticate(self.hr)
@@ -1001,6 +1028,7 @@ class PeopleApiTests(TestCase):
         )
         self.assertEqual(staff.status_code, 201)
         self.assertEqual(staff.json()["filled_count"], 1)
+        self.assertEqual(staff.json()["filled_employees"], [{"id": self.profile.pk, "full_name": "Анна"}])
         self.assertEqual(staff.json()["vacancies"], 2)
         self.assertTrue(StaffPosition.objects.filter(department=self.department).exists())
 

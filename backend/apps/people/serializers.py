@@ -142,6 +142,7 @@ class StaffPositionSerializer(serializers.ModelSerializer):
     department_name = serializers.CharField(source="department.name", read_only=True)
     position_name = serializers.CharField(source="position.name", read_only=True)
     filled_count = serializers.SerializerMethodField()
+    filled_employees = serializers.SerializerMethodField()
     vacancies = serializers.SerializerMethodField()
     open_vacancy_count = serializers.SerializerMethodField()
 
@@ -149,7 +150,7 @@ class StaffPositionSerializer(serializers.ModelSerializer):
         model = StaffPosition
         fields = [
             "id", "department", "department_name", "position", "position_name",
-            "headcount", "filled_count", "vacancies", "open_vacancy_count", "note", "is_active",
+            "headcount", "filled_count", "filled_employees", "vacancies", "open_vacancy_count", "note", "is_active",
         ]
         read_only_fields = ["id"]
 
@@ -186,6 +187,14 @@ class StaffPositionSerializer(serializers.ModelSerializer):
             status__in=[EmployeeProfile.Status.EMPLOYED, EmployeeProfile.Status.PROBATION],
         ).count()
 
+    def get_filled_employees(self, obj):
+        employees = EmployeeProfile.objects.filter(
+            department=obj.department,
+            position=obj.position,
+            status__in=[EmployeeProfile.Status.EMPLOYED, EmployeeProfile.Status.PROBATION],
+        ).select_related("user").order_by("last_name", "first_name")
+        return [{"id": employee.pk, "full_name": str(employee)} for employee in employees]
+
     def get_vacancies(self, obj):
         return max(obj.headcount - self.get_filled_count(obj), 0)
 
@@ -197,6 +206,7 @@ class EmployeeProfileSerializer(serializers.ModelSerializer):
     full_name = serializers.SerializerMethodField()
     first_name = serializers.SerializerMethodField()
     last_name = serializers.SerializerMethodField()
+    middle_name = serializers.SerializerMethodField()
     email = serializers.SerializerMethodField()
     department = serializers.SerializerMethodField()
     department_name = serializers.SerializerMethodField()
@@ -210,7 +220,7 @@ class EmployeeProfileSerializer(serializers.ModelSerializer):
     class Meta:
         model = EmployeeProfile
         fields = [
-            "id", "user", "full_name", "first_name", "last_name", "email", "employee_number", "department", "department_name",
+            "id", "user", "full_name", "first_name", "last_name", "middle_name", "email", "employee_number", "department", "department_name",
             "position", "position_name", "grade", "birth_date", "age", "hire_date", "tenure_years",
             "dismissal_date", "education", "competencies", "status", "status_label", "checklist_score",
             "development_progress", "salary_base", "monthly_bonus", "quarterly_bonus", "updated_at",
@@ -232,6 +242,9 @@ class EmployeeProfileSerializer(serializers.ModelSerializer):
 
     def get_last_name(self, obj):
         return obj.user.last_name if obj.user_id else obj.last_name
+
+    def get_middle_name(self, obj):
+        return obj.user.middle_name if obj.user_id else obj.middle_name
 
     def get_email(self, obj):
         return obj.user.email if obj.user_id else obj.email
@@ -286,7 +299,7 @@ class EmployeeProfileWriteSerializer(serializers.ModelSerializer):
     class Meta:
         model = EmployeeProfile
         fields = [
-            "email", "first_name", "last_name", "employee_number", "department", "position",
+            "email", "first_name", "last_name", "middle_name", "employee_number", "department", "position",
             "grade", "birth_date", "hire_date", "dismissal_date", "education", "competencies", "status",
             "checklist_score", "development_progress", "salary_base", "monthly_bonus", "quarterly_bonus",
             "location", "legal_entity", "gender", "telegram", "dms_status", "dms_details",
@@ -341,6 +354,7 @@ class EmployeeProfileWriteSerializer(serializers.ModelSerializer):
                 email=email,
                 first_name=validated_data.get("first_name", ""),
                 last_name=validated_data.get("last_name", ""),
+                middle_name=validated_data.get("middle_name", ""),
                 department=validated_data.get("department"),
                 password=temporary_password,
                 role=User.Role.EMPLOYEE,
@@ -364,7 +378,7 @@ class EmployeeProfileWriteSerializer(serializers.ModelSerializer):
         email = validated_data.get("email", instance.email)
         if instance.user_id:
             user_updates = {}
-            for field in ("first_name", "last_name", "department"):
+            for field in ("first_name", "last_name", "middle_name", "department"):
                 if field in validated_data:
                     user_updates[field] = validated_data[field]
             if email:
@@ -381,6 +395,7 @@ class EmployeeProfileWriteSerializer(serializers.ModelSerializer):
                 email=email,
                 first_name=validated_data.get("first_name", instance.first_name),
                 last_name=validated_data.get("last_name", instance.last_name),
+                middle_name=validated_data.get("middle_name", instance.middle_name),
                 department=validated_data.get("department", instance.department),
                 password=temporary_password,
                 role=User.Role.EMPLOYEE,

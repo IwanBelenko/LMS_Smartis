@@ -35,6 +35,7 @@ class UserSerializer(serializers.ModelSerializer):
             "email",
             "first_name",
             "last_name",
+            "middle_name",
             "role",
             "role_label",
             "status",
@@ -104,6 +105,7 @@ def _save_employee_profile(user, position_marker, employee_number):
 
 class UserCreateSerializer(serializers.ModelSerializer):
     generate_password = serializers.BooleanField(write_only=True, required=False, default=False)
+    create_employee_profile = serializers.BooleanField(write_only=True, required=False, default=False)
     position = serializers.PrimaryKeyRelatedField(
         queryset=Position.objects.filter(is_active=True), allow_null=True, required=False, write_only=True,
     )
@@ -112,9 +114,9 @@ class UserCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = [
-            "id", "email", "first_name", "last_name", "role", "department",
+            "id", "email", "first_name", "last_name", "middle_name", "role", "department",
             "can_view_compensation", "generate_password",
-            "position", "employee_number",
+            "position", "employee_number", "create_employee_profile",
         ]
         read_only_fields = ["id"]
 
@@ -123,6 +125,14 @@ class UserCreateSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         role = attrs.get("role", User.Role.EMPLOYEE)
+        create_employee_profile = attrs.get("create_employee_profile", False)
+        employee_errors = {}
+        if create_employee_profile and not attrs.get("department"):
+            employee_errors["department"] = "Выберите отдел для нового пользователя"
+        if create_employee_profile and not attrs.get("position"):
+            employee_errors["position"] = "Выберите или создайте должность для нового пользователя"
+        if employee_errors:
+            raise serializers.ValidationError(employee_errors)
         attrs["can_view_compensation"] = bool(
             role == User.Role.ADMIN
             or (role in {User.Role.HR, User.Role.LEADER} and attrs.get("can_view_compensation", False))
@@ -138,6 +148,7 @@ class UserCreateSerializer(serializers.ModelSerializer):
     @transaction.atomic
     def create(self, validated_data):
         should_generate = validated_data.pop("generate_password", False)
+        validated_data.pop("create_employee_profile", False)
         position = validated_data.pop("position", serializers.empty)
         employee_number = validated_data.pop("employee_number", "")
         temporary_password = generate_temporary_password() if should_generate else None
@@ -157,6 +168,7 @@ class UserCreateSerializer(serializers.ModelSerializer):
 
 
 class UserUpdateSerializer(serializers.ModelSerializer):
+    sync_employee_profile = serializers.BooleanField(write_only=True, required=False, default=False)
     position = serializers.PrimaryKeyRelatedField(
         queryset=Position.objects.filter(is_active=True), allow_null=True, required=False, write_only=True,
     )
@@ -165,8 +177,8 @@ class UserUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = [
-            "email", "first_name", "last_name", "role", "department", "can_view_compensation",
-            "position", "employee_number",
+            "email", "first_name", "last_name", "middle_name", "role", "department", "can_view_compensation",
+            "position", "employee_number", "sync_employee_profile",
         ]
 
     def validate_email(self, value):
@@ -203,6 +215,20 @@ class UserUpdateSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         role = attrs.get("role", self.instance.role)
         requested = attrs.get("can_view_compensation", self.instance.can_view_compensation)
+        if attrs.get("sync_employee_profile"):
+            employee_errors = {}
+            if not attrs.get("department", self.instance.department):
+                employee_errors["department"] = "Выберите отдел для пользователя"
+            position = attrs.get("position", serializers.empty)
+            if position is serializers.empty:
+                try:
+                    position = self.instance.employee_profile.position
+                except EmployeeProfile.DoesNotExist:
+                    position = None
+            if not position:
+                employee_errors["position"] = "Выберите или создайте должность для пользователя"
+            if employee_errors:
+                raise serializers.ValidationError(employee_errors)
         attrs["can_view_compensation"] = bool(
             role == User.Role.ADMIN
             or (role in {User.Role.HR, User.Role.LEADER} and requested)
@@ -211,6 +237,7 @@ class UserUpdateSerializer(serializers.ModelSerializer):
 
     @transaction.atomic
     def update(self, instance, validated_data):
+        validated_data.pop("sync_employee_profile", False)
         position = validated_data.pop("position", serializers.empty)
         employee_number = validated_data.pop("employee_number", "")
         user = super().update(instance, validated_data)

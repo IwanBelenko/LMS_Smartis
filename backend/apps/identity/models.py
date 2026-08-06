@@ -73,6 +73,7 @@ class User(AbstractUser):
 
     username = None
     email = models.EmailField("Email", unique=True)
+    middle_name = models.CharField("Отчество", max_length=150, blank=True)
     role = models.CharField("Роль", max_length=20, choices=Role.choices, default=Role.EMPLOYEE)
     status = models.CharField("Статус", max_length=20, choices=Status.choices, default=Status.INVITED)
     can_view_compensation = models.BooleanField("Может видеть оплату труда", default=False)

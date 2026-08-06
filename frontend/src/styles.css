@@ -2672,6 +2672,10 @@ button.vacancy-card { padding: 13px; display: grid; align-content: center; gap: 
 }
 .organization-staff-editor__fact span { color: var(--muted); font-size: .58rem; }
 .organization-staff-editor__fact strong { font-size: .88rem; }
+.organization-staff-editor__fact small {
+  overflow: hidden; color: var(--muted); font-size: .56rem; line-height: 1.3;
+  text-overflow: ellipsis; white-space: nowrap;
+}
 .organization-staff-editor__fact--free { background: color-mix(in srgb, var(--warning) 8%, var(--surface)); }
 .organization-staff-editor__fact--free strong { color: var(--warning); }
 .organization-staff-editor__save { min-height: 56px; white-space: nowrap; }
@@ -2723,6 +2727,20 @@ button.vacancy-card { padding: 13px; display: grid; align-content: center; gap: 
 .staffing-explanation {
   margin-top: -4px; padding: 9px 11px; border-left: 3px solid var(--brand);
   color: var(--muted); background: color-mix(in srgb, var(--brand) 6%, var(--surface)); font-size: .68rem; line-height: 1.5;
+}
+.staff-assignment {
+  padding: 12px; border: 1px solid var(--border); border-radius: 8px;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end; gap: 10px; background: var(--surface-soft);
+}
+.staff-assignment > div { grid-column: 1 / -1; align-self: center; display: grid; gap: 4px; }
+.staff-assignment > div strong { font-size: .72rem; }
+.staff-assignment > div span { color: var(--muted); font-size: .65rem; line-height: 1.35; }
+.staff-assignment > label { min-width: 0; }
+.staff-assignment > label select { width: 100%; min-width: 0; }
+.staff-assignment > button { min-width: 132px; min-height: 40px; }
+@container organization-details (max-width: 680px) {
+  .staff-assignment { grid-template-columns: 1fr; }
 }
 
 .update-metrics {
