@@ -121,6 +121,26 @@ class IdentityApiTests(TestCase):
         self.assertFalse(Invitation.objects.filter(user=user).exists())
         self.assertEqual(len(mail.outbox), 0)
 
+    def test_new_internal_user_requires_department_and_position(self):
+        self.authenticate()
+        response = self.client.post(
+            "/api/v1/users/",
+            {
+                "email": "internal.user@test.local",
+                "first_name": "Анна",
+                "last_name": "Сотрудник",
+                "middle_name": "Ивановна",
+                "role": User.Role.EMPLOYEE,
+                "create_employee_profile": True,
+                "generate_password": True,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("department", response.json())
+        self.assertIn("position", response.json())
+
     def test_administrator_links_existing_user_to_employee_from_user_card(self):
         position = Position.objects.create(name="Руководитель HR")
         user = User.objects.create_user(

@@ -58,6 +58,15 @@ import smartisWordmarkLight from "./assets/smartis-wordmark-light.png";
 
 const RichTextEditor = lazy(() => import("./RichTextEditor"));
 const APP_VERSION = import.meta.env.VITE_APP_VERSION || "dev";
+const EMPLOYEE_GRADES = [
+  "Ассистент",
+  "Junior",
+  "Middle",
+  "Senior",
+  "Руководитель группы / Team Lead",
+  "Директор",
+  "TOP-менеджер",
+] as const;
 
 function Brand({ login = false }: { login?: boolean }) {
   return (
@@ -78,6 +87,7 @@ type User = {
   email: string;
   first_name: string;
   last_name: string;
+  middle_name: string;
   role: string;
   role_label: string;
   status: string;
@@ -111,6 +121,7 @@ type StaffPosition = {
   position_name: string;
   headcount: number;
   filled_count: number;
+  filled_employees: Array<{ id: number; full_name: string }>;
   vacancies: number;
   open_vacancy_count: number;
   note: string;
@@ -130,6 +141,7 @@ type EmployeeProfile = {
   full_name: string;
   first_name: string;
   last_name: string;
+  middle_name: string;
   email: string;
   employee_number: string;
   department: number | null;
@@ -1868,11 +1880,10 @@ function UsersView({ token }: { token: string }) {
   const [deleteUser, setDeleteUser] = useState<User | null>(null);
   const [userBusy, setUserBusy] = useState(false);
   const [form, setForm] = useState({
-    email: "", first_name: "", last_name: "", role: "employee", department: "", position: "", employee_number: "", can_view_compensation: false,
+    email: "", first_name: "", last_name: "", middle_name: "", role: "employee", department: "", position: "", employee_number: "", can_view_compensation: false,
   });
-  const [departmentName, setDepartmentName] = useState("");
   const [userForm, setUserForm] = useState({
-    email: "", first_name: "", last_name: "", role: "employee", department: "", position: "", employee_number: "", can_view_compensation: false,
+    email: "", first_name: "", last_name: "", middle_name: "", role: "employee", department: "", position: "", employee_number: "", can_view_compensation: false,
   });
 
   async function load() {
@@ -1903,10 +1914,11 @@ function UsersView({ token }: { token: string }) {
           ...form,
           department: form.department ? Number(form.department) : null,
           position: form.position ? Number(form.position) : null,
+          create_employee_profile: true,
           generate_password: true,
         }),
       });
-      setForm({ email: "", first_name: "", last_name: "", role: "employee", department: "", position: "", employee_number: "", can_view_compensation: false });
+      setForm({ email: "", first_name: "", last_name: "", middle_name: "", role: "employee", department: "", position: "", employee_number: "", can_view_compensation: false });
       setShowForm(false);
       setNotice("Пользователь создан. Передайте ему временный пароль");
       setTemporaryPassword({ email: created.email, password: created.temporary_password });
@@ -1941,6 +1953,7 @@ function UsersView({ token }: { token: string }) {
       email: user.email,
       first_name: user.first_name,
       last_name: user.last_name,
+      middle_name: user.middle_name,
       role: user.role,
       department: user.department ? String(user.department) : "",
       position: user.position ? String(user.position) : "",
@@ -1961,6 +1974,7 @@ function UsersView({ token }: { token: string }) {
           ...userForm,
           department: userForm.department ? Number(userForm.department) : null,
           position: userForm.position ? Number(userForm.position) : null,
+          sync_employee_profile: true,
         }),
       });
       setEditingUser(null);
@@ -2007,24 +2021,6 @@ function UsersView({ token }: { token: string }) {
     }
   }
 
-  async function createDepartment(event: FormEvent) {
-    event.preventDefault();
-    if (!departmentName.trim()) return;
-    try {
-      await apiRequest<Department>("/departments/", token, {
-        method: "POST",
-        body: JSON.stringify({
-          name: departmentName,
-          code: "dept-" + Date.now(),
-        }),
-      });
-      setDepartmentName("");
-      await load();
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Не удалось создать отдел");
-    }
-  }
-
   return (
     <>
       <PageHeader
@@ -2053,29 +2049,24 @@ function UsersView({ token }: { token: string }) {
           <form className="user-form" onSubmit={createUser}>
             <label>Имя<input value={form.first_name} onChange={(e) => setForm({ ...form, first_name: e.target.value })} required /></label>
             <label>Фамилия<input value={form.last_name} onChange={(e) => setForm({ ...form, last_name: e.target.value })} required /></label>
+            <label>Отчество<input value={form.middle_name} onChange={(e) => setForm({ ...form, middle_name: e.target.value })} /></label>
             <label>Email<input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required /></label>
             <label>Роль<select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value, can_view_compensation: ["hr", "leader"].includes(e.target.value) ? form.can_view_compensation : false })}>
               <option value="employee">Сотрудник</option><option value="hr">HR-менеджер</option>
               <option value="admin">Администратор</option><option value="author">Автор курсов</option>
               <option value="leader">Руководитель</option>
             </select></label>
-            <label>Отдел<select value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })}>
-              <option value="">Без отдела</option>{departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+            <label>Отдел<select value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })} required>
+              <option value="">Выберите отдел</option>{departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
             </select></label>
-            <label>Должность<select value={form.position} onChange={(e) => setForm({ ...form, position: e.target.value })}><option value="">Не оформлять как сотрудника</option>{positions.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+            <div className="reference-field"><label>Должность<select value={form.position} onChange={(e) => setForm({ ...form, position: e.target.value })} required><option value="">Выберите должность</option>{positions.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><button className="text-button" type="button" onClick={() => setShowPositionCreate(true)}><Plus />Новая должность</button></div>
             {form.position && <label>Табельный номер<input value={form.employee_number} onChange={(e) => setForm({ ...form, employee_number: e.target.value })} placeholder="Создастся автоматически" /></label>}
             {["hr", "leader"].includes(form.role) && <label className="user-compensation-access"><input type="checkbox" checked={form.can_view_compensation} onChange={(event) => setForm({ ...form, can_view_compensation: event.target.checked })} /><span><strong>Доступ к оплате труда</strong><small>Показывать оклад и премии в карточках сотрудников</small></span></label>}
             <button className="primary-button" type="submit">Создать и сгенерировать пароль</button>
           </form>
         </section>
       )}
-      <section className="panel department-bar">
-        <form onSubmit={createDepartment}>
-          <label>Новый отдел<input value={departmentName} onChange={(e) => setDepartmentName(e.target.value)} placeholder="Например, Поддержка" /></label>
-          <button className="secondary-button" type="submit">Добавить отдел</button>
-        </form>
-        <span>{departments.length} отделов</span>
-      </section>
+      <p className="form-notice users-notice">Отделы и их место в дереве создаются в разделе «Оргструктура».</p>
       {error && <p className="form-error">{error}</p>}
       {notice && <p className="form-notice users-notice"><CheckCircle2 />{notice}</p>}
       <section className="panel table-panel">
@@ -2085,7 +2076,7 @@ function UsersView({ token }: { token: string }) {
             <tbody>
               {users.map((item) => (
                 <tr key={item.id}>
-                  <td><strong>{item.first_name} {item.last_name}</strong><span>{item.email}</span></td>
+                  <td><strong>{[item.last_name, item.first_name, item.middle_name].filter(Boolean).join(" ")}</strong><span>{item.email}</span></td>
                   <td>{item.position_name || "Не оформлен как сотрудник"}</td><td>{item.department_name || "—"}</td><td>{item.role_label}{item.can_view_compensation && item.role !== "admin" && <span>Оплата труда</span>}</td>
                   <td><span className={"status status--" + item.status}>{item.status_label}</span></td>
                   <td><button className="secondary-button user-invite-button" type="button" onClick={() => openUser(item)}><Settings2 />Управлять</button></td>
@@ -2108,12 +2099,13 @@ function UsersView({ token }: { token: string }) {
               <div className="hcm-form__grid">
                 <label>Имя<input value={userForm.first_name} onChange={(event) => setUserForm({ ...userForm, first_name: event.target.value })} required /></label>
                 <label>Фамилия<input value={userForm.last_name} onChange={(event) => setUserForm({ ...userForm, last_name: event.target.value })} required /></label>
+                <label>Отчество<input value={userForm.middle_name} onChange={(event) => setUserForm({ ...userForm, middle_name: event.target.value })} /></label>
                 <label className="hcm-form__wide">Корпоративная почта<input type="email" value={userForm.email} onChange={(event) => setUserForm({ ...userForm, email: event.target.value })} required /></label>
                 <label>Роль<select value={userForm.role} onChange={(event) => setUserForm({ ...userForm, role: event.target.value, can_view_compensation: ["hr", "leader"].includes(event.target.value) ? userForm.can_view_compensation : false })}><option value="employee">Сотрудник</option><option value="hr">HR-менеджер</option><option value="admin">Администратор</option><option value="author">Автор курсов</option><option value="leader">Руководитель</option></select></label>
-                <label>Отдел<select value={userForm.department} onChange={(event) => setUserForm({ ...userForm, department: event.target.value })}><option value="">Без отдела</option>{departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-                <div className="reference-field"><label>Должность<select value={userForm.position} onChange={(event) => setUserForm({ ...userForm, position: event.target.value })}><option value="">Не оформлен как сотрудник</option>{positions.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><button className="text-button" type="button" onClick={() => setShowPositionCreate(true)}><Plus />Новая должность</button></div>
+                <label>Отдел<select value={userForm.department} onChange={(event) => setUserForm({ ...userForm, department: event.target.value })} required><option value="">Выберите отдел</option>{departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+                <div className="reference-field"><label>Должность<select value={userForm.position} onChange={(event) => setUserForm({ ...userForm, position: event.target.value })} required><option value="">Выберите должность</option>{positions.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><button className="text-button" type="button" onClick={() => setShowPositionCreate(true)}><Plus />Новая должность</button></div>
                 {userForm.position && <label>Табельный номер<input value={userForm.employee_number} onChange={(event) => setUserForm({ ...userForm, employee_number: event.target.value })} placeholder="Создастся автоматически" /></label>}
-                <div className="hcm-form__wide user-employee-link"><ContactRound /><span><strong>{editingUser.employee_profile_id ? "Карточка сотрудника связана" : userForm.position ? "Карточка сотрудника будет создана" : "Только учётная запись"}</strong><small>Отдел и должность синхронизируются с реестром сотрудников и оргструктурой.</small></span></div>
+                <div className="hcm-form__wide user-employee-link"><ContactRound /><span><strong>{editingUser.employee_profile_id ? "Карточка сотрудника связана" : "Карточка сотрудника будет создана"}</strong><small>Отдел и должность синхронизируются с реестром сотрудников и оргструктурой.</small></span></div>
                 {["hr", "leader"].includes(userForm.role) && <label className="hcm-form__wide user-compensation-access"><input type="checkbox" checked={userForm.can_view_compensation} onChange={(event) => setUserForm({ ...userForm, can_view_compensation: event.target.checked })} /><span><strong>Разрешить просмотр оплаты труда</strong><small>Пользователь увидит оклады, месячные и квартальные премии.</small></span></label>}
               </div>
               <div className="user-access-state">
@@ -2137,7 +2129,7 @@ function UsersView({ token }: { token: string }) {
       )}
       {deleteUser && <DeleteConfirmationDialog title="Удалить пользователя?" name={`${deleteUser.first_name} ${deleteUser.last_name} · ${deleteUser.email}`} description={deleteUser.employee_profile_id ? "Учётная запись и связанная карточка сотрудника со всеми кадровыми данными будут удалены. Отменить это действие нельзя." : "Учётная запись будет удалена без возможности восстановления."} busy={userBusy} onCancel={() => setDeleteUser(null)} onConfirm={() => void confirmDeleteUser()} />}
       {temporaryPassword && <TemporaryPasswordDialog value={temporaryPassword} onClose={() => setTemporaryPassword(null)} />}
-      {showPositionCreate && <PositionCreateDialog token={token} departments={departments} defaultDepartment={userForm.department} onClose={() => setShowPositionCreate(false)} onCreated={(position) => { setPositions((items) => [...items, position].sort((left, right) => left.name.localeCompare(right.name, "ru"))); setUserForm((current) => ({ ...current, position: String(position.id) })); }} />}
+      {showPositionCreate && <PositionCreateDialog token={token} departments={departments} defaultDepartment={editingUser ? userForm.department : form.department} onClose={() => setShowPositionCreate(false)} onCreated={(position) => { setPositions((items) => [...items, position].sort((left, right) => left.name.localeCompare(right.name, "ru"))); if (editingUser) setUserForm((current) => ({ ...current, position: String(position.id) })); else setForm((current) => ({ ...current, position: String(position.id) })); }} />}
     </>
   );
 }
@@ -2767,6 +2759,8 @@ function OrganizationView({ token }: { token: string }) {
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [staffHeadcountDrafts, setStaffHeadcountDrafts] = useState<Record<number, string>>({});
   const [staffHeadcountBusy, setStaffHeadcountBusy] = useState<number | null>(null);
+  const [staffAssignee, setStaffAssignee] = useState("");
+  const [staffAssignmentBusy, setStaffAssignmentBusy] = useState(false);
 
   async function load() {
     try {
@@ -2782,6 +2776,9 @@ function OrganizationView({ token }: { token: string }) {
       ]);
       setDepartments(nextDepartments);
       setStaff(nextStaff);
+      setStaffDialog((current) => current && current !== "new"
+        ? nextStaff.find((item) => item.id === current.id) || current
+        : current);
       setStaffHeadcountDrafts(Object.fromEntries(nextStaff.map((item) => [item.id, String(item.headcount)])));
       setEmployees(nextEmployees);
       setPositions(nextPositions);
@@ -2823,8 +2820,14 @@ function OrganizationView({ token }: { token: string }) {
     : visibleStaff.find((item) => item.position === Number(staffForm.position)) || null;
   const selectedStaffFilled = selectedStaffPosition?.filled_count || 0;
   const selectedStaffPlanned = Math.max(Number(staffForm.headcount) || 0, 0);
+  const selectedStaffSavedHeadcount = selectedStaffPosition?.headcount || selectedStaffPlanned;
   const selectedStaffFree = Math.max(selectedStaffPlanned - selectedStaffFilled, 0);
   const staffPlanIsTooSmall = selectedStaffPlanned < selectedStaffFilled;
+  const availableStaffAssignees = employees.filter((employee) => (
+    employee.status !== "dismissed"
+    && employee.department === selected
+    && employee.position !== Number(staffForm.position)
+  ));
 
   function openDepartment(item?: OrgDepartment) {
     setDepartmentDialog(item || "new");
@@ -2857,12 +2860,38 @@ function OrganizationView({ token }: { token: string }) {
   }
 
   function openStaff(item?: StaffPosition) {
+    setStaffAssignee("");
     setStaffDialog(item || "new");
     setStaffForm(item ? {
       position: String(item.position),
       headcount: String(item.headcount),
       note: item.note,
     } : { position: "", headcount: "1", note: "" });
+  }
+
+  async function assignStaffEmployee() {
+    if (!staffAssignee || !selected || !staffForm.position || !selectedStaffPosition) return;
+    if (selectedStaffFilled >= selectedStaffSavedHeadcount) {
+      setError("Все места по штатному плану заняты — сначала увеличьте количество штатных единиц");
+      return;
+    }
+    const employee = employees.find((item) => item.id === Number(staffAssignee));
+    if (!employee) return;
+    setStaffAssignmentBusy(true);
+    setError("");
+    try {
+      await apiRequest<EmployeeProfile>(`/employees/${employee.id}/`, token, {
+        method: "PATCH",
+        body: JSON.stringify({ department: selected, position: Number(staffForm.position) }),
+      });
+      setStaffAssignee("");
+      setNotice(`${employee.full_name} назначен(а) на позицию «${selectedStaffPosition.position_name}»`);
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось назначить сотрудника");
+    } finally {
+      setStaffAssignmentBusy(false);
+    }
   }
 
   async function saveStaff(event: FormEvent) {
@@ -3110,7 +3139,7 @@ function OrganizationView({ token }: { token: string }) {
                     </button>
                     <div className="organization-staff-editor">
                       <label><span>Штатных единиц</span><div><button type="button" disabled={staffHeadcountBusy === item.id || Number(staffHeadcountDrafts[item.id]) <= Math.max(item.filled_count, 1)} onClick={() => changeStaffHeadcountDraft(item, -1)} aria-label={`Уменьшить штат для ${item.position_name}`}><Minus /></button><input type="number" min={Math.max(item.filled_count, 1)} value={staffHeadcountDrafts[item.id] ?? String(item.headcount)} onChange={(event) => setStaffHeadcountDrafts((drafts) => ({ ...drafts, [item.id]: event.target.value }))} aria-label={`Штатных единиц для ${item.position_name}`} /><button type="button" disabled={staffHeadcountBusy === item.id} onClick={() => changeStaffHeadcountDraft(item, 1)} aria-label={`Увеличить штат для ${item.position_name}`}><Plus /></button></div></label>
-                      <div className="organization-staff-editor__fact"><span>Занято сотрудниками</span><strong>{item.filled_count}</strong></div>
+                      <div className="organization-staff-editor__fact"><span>Занято сотрудниками</span><strong>{item.filled_count}</strong>{item.filled_employees.length > 0 && <small title={item.filled_employees.map((employee) => employee.full_name).join(", ")}>{item.filled_employees.map((employee) => employee.full_name).join(", ")}</small>}</div>
                       <div className={item.vacancies > 0 ? "organization-staff-editor__fact organization-staff-editor__fact--free" : "organization-staff-editor__fact"}><span>Свободно сейчас</span><strong>{item.vacancies}</strong></div>
                       <button className={staffHeadcountBusy === item.id ? "secondary-button organization-staff-editor__save organization-staff-editor__save--busy" : "secondary-button organization-staff-editor__save"} type="button" disabled={staffHeadcountBusy === item.id || Number(staffHeadcountDrafts[item.id]) === item.headcount} onClick={() => void saveStaffHeadcount(item)}>{staffHeadcountBusy === item.id ? "Сохраняем…" : "Сохранить штат"}</button>
                     </div>
@@ -3159,9 +3188,14 @@ function OrganizationView({ token }: { token: string }) {
                   <div className={selectedStaffFree > 0 ? "staffing-calculation__free" : ""}><small>Свободных мест</small><strong>{selectedStaffFree}</strong></div>
                 </div>
                 <p className="hcm-form__wide staffing-explanation">Свободные места рассчитываются автоматически. Чтобы передать свободное место HR в работу, сохраните изменения и нажмите «Начать подбор» в строке должности.</p>
+                {selectedStaffPosition && <div className="hcm-form__wide staff-assignment">
+                  <div><strong>Кто занимает позицию</strong><span>{selectedStaffPosition.filled_employees.length ? selectedStaffPosition.filled_employees.map((employee) => employee.full_name).join(" · ") : "Пока никто не назначен"}</span></div>
+                  <label>Назначить сотрудника<select value={staffAssignee} onChange={(event) => setStaffAssignee(event.target.value)} disabled={selectedStaffFilled >= selectedStaffSavedHeadcount || staffAssignmentBusy}><option value="">{selectedStaffFilled >= selectedStaffSavedHeadcount ? "Все штатные места заняты" : availableStaffAssignees.length ? "Выберите сотрудника" : "Нет доступных сотрудников в отделе"}</option>{availableStaffAssignees.map((employee) => <option value={employee.id} key={employee.id}>{employee.full_name}{employee.position_name ? ` · сейчас: ${employee.position_name}` : " · без должности"}</option>)}</select></label>
+                  <button className="secondary-button" type="button" disabled={!staffAssignee || selectedStaffFilled >= selectedStaffSavedHeadcount || staffAssignmentBusy} onClick={() => void assignStaffEmployee()}>{staffAssignmentBusy ? "Назначаем…" : "Назначить"}</button>
+                </div>}
                 {staffPlanIsTooSmall && <p className="hcm-form__wide form-error">Нельзя уменьшить план до {selectedStaffPlanned}: на этой позиции уже работает {selectedStaffFilled}.</p>}
                 <label className="hcm-form__wide">Комментарий<textarea value={staffForm.note} onChange={(event) => setStaffForm({ ...staffForm, note: event.target.value })} placeholder="Зона ответственности или пояснение к позиции" /></label>
-                {staffDialog === "new" && visibleStaff.some((item) => item.position === Number(staffForm.position)) && <p className="hcm-form__wide form-notice">Эта должность уже есть в отделе. Сохранение обновит штатные единицы и комментарий существующей позиции.</p>}
+                {staffDialog === "new" && visibleStaff.some((item) => item.position === Number(staffForm.position)) && <p className="hcm-form__wide form-notice">Эта строка уже есть в штатном расписании отдела. Здесь можно изменить план и комментарий; назначенные сотрудники показаны в карточке позиции.</p>}
               </div>
               <footer className="destructive-form-footer">{staffDialog !== "new" && <button className="text-button text-button--danger delete-text-button" type="button" onClick={() => setDeleteTarget({ kind: "staff", item: staffDialog })}><Trash2 />Удалить позицию</button>}<div><button className="secondary-button" type="button" onClick={() => setStaffDialog(null)}>Отмена</button><button className="primary-button" type="submit" disabled={staffPlanIsTooSmall}>Сохранить план</button></div></footer>
             </form>
@@ -3193,7 +3227,7 @@ function OrganizationView({ token }: { token: string }) {
 }
 
 const emptyEmployeeForm = {
-  first_name: "", last_name: "", email: "", employee_number: "", department: "", position: "",
+  first_name: "", last_name: "", middle_name: "", email: "", employee_number: "", department: "", position: "",
   grade: "", birth_date: "", hire_date: "", dismissal_date: "", education: "", competencies: "", status: "employed",
   checklist_score: "0", development_progress: "0", salary_base: "", monthly_bonus: "", quarterly_bonus: "",
   location: "", legal_entity: "", gender: "", telegram: "", dms_status: "", dms_details: "",
@@ -3261,6 +3295,7 @@ function EmployeesView({ token, user }: { token: string; user: User }) {
     setForm(employee ? {
       first_name: employee.first_name,
       last_name: employee.last_name,
+      middle_name: employee.middle_name,
       email: employee.email,
       employee_number: employee.employee_number,
       department: employee.department ? String(employee.department) : "",
@@ -3761,13 +3796,14 @@ function EmployeesView({ token, user }: { token: string; user: User }) {
               <div className="hcm-form__grid">
                 <label>Имя<input value={form.first_name} onChange={(e) => setForm({ ...form, first_name: e.target.value })} required /></label>
                 <label>Фамилия<input value={form.last_name} onChange={(e) => setForm({ ...form, last_name: e.target.value })} required /></label>
+                <label>Отчество<input value={form.middle_name} onChange={(e) => setForm({ ...form, middle_name: e.target.value })} /></label>
                 <label className="hcm-form__wide">Корпоративная почта<input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /><span>Можно оставить пустой — сотрудник сохранится без доступа в систему.</span></label>
                 <label>Табельный номер<input value={form.employee_number} onChange={(e) => setForm({ ...form, employee_number: e.target.value })} /></label>
                 <label>Дата рождения<input type="date" value={form.birth_date} onChange={(e) => setForm({ ...form, birth_date: e.target.value })} /></label>
                 <label>Дата выхода<input type="date" value={form.hire_date} onChange={(e) => setForm({ ...form, hire_date: e.target.value })} /></label>
                 <label>Отдел<select value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })}><option value="">{departments.length ? "Без отдела" : "Нет подразделений — создайте в оргструктуре"}</option>{departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
                 <div className="reference-field"><label>Должность<select value={form.position} onChange={(e) => setForm({ ...form, position: e.target.value })}><option value="">{positions.length ? "Не указана" : "Должностей пока нет"}</option>{positions.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><button className="text-button" type="button" onClick={() => setShowPositionCreate(true)}><Plus />Новая должность</button></div>
-                <label>Грейд<input value={form.grade} onChange={(e) => setForm({ ...form, grade: e.target.value })} placeholder="Junior, Middle, Senior" /></label>
+                <label>Грейд<select value={form.grade} onChange={(e) => setForm({ ...form, grade: e.target.value })}><option value="">Не указан</option>{EMPLOYEE_GRADES.map((grade) => <option value={grade} key={grade}>{grade}</option>)}</select></label>
                 <label>Статус<select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value, dismissal_date: e.target.value === "dismissed" ? (form.dismissal_date || new Date().toISOString().slice(0, 10)) : "" })}><option value="employed">Работает</option><option value="probation">Испытательный срок</option><option value="dismissed" disabled={!editing}>Уволен</option></select></label>
                 {form.status === "dismissed" && <label>Дата увольнения<input type="date" value={form.dismissal_date} onChange={(e) => setForm({ ...form, dismissal_date: e.target.value })} required /></label>}
                 {form.status === "dismissed" && <div className="employee-dismissal-warning"><span>Доступ будет заблокирован</span><small>История, документы и результаты обучения сохранятся.</small></div>}
@@ -4883,7 +4919,7 @@ function RecruitmentView({ token, user }: { token: string; user: User }) {
                 <label className="hcm-form__wide">Корпоративная почта<input type="email" value={hireForm.corporate_email} onChange={(event) => setHireForm({ ...hireForm, corporate_email: event.target.value })} required /></label>
                 <label>Табельный номер<input value={hireForm.employee_number} onChange={(event) => setHireForm({ ...hireForm, employee_number: event.target.value })} required /></label>
                 <label>Дата выхода<input type="date" value={hireForm.hire_date} onChange={(event) => setHireForm({ ...hireForm, hire_date: event.target.value })} required /></label>
-                <label>Грейд<input value={hireForm.grade} onChange={(event) => setHireForm({ ...hireForm, grade: event.target.value })} placeholder="Junior, Middle, Senior" /></label>
+                <label>Грейд<select value={hireForm.grade} onChange={(event) => setHireForm({ ...hireForm, grade: event.target.value })}><option value="">Не указан</option>{EMPLOYEE_GRADES.map((grade) => <option value={grade} key={grade}>{grade}</option>)}</select></label>
               </div>
               {error && <p className="form-error">{error}</p>}
               <footer><button className="secondary-button" type="button" onClick={() => setHiring(null)}>Отмена</button><button className="primary-button" type="submit" disabled={saving}>{saving ? "Оформляем…" : "Оформить и пригласить"}</button></footer>

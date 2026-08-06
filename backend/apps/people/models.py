@@ -50,6 +50,15 @@ class EmployeeProfile(models.Model):
         FEMALE = "female", "Женский"
         MALE = "male", "Мужской"
 
+    class Grade(models.TextChoices):
+        ASSISTANT = "Ассистент", "Ассистент"
+        JUNIOR = "Junior", "Junior"
+        MIDDLE = "Middle", "Middle"
+        SENIOR = "Senior", "Senior"
+        TEAM_LEAD = "Руководитель группы / Team Lead", "Руководитель группы / Team Lead"
+        DIRECTOR = "Директор", "Директор"
+        TOP_MANAGER = "TOP-менеджер", "TOP-менеджер"
+
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
         related_name="employee_profile",
@@ -59,6 +68,7 @@ class EmployeeProfile(models.Model):
     )
     first_name = models.CharField("Имя", max_length=150, blank=True)
     last_name = models.CharField("Фамилия", max_length=150, blank=True)
+    middle_name = models.CharField("Отчество", max_length=150, blank=True)
     email = models.EmailField("Корпоративная почта", blank=True)
     department = models.ForeignKey(
         "identity.Department",
@@ -70,7 +80,7 @@ class EmployeeProfile(models.Model):
     )
     employee_number = models.CharField("Табельный номер", max_length=40, unique=True, null=True, blank=True)
     position = models.ForeignKey(Position, related_name="employees", null=True, blank=True, on_delete=models.SET_NULL)
-    grade = models.CharField("Грейд", max_length=80, blank=True)
+    grade = models.CharField("Грейд", max_length=80, choices=Grade.choices, blank=True)
     birth_date = models.DateField("Дата рождения", null=True, blank=True)
     hire_date = models.DateField("Дата выхода", null=True, blank=True)
     dismissal_date = models.DateField("Дата увольнения", null=True, blank=True)
@@ -108,13 +118,14 @@ class EmployeeProfile(models.Model):
 
     def __str__(self):
         if self.user_id:
-            return self.user.get_full_name() or self.user.email
-        return f"{self.first_name} {self.last_name}".strip() or self.email or f"Сотрудник #{self.pk}"
+            return " ".join(filter(None, [self.user.first_name, self.user.last_name, self.user.middle_name])) or self.user.email
+        return " ".join(filter(None, [self.first_name, self.last_name, self.middle_name])) or self.email or f"Сотрудник #{self.pk}"
 
     def save(self, *args, **kwargs):
         if self.user_id:
             self.first_name = self.user.first_name
             self.last_name = self.user.last_name
+            self.middle_name = self.user.middle_name
             self.email = self.user.email
             self.department = self.user.department
         super().save(*args, **kwargs)
