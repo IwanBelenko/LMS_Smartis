@@ -1414,6 +1414,19 @@ const demoDevelopmentCourses: DevelopmentCourseNode[] = Array.from({ length: 50 
   };
 });
 
+const demoDevelopmentCourseTitles = [
+  "Основы управления командой", "Постановка задач", "Делегирование", "One-to-one", "Обратная связь",
+  "Адаптация сотрудников", "Мотивация команды", "Управление конфликтами", "Фасилитация встреч", "Публичные выступления",
+  "Управление изменениями", "Сложные переговоры", "Стратегическое мышление", "Работа с данными", "Финансы руководителя",
+  "Продуктовые метрики", "Культура экспериментов", "Управление рисками", "Планирование ресурсов", "Управление проектами",
+  "Клиентский опыт", "Исследование аудитории", "Основы маркетинга", "Дизайн-мышление", "Проверка гипотез",
+  "Командные роли", "Эмоциональный интеллект", "Управление временем", "Проведение интервью", "Наставничество",
+  "Презентация решений", "Деловая переписка", "Основы аналитики", "Визуализация данных", "Работа с бюджетом",
+  "Информационная безопасность", "Корпоративная культура", "Правовые основы", "Охрана труда", "Управление качеством",
+  "Лидерство без формального статуса", "Критическое мышление", "Креативные техники", "Управление стрессом", "Личная эффективность",
+  "Карьерное планирование", "Развитие экспертизы", "Внутренние коммуникации", "Работа с обратной связью", "Итоговый проект",
+] as const;
+
 function closestPointOnDevelopmentWeb(point: DevelopmentPoint) {
   let nearest = developmentCenter;
   let nearestDistance = Number.POSITIVE_INFINITY;
@@ -1437,7 +1450,7 @@ function closestPointOnDevelopmentWeb(point: DevelopmentPoint) {
   return nearest;
 }
 
-function DevelopmentNetwork({
+function LegacyDevelopmentNetwork({
   learning,
   compact = false,
   onNavigate,
@@ -1708,6 +1721,208 @@ function DevelopmentNetwork({
   );
 }
 
+function DevelopmentNetwork({
+  learning,
+  compact = false,
+  onNavigate,
+}: {
+  learning: MyLearning;
+  compact?: boolean;
+  onNavigate: (view: ViewId) => void;
+}) {
+  const actualCourses: DevelopmentCourseNode[] = [
+    ...learning.paths.flatMap((path, segment) => path.courses.map((course, index) => ({
+      id: `course-${course.id}`,
+      title: course.course_title,
+      progress: course.progress,
+      status: course.status,
+      segment,
+      ...positionDevelopmentCourse(segment % 4, index, path.courses.length),
+    }))),
+    ...learning.standalone.map((course, index, items) => ({
+      id: `course-${course.id}`,
+      title: course.course_title,
+      progress: course.progress,
+      status: course.status,
+      segment: null,
+      ...positionDevelopmentCourse(null, index, items.length),
+    })),
+  ];
+  const demoMode = APP_VERSION === "dev" && actualCourses.length < 6;
+  const demoCourses: DevelopmentCourseNode[] = demoDevelopmentCourses.slice(0, 50).map((course, index) => ({
+    ...course,
+    title: demoDevelopmentCourseTitles[index] || course.title,
+  }));
+  const networkCourses = demoMode ? demoCourses : actualCourses;
+  const completedCourses = networkCourses.filter((course) => course.status === "completed").length;
+  const courseCount = Math.max(networkCourses.length, 1);
+  const spokeCount = courseCount < 8 ? Math.max(courseCount, 6) : 10;
+  const ringCount = Math.max(5, Math.ceil(courseCount / spokeCount));
+  const innerRadius = 0;
+  const outerRadius = 44;
+  const ringStep = (outerRadius - innerRadius) / ringCount;
+  const currentCourse = networkCourses.find((course) => course.status === "in_progress")
+    || networkCourses.find((course) => course.status === "available");
+  const activeCourses = networkCourses.filter((course) => course.status === "in_progress" || course.status === "available").length;
+  const earnedEnergy = completedCourses * 100;
+  const level = Math.max(1, Math.floor(completedCourses / 10) + 1);
+  const networkProgress = Math.round(networkCourses.reduce((sum, course) => sum + course.progress, 0) / courseCount);
+  const [activeNode, setActiveNode] = useState<string | null>(null);
+  const activeCourse = networkCourses.find((course) => course.id === activeNode);
+
+  function webPoint(boundary: number, spoke: number) {
+    const angle = -Math.PI / 2 + spoke * Math.PI * 2 / spokeCount;
+    const radius = innerRadius + boundary * ringStep;
+    return { x: 50 + Math.cos(angle) * radius, y: 50 + Math.sin(angle) * radius };
+  }
+
+  function courseSlot(index: number) {
+    const slotCount = ringCount * spokeCount;
+    return courseCount <= 1 ? 0 : Math.round(index * (slotCount - 1) / (courseCount - 1));
+  }
+
+  function webCellPath(index: number) {
+    const ring = Math.floor(index / spokeCount);
+    const spoke = index % spokeCount;
+    const next = (spoke + 1) % spokeCount;
+    const innerStart = webPoint(ring, spoke);
+    const outerStart = webPoint(ring + 1, spoke);
+    const outerEnd = webPoint(ring + 1, next);
+    const innerEnd = webPoint(ring, next);
+    const middleAngle = -Math.PI / 2 + (spoke + .5) * Math.PI * 2 / spokeCount;
+    const outerRadiusForCell = innerRadius + (ring + 1) * ringStep;
+    const innerRadiusForCell = innerRadius + ring * ringStep;
+    const outerControl = {
+      x: 50 + Math.cos(middleAngle) * outerRadiusForCell * .87,
+      y: 50 + Math.sin(middleAngle) * outerRadiusForCell * .87,
+    };
+    const innerControl = {
+      x: 50 + Math.cos(middleAngle) * innerRadiusForCell * .87,
+      y: 50 + Math.sin(middleAngle) * innerRadiusForCell * .87,
+    };
+    return `M ${innerStart.x} ${innerStart.y} L ${outerStart.x} ${outerStart.y} Q ${outerControl.x} ${outerControl.y} ${outerEnd.x} ${outerEnd.y} L ${innerEnd.x} ${innerEnd.y} Q ${innerControl.x} ${innerControl.y} ${innerStart.x} ${innerStart.y} Z`;
+  }
+
+  function webCellCenter(index: number) {
+    const ring = Math.floor(index / spokeCount);
+    const spoke = index % spokeCount;
+    const next = (spoke + 1) % spokeCount;
+    const points = [webPoint(ring, spoke), webPoint(ring + 1, spoke), webPoint(ring + 1, next), webPoint(ring, next)];
+    return {
+      x: points.reduce((sum, point) => sum + point.x, 0) / points.length,
+      y: points.reduce((sum, point) => sum + point.y, 0) / points.length,
+    };
+  }
+
+  function ringPath(boundary: number) {
+    const points = Array.from({ length: spokeCount }, (_, spoke) => webPoint(boundary, spoke));
+    const radius = innerRadius + boundary * ringStep;
+    return `${points.map((point, index) => {
+      if (index === 0) return `M ${point.x} ${point.y}`;
+      const middleAngle = -Math.PI / 2 + (index - .5) * Math.PI * 2 / spokeCount;
+      return `Q ${50 + Math.cos(middleAngle) * radius * .87} ${50 + Math.sin(middleAngle) * radius * .87} ${point.x} ${point.y}`;
+    }).join(" ")} Q ${50 + Math.cos(-Math.PI / 2 + (spokeCount - .5) * Math.PI * 2 / spokeCount) * radius * .87} ${50 + Math.sin(-Math.PI / 2 + (spokeCount - .5) * Math.PI * 2 / spokeCount) * radius * .87} ${points[0].x} ${points[0].y} Z`;
+  }
+
+  const networkStyle = {
+    "--development-thread-color": "#78a92f",
+    "--development-thread-width": ".9",
+    "--development-thread-glow": "5px",
+  } as React.CSSProperties;
+
+  return (
+    <section className={`panel development-card living-development-card ${compact ? "development-card--compact" : ""}`}>
+      <div className="section-heading development-card__heading living-development-heading">
+        <div>
+          <span className="eyebrow">Smartis · развитие</span>
+          <h2>Персональная карта</h2>
+          <p>Курсы постепенно формируют вашу персональную карту развития</p>
+        </div>
+        <div className="development-card__badges living-development-badges">
+          <span className="living-development-wip">Раздел в доработке</span>
+          {demoMode && <span className="development-demo-badge">Локальное демо · 50 курсов</span>}
+          <span className="development-level">Уровень {level}</span>
+        </div>
+      </div>
+      <div className="living-development-layout">
+        <div className="living-development-main">
+          <div className="living-development-visual">
+            <div className="living-development-map" style={networkStyle} aria-label="Паутина назначенных курсов">
+              <svg className="living-development-web" viewBox="0 0 100 100" role="img" aria-label={`Сеть из ${networkCourses.length} курсов`}>
+                {Array.from({ length: ringCount }, (_, ring) => (
+                  <path className="living-development-ring" d={ringPath(ring + 1)} key={`ring-${ring}`} />
+                ))}
+                {Array.from({ length: spokeCount }, (_, spoke) => {
+                  const point = webPoint(ringCount, spoke);
+                  return <line className="living-development-spoke" x1="50" y1="50" x2={point.x} y2={point.y} key={`spoke-${spoke}`} />;
+                })}
+                {networkCourses.map((course, index) => {
+                  const opacity = course.status === "completed" ? .5 : course.status === "in_progress" ? .18 + course.progress / 420 : course.status === "available" ? .08 : .025;
+                  const slot = courseSlot(index);
+                  return (
+                    <path
+                      className={`living-development-cell living-development-cell--${course.status} ${activeNode === course.id ? "living-development-cell--active" : ""}`}
+                      d={webCellPath(slot)}
+                      style={{ fillOpacity: opacity }}
+                      key={course.id}
+                      role="button"
+                      tabIndex={0}
+                      aria-label={`${course.title}: ${course.status === "locked" ? "закрыт" : `${course.progress}%`}`}
+                      onMouseEnter={() => setActiveNode(course.id)}
+                      onMouseLeave={() => setActiveNode(null)}
+                      onFocus={() => setActiveNode(course.id)}
+                      onBlur={() => setActiveNode(null)}
+                      onClick={() => { if (!demoMode && course.status !== "locked") onNavigate("trajectory"); }}
+                      onKeyDown={(event) => {
+                        if ((event.key === "Enter" || event.key === " ") && !demoMode && course.status !== "locked") onNavigate("trajectory");
+                      }}
+                    />
+                  );
+                })}
+                {networkCourses.map((course, index) => {
+                  const slot = courseSlot(index);
+                  const point = webPoint(Math.floor(slot / spokeCount) + 1, slot % spokeCount);
+                  return <circle className={`living-development-node living-development-node--${course.status}`} cx={point.x} cy={point.y} r=".7" key={`node-${course.id}`} />;
+                })}
+              </svg>
+              {activeCourse && (() => {
+                const index = networkCourses.findIndex((course) => course.id === activeCourse.id);
+                const point = webCellCenter(courseSlot(index));
+                const left = Math.max(18, Math.min(82, point.x));
+                const top = Math.max(15, Math.min(85, point.y));
+                return (
+                  <div className={`living-development-tooltip ${top < 26 ? "living-development-tooltip--below" : ""}`} style={{ left: `${left}%`, top: `${top}%` }}>
+                    <strong>{activeCourse.title}</strong>
+                    <span>{activeCourse.status === "completed" ? "Пройден · 100 энергии получено" : activeCourse.status === "locked" ? "Закрыт · завершите предыдущие курсы" : `${activeCourse.progress}% пройдено`}</span>
+                  </div>
+                );
+              })()}
+            </div>
+            <aside className="living-development-progress-widget" aria-label="Прогресс развития">
+              <div className="living-development-progress-ring" style={{ "--network-progress": `${networkProgress * 3.6}deg` } as React.CSSProperties}>
+                <span><strong>{networkProgress}%</strong><small>готово</small></span>
+              </div>
+              <div className="living-development-progress-stats">
+                <div><strong>{completedCourses} / {networkCourses.length}</strong><span>курсов завершено</span></div>
+                <div><strong>{activeCourses}</strong><span>курсов сейчас доступно</span></div>
+                <div><strong>{earnedEnergy}</strong><span>энергии получено</span></div>
+              </div>
+              <p>Каждый завершённый курс заполняет отдельный сектор паутины.</p>
+            </aside>
+          </div>
+          <div className="living-development-footer">
+            <span>
+              <strong>{currentCourse?.title || (networkCourses.length ? "Траектория завершена" : "Обучение пока не назначено")}</strong>
+              <small>{currentCourse ? "Следующий рекомендуемый курс" : networkCourses.length ? "Все назначенные курсы завершены" : "Карта заполнится после назначения курсов"}</small>
+            </span>
+            <button className="secondary-button" type="button" onClick={() => onNavigate("trajectory")} disabled={demoMode}>Открыть обучение <ChevronRight /></button>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function DevelopmentNetworkView({ token, onNavigate }: { token: string; onNavigate: (view: ViewId) => void }) {
   const [learning, setLearning] = useState<MyLearning>({ paths: [], standalone: [] });
   useEffect(() => {
@@ -1747,7 +1962,10 @@ function HomeView({ user, token, onNavigate }: { user: User; token: string; onNa
         <button className="primary-button" type="button" onClick={() => onNavigate("trajectory")}>{current ? "Продолжить" : "Открыть обучение"} <ChevronRight /></button>
         <div className="progress"><span style={{ width: `${current?.progress || 0}%` }} /></div>
       </section>
-      <DevelopmentNetwork learning={learning} compact onNavigate={onNavigate} />
+      <button className="home-development-link" type="button" onClick={() => onNavigate("ranking")}>
+        <span>Сеть развития</span>
+        <ChevronRight />
+      </button>
     </>
   );
 }
